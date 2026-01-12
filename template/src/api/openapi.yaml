@@ -1,0 +1,299 @@
+openapi: 3.0.3
+info:
+  title: Example Umbraco Add-on API
+  description: |
+    Example OpenAPI specification demonstrating how to define an API for an Umbraco add-on.
+    This spec is used to generate a typed client with Orval.
+  version: 1.0.0
+  contact:
+    name: Umbraco HQ
+
+servers:
+  - url: /umbraco/example/api/v1
+    description: Example API base path
+
+paths:
+  /item:
+    get:
+      operationId: getItems
+      summary: Get all items
+      description: Returns a paginated list of items
+      parameters:
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Number of items to skip
+        - name: take
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Number of items to return
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedItemResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: createItem
+      summary: Create a new item
+      description: Creates a new item and returns its location
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateItemRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URL of the created item
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /item/{id}:
+    get:
+      operationId: getItemById
+      summary: Get item by ID
+      description: Returns a single item by its unique identifier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The unique identifier of the item
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: updateItem
+      summary: Update an item
+      description: Updates an existing item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The unique identifier of the item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateItemRequest'
+      responses:
+        '200':
+          description: Success
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteItem
+      summary: Delete an item
+      description: Deletes an item by its unique identifier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The unique identifier of the item
+      responses:
+        '200':
+          description: Success
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /item/search:
+    get:
+      operationId: searchItems
+      summary: Search items
+      description: Search for items by name
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query string
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: take
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedItemResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  schemas:
+    ItemResponse:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier
+        name:
+          type: string
+          description: Item name
+        description:
+          type: string
+          nullable: true
+          description: Optional description
+        isActive:
+          type: boolean
+          default: true
+          description: Whether the item is active
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    PagedItemResponse:
+      type: object
+      required:
+        - total
+        - items
+      properties:
+        total:
+          type: integer
+          description: Total number of items
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemResponse'
+
+    CreateItemRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Item name
+        description:
+          type: string
+          nullable: true
+          maxLength: 2000
+          description: Optional description
+        isActive:
+          type: boolean
+          default: true
+          description: Whether the item is active
+
+    UpdateItemRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Item name
+        description:
+          type: string
+          nullable: true
+          maxLength: 2000
+          description: Optional description
+        isActive:
+          type: boolean
+          description: Whether the item is active
+
+    ProblemDetails:
+      type: object
+      description: RFC 7807 Problem Details for HTTP APIs
+      properties:
+        type:
+          type: string
+          description: A URI reference identifying the problem type
+        title:
+          type: string
+          description: A short human-readable summary
+        status:
+          type: integer
+          description: The HTTP status code
+        detail:
+          type: string
+          description: A human-readable explanation
+        instance:
+          type: string
+          description: A URI reference identifying the specific occurrence
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'

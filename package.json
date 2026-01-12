@@ -1,0 +1,30 @@
+{
+  "name": "umbraco-mcp-toolkit-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Umbraco MCP Toolkit monorepo",
+  "workspaces": [
+    "packages/*",
+    "template"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/toolkit",
+    "clean": "npm run clean -w packages/toolkit",
+    "compile": "npm run compile -w packages/toolkit",
+    "test": "npm run test -w packages/toolkit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/umbraco/umbraco-mcp-toolkit.git"
+  },
+  "keywords": [
+    "Umbraco",
+    "MCP",
+    "Model Context Protocol"
+  ],
+  "author": "Umbraco HQ",
+  "license": "MIT"
+}

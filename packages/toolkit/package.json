@@ -1,0 +1,87 @@
+{
+  "name": "@umbraco-cms/mcp-toolkit",
+  "version": "1.0.0-beta.1",
+  "type": "module",
+  "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./evals": {
+      "types": "./dist/evals/index.d.ts",
+      "import": "./dist/evals/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "import": "./dist/config/index.js"
+    },
+    "./helpers": {
+      "types": "./dist/helpers/index.d.ts",
+      "import": "./dist/helpers/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsup",
+    "compile": "tsc --noEmit",
+    "watch": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/umbraco/umbraco-mcp-toolkit.git"
+  },
+  "keywords": [
+    "Umbraco",
+    "MCP",
+    "Model Context Protocol",
+    "toolkit"
+  ],
+  "author": "Umbraco HQ",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/umbraco/umbraco-mcp-toolkit/issues"
+  },
+  "homepage": "https://github.com/umbraco/umbraco-mcp-toolkit#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "axios": "^1.8.4",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.76",
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "jest": "^29.7.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.3.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "name": "my-umbraco-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for my Umbraco add-on",
+  "main": "dist/index.js",
+  "bin": {
+    "my-umbraco-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsup --config tsup.config.ts",
+    "compile": "tsc --noEmit",
+    "watch": "tsup --config tsup.config.ts --watch",
+    "generate": "orval --config orval.config.ts",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__",
+    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand",
+    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "Umbraco",
+    "MCP",
+    "Model Context Protocol"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@umbraco-cms/mcp-toolkit": "file:../packages/toolkit",
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0",
+    "uuid": "^11.1.0",
+    "yargs": "^18.0.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "@types/uuid": "^10.0.0",
+    "@types/yargs": "^17.0.33",
+    "jest": "^29.7.0",
+    "orval": "^7.8.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.3.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}
