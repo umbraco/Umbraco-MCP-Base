@@ -12,11 +12,6 @@ import createExampleTool from "../post/create-example.js";
 describe("create-example", () => {
   setupTestEnvironment();
 
-  afterEach(async () => {
-    await ExampleTestHelper.cleanup("Test");
-    await ExampleTestHelper.cleanup("_reserved_");
-  });
-
   it("should create a new item", async () => {
     const context = createMockRequestHandlerExtra();
 

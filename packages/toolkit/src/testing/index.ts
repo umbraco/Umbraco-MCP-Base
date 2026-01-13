@@ -12,7 +12,7 @@ export {
   normalizeObject,
 } from "./snapshot-result.js";
 
-export { setupTestEnvironment } from "./test-environment.js";
+export { setupTestEnvironment, setupMswServer } from "./test-environment.js";
 
 export {
   createMockRequestHandlerExtra,

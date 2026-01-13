@@ -13,10 +13,6 @@ import deleteExampleTool from "../delete/delete-example.js";
 describe("delete-example", () => {
   setupTestEnvironment();
 
-  afterEach(async () => {
-    await ExampleTestHelper.cleanup("Test");
-  });
-
   it("should delete existing item", async () => {
     const context = createMockRequestHandlerExtra();
 

@@ -36,3 +36,55 @@ export function setupTestEnvironment(): void {
     console.error = originalConsoleError;
   });
 }
+
+/**
+ * MSW server interface (subset of SetupServer from msw/node).
+ * Using a minimal interface to avoid requiring msw as a dependency.
+ */
+interface MswServer {
+  listen: (options?: { onUnhandledRequest?: "error" | "warn" | "bypass" }) => void;
+  resetHandlers: () => void;
+  close: () => void;
+}
+
+/**
+ * Sets up MSW (Mock Service Worker) server for API mocking in tests.
+ *
+ * This helper:
+ * - Starts the MSW server before all tests
+ * - Resets handlers and optionally clears store after each test
+ * - Closes the server after all tests
+ *
+ * Usage in jest-setup.ts (via setupFilesAfterEnv):
+ * ```typescript
+ * import { setupMswServer } from "@umbraco-cms/mcp-toolkit/testing";
+ * import { server } from "./mocks/server.js";
+ * import { resetStore } from "./mocks/store.js";
+ *
+ * setupMswServer(server, resetStore);
+ * ```
+ *
+ * @param server - The MSW server instance from setupServer()
+ * @param resetStore - Optional function to reset mock data store between tests
+ * @param options - Optional configuration
+ */
+export function setupMswServer(
+  server: MswServer,
+  resetStore?: () => void,
+  options?: { onUnhandledRequest?: "error" | "warn" | "bypass" }
+): void {
+  const onUnhandledRequest = options?.onUnhandledRequest ?? "error";
+
+  beforeAll(() => {
+    server.listen({ onUnhandledRequest });
+  });
+
+  afterEach(() => {
+    server.resetHandlers();
+    resetStore?.();
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+}

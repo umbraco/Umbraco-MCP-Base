@@ -13,10 +13,6 @@ import getExampleTool from "../get/get-example.js";
 describe("get-example", () => {
   setupTestEnvironment();
 
-  afterEach(async () => {
-    await ExampleTestHelper.cleanup("Test");
-  });
-
   it("should return item by ID", async () => {
     const context = createMockRequestHandlerExtra();
 

@@ -43,7 +43,7 @@ Report on each step as you complete it.`,
       ],
       requiredTools: ["create-example", "list-examples", "update-example", "delete-example"],
       successPattern: /created|updated|deleted/i,
-      verbose: true,
+      //verbose: true,
     }),
     timeout
   );

@@ -13,10 +13,6 @@ import updateExampleTool from "../put/update-example.js";
 describe("update-example", () => {
   setupTestEnvironment();
 
-  afterEach(async () => {
-    await ExampleTestHelper.cleanup("Test");
-  });
-
   it("should update existing item", async () => {
     const context = createMockRequestHandlerExtra();
 

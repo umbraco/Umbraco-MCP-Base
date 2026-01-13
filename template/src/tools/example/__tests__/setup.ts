@@ -1,5 +1,8 @@
 /**
  * Shared test setup for example tools
+ *
+ * MSW server is configured globally via jest.config.ts setupFilesAfterEnv.
+ * See src/mocks/jest-setup.ts for the global MSW setup.
  */
 
 import {
@@ -8,10 +11,10 @@ import {
 } from "@umbraco-cms/mcp-toolkit/testing";
 import { configureApiClient } from "@umbraco-cms/mcp-toolkit";
 import { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
+import { server } from "../../../mocks/server.js";
 import { ExampleBuilder } from "./helpers/example-builder.js";
 import { ExampleTestHelper } from "./helpers/example-test-helper.js";
 
-process.env.USE_MOCK_API = "true";
 configureApiClient(() => getExampleUmbracoAddOnAPI());
 
 export {
@@ -19,4 +22,5 @@ export {
   createMockRequestHandlerExtra,
   ExampleBuilder,
   ExampleTestHelper,
+  server,
 };
