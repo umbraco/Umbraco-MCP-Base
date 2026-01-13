@@ -8,13 +8,12 @@ export type {
   ToolDefinition,
   ToolAnnotations,
   UserModel,
-  ToolSliceName,
-  ExtendedSliceName,
+  BaseSliceName,
 } from "./tool-definition.js";
 
 export {
-  toolSliceNames,
-  allSliceNames,
+  baseSliceNames,
+  allBaseSliceNames,
 } from "./tool-definition.js";
 
 export type {

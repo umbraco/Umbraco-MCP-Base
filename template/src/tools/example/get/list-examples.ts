@@ -25,7 +25,7 @@ const listExamplesTool: ToolDefinition<typeof inputSchema, typeof outputSchema> 
   description: "Lists all example items with pagination.",
   inputSchema,
   outputSchema,
-  slices: ["read"],
+  slices: ["list"],
   annotations: {
     readOnlyHint: true,
   },

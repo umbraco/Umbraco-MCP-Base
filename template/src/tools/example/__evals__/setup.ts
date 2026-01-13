@@ -6,7 +6,7 @@
  */
 
 import path from "path";
-import { configureEvals } from "@umbraco-cms/mcp-toolkit/evals";
+import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-toolkit/evals";
 
 // Configure the eval framework for this MCP server
 configureEvals({
@@ -27,7 +27,7 @@ configureEvals({
   },
 
   // Test defaults
-  defaultModel: "claude-3-5-haiku-20241022",
+  defaultModel: ClaudeModels.Haiku,
   defaultMaxTurns: 10,
   defaultMaxBudgetUsd: 0.25,
   defaultTimeoutMs: 60000,

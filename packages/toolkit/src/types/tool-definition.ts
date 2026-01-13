@@ -42,43 +42,33 @@ export interface UserModel {
 }
 
 /**
- * Tool slice names for categorizing tools by operation type.
- * These are the standard slices used across MCP servers.
+ * Base tool slice names - minimal set for common operations.
+ * Extend these in your project with domain-specific slices.
+ *
+ * @example
+ * ```typescript
+ * // In your project's slice-registry.ts
+ * import { baseSliceNames } from "@umbraco-cms/mcp-toolkit";
+ *
+ * export const toolSliceNames = [
+ *   ...baseSliceNames,
+ *   'publish', 'recycle-bin', 'move', 'copy',  // Add your slices
+ * ] as const;
+ * ```
  */
-export const toolSliceNames = [
-  // CRUD
-  'create', 'read', 'update', 'delete',
-  // Navigation
-  'tree', 'folders',
-  // Query
-  'search', 'list', 'references',
-  // Workflow
-  'publish', 'recycle-bin', 'move', 'copy', 'sort', 'validate', 'rename',
-  // Information
-  'configuration', 'audit', 'urls', 'domains', 'permissions', 'user-status', 'current-user',
-  // Entity Management
-  'notifications', 'public-access', 'scaffolding', 'blueprints',
-  // System
-  'server-info', 'diagnostics', 'templates',
+export const baseSliceNames = [
+  'create', 'read', 'update', 'delete', 'list',
 ] as const;
 
 /**
- * Valid slice names for tool categorization.
- * Derived from toolSliceNames array for compile-time type safety.
+ * Base slice name type.
  */
-export type ToolSliceName = typeof toolSliceNames[number];
+export type BaseSliceName = typeof baseSliceNames[number];
 
 /**
- * All valid slice names for configuration validation.
- * Includes 'other' as a catch-all for tools with empty slices arrays.
+ * All base slice names including 'other' catch-all.
  */
-export const allSliceNames: readonly string[] = [...toolSliceNames, 'other'];
-
-/**
- * Extended slice names including 'other' for catch-all purposes.
- * Tools with empty slices array are always included as 'other'.
- */
-export type ExtendedSliceName = ToolSliceName | 'other';
+export const allBaseSliceNames: readonly string[] = [...baseSliceNames, 'other'];
 
 /**
  * Core tool definition interface.
@@ -107,7 +97,7 @@ export interface ToolDefinition<
   /** Optional function to dynamically enable/disable the tool based on user context */
   enabled?: (user: TUser) => boolean;
   /** Explicit slice assignment for categorization (empty array = always included) */
-  slices: ToolSliceName[];
+  slices: string[];
   /** Optional annotations for tool behavior hints */
   annotations?: Partial<ToolAnnotations>;
   /** @deprecated Use annotations.readOnlyHint instead - kept for backwards compatibility */

@@ -4,18 +4,18 @@
  * Utilities for validating slice names.
  */
 
-import { allSliceNames } from "../types/tool-definition.js";
+import { allBaseSliceNames } from "../types/tool-definition.js";
 
 /**
  * Validate slice names against the known slice names.
  * Returns valid and invalid names.
  *
  * @param names - Array of slice names to validate
- * @param validSlices - Optional custom list of valid slices (defaults to allSliceNames)
+ * @param validSlices - Custom list of valid slices (required - pass your project's allSliceNames)
  */
 export function validateSliceNames(
   names: string[],
-  validSlices: readonly string[] = allSliceNames
+  validSlices: readonly string[] = allBaseSliceNames
 ): { valid: string[], invalid: string[] } {
   const validNames = new Set<string>(validSlices);
 

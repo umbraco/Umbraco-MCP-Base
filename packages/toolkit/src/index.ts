@@ -59,10 +59,9 @@ export {
   type ToolDefinition,
   type ToolAnnotations,
   type UserModel,
-  type ToolSliceName,
-  type ExtendedSliceName,
-  toolSliceNames,
-  allSliceNames,
+  type BaseSliceName,
+  baseSliceNames,
+  allBaseSliceNames,
 } from "./types/tool-definition.js";
 
 export {

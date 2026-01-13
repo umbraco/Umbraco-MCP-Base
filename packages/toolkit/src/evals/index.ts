@@ -74,3 +74,6 @@ export {
   runScenarioTest,
   setupConsoleMock
 } from "./scenario-runner.js";
+
+// Model constants
+export { ClaudeModels } from "./models.js";

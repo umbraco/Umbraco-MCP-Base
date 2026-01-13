@@ -25,7 +25,7 @@ const searchExamplesTool: ToolDefinition<typeof inputSchema, typeof outputSchema
   description: "Searches example items by name.",
   inputSchema,
   outputSchema,
-  slices: ["read"],
+  slices: ["search"],
   annotations: {
     readOnlyHint: true,
   },
