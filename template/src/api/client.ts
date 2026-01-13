@@ -66,8 +66,9 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
   const { method: rawMethod, url, data } = config;
   // Normalize method to lowercase for consistent matching
   const method = rawMethod?.toLowerCase();
-  // Handle paths from generated client (which uses paths like /item directly)
-  const path = url || "";
+  // Handle paths from both generated client (/item) and getClient() (/umbraco/example/api/v1/item)
+  const rawPath = url || "";
+  const path = rawPath.replace(/^\/umbraco\/example\/api\/v1/, "");
 
   // GET /item - List all items
   if (method === "get" && path === "/item") {
@@ -270,6 +271,14 @@ export const customInstance = async <T>(
   // Use mock mode if enabled (check at runtime to support test mocking)
   if (isMockMode()) {
     const response = handleMockRequest<T>(mergedConfig);
+
+    // Throw on error status codes (like real Axios does) unless returnFullResponse is set
+    if (!returnFullResponse && response.status >= 400) {
+      const error: any = new Error(`Request failed with status code ${response.status}`);
+      error.response = response;
+      error.status = response.status;
+      throw error;
+    }
 
     if (returnFullResponse) {
       return response;

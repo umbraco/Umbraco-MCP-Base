@@ -11,6 +11,4 @@ export default defineConfig({
   treeshake: true,
   minify: false,
   dts: false,
-  external: [],
-  noExternal: [/.*/],
 });

@@ -12,7 +12,6 @@ import {
 } from "@umbraco-cms/mcp-toolkit";
 import type { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { updateItemParams, updateItemBody } from "../../../api/generated/exampleApi.zod.js";
-import { z } from "zod";
 
 // Type for the API client returned by getExampleUmbracoAddOnAPI()
 type ExampleApiClient = ReturnType<typeof getExampleUmbracoAddOnAPI>;
@@ -23,16 +22,10 @@ const inputSchema = {
   ...updateItemBody.shape,
 };
 
-// Output schema for update result
-const outputSchema = z.object({
-  success: z.boolean(),
-});
-
-const updateExampleTool: ToolDefinition<typeof inputSchema, typeof outputSchema> = {
+const updateExampleTool: ToolDefinition<typeof inputSchema> = {
   name: "update-example",
   description: "Updates an existing example item.",
   inputSchema,
-  outputSchema,
   slices: ["update"],
   annotations: {
     destructiveHint: false,

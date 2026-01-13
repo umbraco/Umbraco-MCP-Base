@@ -12,7 +12,6 @@ import {
 } from "@umbraco-cms/mcp-toolkit";
 import type { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { deleteItemParams } from "../../../api/generated/exampleApi.zod.js";
-import { z } from "zod";
 
 // Type for the API client returned by getExampleUmbracoAddOnAPI()
 type ExampleApiClient = ReturnType<typeof getExampleUmbracoAddOnAPI>;
@@ -20,16 +19,10 @@ type ExampleApiClient = ReturnType<typeof getExampleUmbracoAddOnAPI>;
 // Use the generated Zod schema for input
 const inputSchema = deleteItemParams.shape;
 
-// Output schema for delete result
-const outputSchema = z.object({
-  success: z.boolean(),
-});
-
-const deleteExampleTool: ToolDefinition<typeof inputSchema, typeof outputSchema> = {
+const deleteExampleTool: ToolDefinition<typeof inputSchema> = {
   name: "delete-example",
   description: "Deletes an example item by ID.",
   inputSchema,
-  outputSchema,
   slices: ["delete"],
   annotations: {
     destructiveHint: true,

@@ -1,7 +1,5 @@
-import type { Config } from "@jest/types";
-
-const config: Config.InitialOptions = {
-  preset: "ts-jest/presets/default-esm",
+const config: import("ts-jest").JestConfigWithTsJest = {
+  preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
   moduleNameMapper: {
@@ -17,10 +15,11 @@ const config: Config.InitialOptions = {
     ],
   },
   testMatch: ["**/__tests__/**/*.test.ts", "**/__evals__/**/*.eval.ts"],
+  testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts"],
   coverageDirectory: "coverage",
   verbose: true,
 };
 
-export default config;
+module.exports = config;
