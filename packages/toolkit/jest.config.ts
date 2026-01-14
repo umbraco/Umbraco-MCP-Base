@@ -1,13 +1,12 @@
 import type { JestConfigWithTsJest } from "ts-jest";
 
 const config: JestConfigWithTsJest = {
-  displayName: "template",
+  displayName: "toolkit",
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
-    "^@/(.*)$": "<rootDir>/src/$1",
   },
   transform: {
     "^.+\\.tsx?$": [
@@ -17,11 +16,10 @@ const config: JestConfigWithTsJest = {
       },
     ],
   },
-  setupFilesAfterEnv: ["<rootDir>/src/mocks/jest-setup.ts"],
-  testMatch: ["**/__tests__/**/*.test.ts", "**/__evals__/**/*.eval.ts"],
-  testPathIgnorePatterns: ["/node_modules/"],
+  testMatch: ["**/__tests__/**/*.test.ts"],
+  testPathIgnorePatterns: ["/node_modules/", "/dist/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
-  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts"],
+  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/**/__tests__/**"],
   coverageDirectory: "coverage",
 };
 

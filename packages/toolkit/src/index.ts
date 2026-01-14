@@ -86,15 +86,48 @@ export {
   createCollectionConfigLoader,
   type ServerConfigForCollections,
   type CollectionConfigLoaderOptions,
-} from "./config/collection-config-loader.js";
+} from "./tool-filtering/collection-config-loader.js";
 
 export {
   validateSliceNames,
-} from "./config/slice-matcher.js";
+} from "./tool-filtering/slice-matcher.js";
 
 export {
   validateModeNames,
   expandModesToCollections,
   getModeExpansionSummary,
   type ModeValidationResult,
-} from "./config/mode-expander.js";
+} from "./tool-filtering/mode-expander.js";
+
+// ============================================================================
+// MCP Client (Chaining)
+// ============================================================================
+
+export {
+  McpClientManager,
+  createMcpClientManager,
+  discoverProxiedTools,
+  isProxiedToolName,
+  parseProxiedToolName,
+  createProxyHandler,
+  proxiedToolsToDefinitions,
+  type McpServerConfig,
+  type McpClientOptions,
+  type FilterConfig,
+  type ProxiedTool,
+} from "./mcp-client/index.js";
+
+// ============================================================================
+// Version Check
+// ============================================================================
+
+export {
+  VersionCheckService,
+  versionCheckService,
+  checkUmbracoVersion,
+  getVersionCheckMessage,
+  clearVersionCheckMessage,
+  isToolExecutionBlocked,
+  type VersionCheckClient,
+  type CheckVersionOptions,
+} from "./version-check/check-umbraco-version.js";

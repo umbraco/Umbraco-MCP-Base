@@ -1,4 +1,4 @@
 {
   "jest.jestCommandLine": "npx --node-options='--experimental-vm-modules' jest",
-  "jest.rootPath": "template"
+  "jest.rootPath": "."
 }

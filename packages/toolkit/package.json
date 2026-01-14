@@ -39,6 +39,8 @@
     "build": "tsup",
     "compile": "tsc --noEmit",
     "watch": "tsup --watch",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "prepublishOnly": "npm run build"
   },
   "engines": {
@@ -74,6 +76,7 @@
     "rimraf": "^6.0.1",
     "ts-jest": "^29.3.2",
     "tsup": "^8.4.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
