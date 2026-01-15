@@ -16,6 +16,9 @@ import {
   createMcpClientManager,
   discoverProxiedTools,
   parseProxiedToolName,
+  createCollectionConfigLoader,
+  shouldIncludeTool,
+  type CollectionConfiguration,
 } from "@umbraco-cms/mcp-toolkit";
 
 // Import the Orval-generated API client
@@ -26,6 +29,10 @@ import exampleCollection from "./tools/example/index.js";
 
 // Import MCP server chain configuration
 import { mcpServers } from "./config/mcp-servers.js";
+
+// Import registries for tool filtering
+import { allModes, allModeNames, allSliceNames } from "./config/index.js";
+import { loadServerConfig, clearConfigCache } from "./config/server-config.js";
 
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
@@ -65,14 +72,45 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Register tools from collections
+// ============================================================================
+// Tool Filtering Setup
+// ============================================================================
+
+// Clear config cache to ensure fresh config for each server start
+clearConfigCache();
+
+// Load server configuration (includes filtering settings from env vars)
+const serverConfig = loadServerConfig(true);
+
+// Create collection config loader with our registries
+const configLoader = createCollectionConfigLoader({
+  modeRegistry: allModes,
+  allModeNames,
+  allSliceNames,
+});
+
+// Load filtering configuration from server config
+const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(serverConfig.umbraco);
+
+// ============================================================================
+// Register Tools with Filtering
+// ============================================================================
+
 const collections = [exampleCollection];
+let registeredToolCount = 0;
 
 for (const collection of collections) {
+  const collectionName = collection.metadata.name;
+
   // Get tools for current user (pass user context if needed)
   const tools = collection.tools({});
 
   for (const tool of tools) {
+    // Check if tool should be included based on filtering config
+    if (!shouldIncludeTool(tool, { collectionName, config: filterConfig })) {
+      continue;
+    }
+
     // Build annotations from tool definition
     const annotations = createToolAnnotations(tool);
 
@@ -83,13 +121,18 @@ for (const collection of collections) {
       outputSchema: tool.outputSchema,
       annotations,
     }, tool.handler);
+
+    registeredToolCount++;
   }
 }
 
 // Start the server
 async function main() {
   // Discover and register proxied tools from chained MCP servers
-  if (mcpServers.length > 0) {
+  // Skip if chaining is disabled via config (DISABLE_MCP_CHAINING=true)
+  const chainingEnabled = mcpServers.length > 0 && !serverConfig.custom.disableMcpChaining;
+
+  if (chainingEnabled) {
     try {
       const proxiedTools = await discoverProxiedTools(mcpClientManager);
 
@@ -121,7 +164,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`MCP Server started with ${collections.length} collection(s)`);
+  console.error(`MCP Server started with ${registeredToolCount} tool(s) from ${collections.length} collection(s)`);
 }
 
 // Cleanup on shutdown

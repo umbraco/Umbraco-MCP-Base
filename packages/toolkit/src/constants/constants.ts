@@ -1,9 +1,13 @@
 export const BLANK_UUID = "00000000-0000-0000-0000-000000000000";
 
-export const TRANSLATORS_USER_GROUP_ID = "550e8400-e29b-41d4-a716-446655440001";
+//Umbraco CMS User Group IDs
+export const TRANSLATORS_USER_GROUP_ID = "F2012E4C-D232-4BD1-8EAE-4384032D97D8";
 export const WRITERS_USER_GROUP_ID = "9fc2a16f-528c-46d6-a014-75bf4ec2480c";
 
+//Umbraco CMS Member Type IDs
 export const Default_Memeber_TYPE_ID = "d59be02f-1df9-4228-aa1e-01917d806cda";
+
+//Umbraco CMS DataType IDs
 export const TextString_DATA_TYPE_ID = "0cc0eba1-9960-42c9-bf9b-60e150b429ae";
 export const MEDIA_PICKER_DATA_TYPE_ID = "4309a3ea-0d78-4329-a06c-c80b036af19a";
 export const MEMBER_PICKER_DATA_TYPE_ID = "1ea2e01f-ebd8-4ce1-8d71-6b1149e63548";
@@ -37,6 +41,3 @@ export const STANDARD_MEDIA_TYPES: Record<string, string> = {
   [MEDIA_TYPE_ARTICLE]: ARTICLE_MEDIA_TYPE_ID,
   [MEDIA_TYPE_VECTOR_GRAPHICS]: VECTOR_GRAPHICS_MEDIA_TYPE_ID,
 };
-
-export const EXAMPLE_IMAGE_PATH =
-  "/src/umb-management-api/tools/temporary-file/__tests__/helpers/example.jpg";

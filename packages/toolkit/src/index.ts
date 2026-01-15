@@ -89,6 +89,12 @@ export {
 } from "./tool-filtering/collection-config-loader.js";
 
 export {
+  shouldIncludeTool,
+  filterTools,
+  type ToolFilterContext,
+} from "./tool-filtering/tool-filter.js";
+
+export {
   validateSliceNames,
 } from "./tool-filtering/slice-matcher.js";
 
@@ -131,3 +137,47 @@ export {
   type VersionCheckClient,
   type CheckVersionOptions,
 } from "./version-check/check-umbraco-version.js";
+
+// ============================================================================
+// Server Configuration
+// ============================================================================
+
+export {
+  getServerConfig,
+  type UmbracoAuthConfig,
+  type UmbracoServerConfig,
+  type ConfigFieldDefinition,
+  type ConfigFieldType,
+  type GetServerConfigOptions,
+  type GetServerConfigResult,
+} from "./config/config.js";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+export {
+  BLANK_UUID,
+  TRANSLATORS_USER_GROUP_ID,
+  WRITERS_USER_GROUP_ID,
+  Default_Memeber_TYPE_ID,
+  TextString_DATA_TYPE_ID,
+  MEDIA_PICKER_DATA_TYPE_ID,
+  MEMBER_PICKER_DATA_TYPE_ID,
+  TAG_DATA_TYPE_ID,
+  FOLDER_MEDIA_TYPE_ID,
+  IMAGE_MEDIA_TYPE_ID,
+  FILE_MEDIA_TYPE_ID,
+  VIDEO_MEDIA_TYPE_ID,
+  AUDIO_MEDIA_TYPE_ID,
+  ARTICLE_MEDIA_TYPE_ID,
+  VECTOR_GRAPHICS_MEDIA_TYPE_ID,
+  MEDIA_TYPE_FOLDER,
+  MEDIA_TYPE_IMAGE,
+  MEDIA_TYPE_FILE,
+  MEDIA_TYPE_VIDEO,
+  MEDIA_TYPE_AUDIO,
+  MEDIA_TYPE_ARTICLE,
+  MEDIA_TYPE_VECTOR_GRAPHICS,
+  STANDARD_MEDIA_TYPES,
+} from "./constants/constants.js";

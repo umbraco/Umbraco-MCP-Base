@@ -41,9 +41,9 @@ export interface UmbracoServerConfig {
 // Configuration Field Definitions - Table-Driven Approach
 // ============================================================================
 
-type ConfigFieldType = "string" | "boolean" | "csv" | "csv-path";
+export type ConfigFieldType = "string" | "boolean" | "csv" | "csv-path";
 
-interface ConfigFieldDefinition {
+export interface ConfigFieldDefinition {
   name: string;
   envVar: string;
   cliFlag: string;
@@ -180,64 +180,45 @@ interface CliArgs {
 // Main Configuration Function
 // ============================================================================
 
-export function getServerConfig(isStdioMode: boolean): UmbracoServerConfig {
+export interface GetServerConfigOptions {
+  /** Additional config fields defined by the consuming package */
+  additionalFields?: ConfigFieldDefinition[];
+}
+
+export interface GetServerConfigResult {
+  /** Base Umbraco MCP configuration */
+  config: UmbracoServerConfig;
+  /** Custom config values from additionalFields - cast to your own interface */
+  custom: Record<string, string | string[] | boolean | undefined>;
+}
+
+export function getServerConfig(
+  isStdioMode: boolean,
+  options: GetServerConfigOptions = {}
+): GetServerConfigResult {
+  const { additionalFields = [] } = options;
+  const allFields = [...CONFIG_FIELDS, ...additionalFields];
+
+  // Build yargs options dynamically from field definitions
+  const yargsOptions: Record<string, { type: "string" | "boolean"; description: string; default?: boolean }> = {
+    env: {
+      type: "string",
+      description: "Path to custom .env file to load environment variables from",
+    },
+  };
+
+  for (const field of allFields) {
+    const yargsType = field.type === "boolean" ? "boolean" : "string";
+    yargsOptions[field.cliFlag] = {
+      type: yargsType,
+      description: `${field.envVar} - ${field.type}${field.required ? " (required)" : ""}`,
+      ...(field.type === "boolean" ? { default: false } : {}),
+    };
+  }
+
   // Parse command line arguments
   const argv = yargs(hideBin(process.argv))
-    .options({
-      "umbraco-client-id": {
-        type: "string",
-        description: "Umbraco API client ID",
-      },
-      "umbraco-client-secret": {
-        type: "string",
-        description: "Umbraco API client secret",
-      },
-      "umbraco-base-url": {
-        type: "string",
-        description: "Umbraco base URL (e.g., https://localhost:44391)",
-      },
-      "umbraco-tool-modes": {
-        type: "string",
-        description: "Comma-separated list of tool modes (e.g., content,media,editor)",
-      },
-      "umbraco-include-tool-collections": {
-        type: "string",
-        description: "Comma-separated list of tool collections to include",
-      },
-      "umbraco-exclude-tool-collections": {
-        type: "string",
-        description: "Comma-separated list of tool collections to exclude",
-      },
-      "umbraco-include-slices": {
-        type: "string",
-        description: "Comma-separated list of tool slices to include (e.g., create,read,tree)",
-      },
-      "umbraco-exclude-slices": {
-        type: "string",
-        description: "Comma-separated list of tool slices to exclude (e.g., delete,recycle-bin)",
-      },
-      "umbraco-include-tools": {
-        type: "string",
-        description: "Comma-separated list of tools to include",
-      },
-      "umbraco-exclude-tools": {
-        type: "string",
-        description: "Comma-separated list of tools to exclude",
-      },
-      "umbraco-allowed-media-paths": {
-        type: "string",
-        description: "Comma-separated list of allowed file system paths for media uploads (security: restricts file path access)",
-      },
-      "umbraco-readonly": {
-        type: "boolean",
-        description: "Enable readonly mode - disables all write operations (create, update, delete)",
-        default: false,
-      },
-      env: {
-        type: "string",
-        description: "Path to custom .env file to load environment variables from",
-      },
-    })
+    .options(yargsOptions)
     .help()
     .version(process.env.NPM_PACKAGE_VERSION ?? "unknown")
     .parseSync() as CliArgs;
@@ -281,10 +262,12 @@ export function getServerConfig(isStdioMode: boolean): UmbracoServerConfig {
   };
 
   const config: Partial<Omit<UmbracoServerConfig, "auth" | "configSources">> = {};
+  const custom: Record<string, string | string[] | boolean | undefined> = {};
 
   // Resolve all config fields using table-driven approach
   const resolvedValues: Record<string, ResolveResult> = {};
 
+  // Process base CONFIG_FIELDS
   for (const field of CONFIG_FIELDS) {
     const result = resolveConfigField(argv, field);
     resolvedValues[field.name] = result;
@@ -302,8 +285,15 @@ export function getServerConfig(isStdioMode: boolean): UmbracoServerConfig {
     }
   }
 
-  // Validate required fields
-  for (const field of CONFIG_FIELDS.filter(f => f.required)) {
+  // Process additional fields into custom object
+  for (const field of additionalFields) {
+    const result = resolveConfigField(argv, field);
+    resolvedValues[field.name] = result;
+    custom[field.name] = result.value;
+  }
+
+  // Validate required fields (both base and additional)
+  for (const field of allFields.filter(f => f.required)) {
     const result = resolvedValues[field.name];
     if (!result?.value) {
       console.error(
@@ -318,7 +308,7 @@ export function getServerConfig(isStdioMode: boolean): UmbracoServerConfig {
     console.log("\nUmbraco MCP Configuration:");
     console.log(`- ENV_FILE: ${envFilePath} (source: ${configSources.envFile})`);
 
-    for (const field of CONFIG_FIELDS) {
+    for (const field of allFields) {
       const result = resolvedValues[field.name];
       logConfigField(result.value, result.source, field);
     }
@@ -327,8 +317,11 @@ export function getServerConfig(isStdioMode: boolean): UmbracoServerConfig {
   }
 
   return {
-    ...config,
-    auth,
-    configSources,
+    config: {
+      ...config,
+      auth,
+      configSources,
+    },
+    custom,
   };
 }

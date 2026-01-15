@@ -56,6 +56,25 @@ export interface AgentTestOptions {
   verbose?: boolean;
   /** Output verbosity level */
   verbosity?: VerbosityLevel;
+  /**
+   * Additional environment variables to pass to the MCP server.
+   * These are merged with the configured serverEnv, with these taking precedence.
+   * Useful for testing tool filtering with different configurations.
+   *
+   * @example
+   * ```typescript
+   * serverEnv: {
+   *   UMBRACO_INCLUDE_SLICES: "read,list",
+   *   UMBRACO_TOOL_MODES: "content",
+   * }
+   * ```
+   */
+  serverEnv?: Record<string, string>;
+  /**
+   * If true, don't set UMBRACO_INCLUDE_TOOLS from the tools parameter.
+   * Use this when testing server-side filtering (slices, modes, collections).
+   */
+  useServerFiltering?: boolean;
 }
 
 /**

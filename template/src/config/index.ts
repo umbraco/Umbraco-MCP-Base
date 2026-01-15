@@ -17,3 +17,11 @@ export {
   allModeNames,
   type ToolModeName,
 } from "./mode-registry.js";
+
+export {
+  loadServerConfig,
+  clearConfigCache,
+  getCustomFieldDefinitions,
+  type ServerConfig,
+  type MyServerCustomConfig,
+} from "./server-config.js";

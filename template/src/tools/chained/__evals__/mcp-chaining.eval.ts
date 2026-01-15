@@ -6,8 +6,14 @@
  * MCP servers are accessible and functional.
  *
  * Requirements:
- * - Chained MCP server (cms) must be available
+ * - Chained MCP server (cms) must be available (@umbraco-cms/mcp-dev)
  * - Running Umbraco instance with valid credentials
+ *
+ * These are integration tests that require external infrastructure.
+ * To run these tests:
+ * 1. Ensure you have a running Umbraco instance
+ * 2. Set UMBRACO_CLIENT_ID, UMBRACO_CLIENT_SECRET, UMBRACO_BASE_URL env vars
+ * 3. Set RUN_CHAINING_TESTS=true
  */
 
 import "../../../tools/example/__evals__/setup.js";
@@ -18,7 +24,12 @@ import {
   getDefaultTimeoutMs,
 } from "@umbraco-cms/mcp-toolkit/evals";
 
-describe("MCP Chaining", () => {
+// Skip these tests unless explicitly enabled (requires real Umbraco instance)
+const shouldRunChainingTests = process.env.RUN_CHAINING_TESTS === "true";
+
+const describeOrSkip = shouldRunChainingTests ? describe : describe.skip;
+
+describeOrSkip("MCP Chaining", () => {
   setupConsoleMock();
   const timeout = getDefaultTimeoutMs();
 

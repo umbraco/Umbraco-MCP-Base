@@ -8,7 +8,7 @@
  * This is the SINGLE SOURCE OF TRUTH for slice names in this project.
  */
 
-import { baseSliceNames } from "@umbraco-cms/mcp-toolkit";
+import { baseSliceNames } from "../../../types/tool-definition.js";
 
 /**
  * Tool slice names for this project.

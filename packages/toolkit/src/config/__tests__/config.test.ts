@@ -19,12 +19,20 @@ const originalExit = process.exit;
 const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
 
+import type { ConfigFieldDefinition, GetServerConfigOptions } from "../config.js";
+
 // Helper to reset modules between tests (since config may cache state)
-async function getServerConfigFresh(isStdioMode: boolean) {
+async function getServerConfigFresh(isStdioMode: boolean, options?: GetServerConfigOptions) {
   // Clear module cache to get fresh config each time
   jest.resetModules();
   const { getServerConfig } = await import("../config.js");
-  return getServerConfig(isStdioMode);
+  return getServerConfig(isStdioMode, options);
+}
+
+// Backwards-compatible helper that returns just the config
+async function getBaseConfigFresh(isStdioMode: boolean) {
+  const result = await getServerConfigFresh(isStdioMode);
+  return result.config;
 }
 
 // Non-existent env file path to prevent loading default .env
@@ -84,7 +92,7 @@ describe("getServerConfig", () => {
         "--umbraco-base-url", "http://localhost:5000"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientId).toBe("test-client-id");
       expect(config.configSources.clientId).toBe("cli");
@@ -97,7 +105,7 @@ describe("getServerConfig", () => {
         "--umbraco-base-url", "http://localhost:5000"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientSecret).toBe("my-secret-value");
       expect(config.configSources.clientSecret).toBe("cli");
@@ -110,7 +118,7 @@ describe("getServerConfig", () => {
         "--umbraco-base-url", "https://my-umbraco.example.com"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.baseUrl).toBe("https://my-umbraco.example.com");
       expect(config.configSources.baseUrl).toBe("cli");
@@ -124,7 +132,7 @@ describe("getServerConfig", () => {
         "--umbraco-tool-modes", "content,media,editor"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["content", "media", "editor"]);
       expect(config.configSources.toolModes).toBe("cli");
@@ -138,7 +146,7 @@ describe("getServerConfig", () => {
         "--umbraco-include-tool-collections", "document,media,data-type"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.includeToolCollections).toEqual(["document", "media", "data-type"]);
       expect(config.configSources.includeToolCollections).toBe("cli");
@@ -152,7 +160,7 @@ describe("getServerConfig", () => {
         "--umbraco-exclude-tool-collections", "user,member"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.excludeToolCollections).toEqual(["user", "member"]);
       expect(config.configSources.excludeToolCollections).toBe("cli");
@@ -166,7 +174,7 @@ describe("getServerConfig", () => {
         "--umbraco-include-slices", "create,read,tree"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.includeSlices).toEqual(["create", "read", "tree"]);
       expect(config.configSources.includeSlices).toBe("cli");
@@ -180,7 +188,7 @@ describe("getServerConfig", () => {
         "--umbraco-exclude-slices", "delete,recycle-bin"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.excludeSlices).toEqual(["delete", "recycle-bin"]);
       expect(config.configSources.excludeSlices).toBe("cli");
@@ -194,7 +202,7 @@ describe("getServerConfig", () => {
         "--umbraco-include-tools", "get-document,create-document"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.includeTools).toEqual(["get-document", "create-document"]);
       expect(config.configSources.includeTools).toBe("cli");
@@ -208,7 +216,7 @@ describe("getServerConfig", () => {
         "--umbraco-exclude-tools", "delete-document,empty-recycle-bin"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.excludeTools).toEqual(["delete-document", "empty-recycle-bin"]);
       expect(config.configSources.excludeTools).toBe("cli");
@@ -222,7 +230,7 @@ describe("getServerConfig", () => {
         "--umbraco-readonly"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.readonly).toBe(true);
       expect(config.configSources.readonly).toBe("cli");
@@ -236,7 +244,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientId).toBe("env-client-id");
       expect(config.configSources.clientId).toBe("env");
@@ -248,7 +256,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientSecret).toBe("env-secret-value");
       expect(config.configSources.clientSecret).toBe("env");
@@ -260,7 +268,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "https://env-umbraco.example.com";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.baseUrl).toBe("https://env-umbraco.example.com");
       expect(config.configSources.baseUrl).toBe("env");
@@ -273,7 +281,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_TOOL_MODES = "content,media,users";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["content", "media", "users"]);
       expect(config.configSources.toolModes).toBe("env");
@@ -286,7 +294,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_INCLUDE_TOOL_COLLECTIONS = "document,media";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.includeToolCollections).toEqual(["document", "media"]);
       expect(config.configSources.includeToolCollections).toBe("env");
@@ -299,7 +307,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_EXCLUDE_SLICES = "delete,publish";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.excludeSlices).toEqual(["delete", "publish"]);
       expect(config.configSources.excludeSlices).toBe("env");
@@ -312,7 +320,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_READONLY = "true";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.readonly).toBe(true);
       expect(config.configSources.readonly).toBe("env");
@@ -325,7 +333,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_READONLY = "false";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.readonly).toBeUndefined();
     });
@@ -341,7 +349,7 @@ describe("getServerConfig", () => {
         "--umbraco-client-id", "cli-client-id"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientId).toBe("cli-client-id");
       expect(config.configSources.clientId).toBe("cli");
@@ -356,7 +364,7 @@ describe("getServerConfig", () => {
         "--umbraco-client-secret", "cli-secret"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.auth.clientSecret).toBe("cli-secret");
       expect(config.configSources.clientSecret).toBe("cli");
@@ -372,7 +380,7 @@ describe("getServerConfig", () => {
         "--umbraco-tool-modes", "editor,admin"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["editor", "admin"]);
       expect(config.configSources.toolModes).toBe("cli");
@@ -388,7 +396,7 @@ describe("getServerConfig", () => {
         "--umbraco-include-slices", "tree,search"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.includeSlices).toEqual(["tree", "search"]);
       expect(config.configSources.includeSlices).toBe("cli");
@@ -403,7 +411,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_TOOL_MODES = " content , media , users ";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["content", "media", "users"]);
     });
@@ -415,7 +423,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_TOOL_MODES = "content,,media,,,users";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["content", "media", "users"]);
     });
@@ -427,7 +435,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_TOOL_MODES = "content";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       expect(config.toolModes).toEqual(["content"]);
     });
@@ -439,7 +447,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await expect(getServerConfigFresh(true)).rejects.toThrow("process.exit(1)");
+      await expect(getBaseConfigFresh(true)).rejects.toThrow("process.exit(1)");
       expect(exitCode).toBe(1);
       expect(consoleErrors.some(e => e.includes("UMBRACO_CLIENT_ID"))).toBe(true);
     });
@@ -449,7 +457,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await expect(getServerConfigFresh(true)).rejects.toThrow("process.exit(1)");
+      await expect(getBaseConfigFresh(true)).rejects.toThrow("process.exit(1)");
       expect(exitCode).toBe(1);
       expect(consoleErrors.some(e => e.includes("UMBRACO_CLIENT_SECRET"))).toBe(true);
     });
@@ -459,7 +467,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_CLIENT_SECRET = "env-secret";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await expect(getServerConfigFresh(true)).rejects.toThrow("process.exit(1)");
+      await expect(getBaseConfigFresh(true)).rejects.toThrow("process.exit(1)");
       expect(exitCode).toBe(1);
       expect(consoleErrors.some(e => e.includes("UMBRACO_BASE_URL"))).toBe(true);
     });
@@ -476,7 +484,7 @@ describe("getServerConfig", () => {
         "--umbraco-include-slices", "create,read"
       ];
 
-      const config = await getServerConfigFresh(true);
+      const config = await getBaseConfigFresh(true);
 
       // Auth fields from env
       expect(config.configSources.clientId).toBe("env");
@@ -503,7 +511,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await getServerConfigFresh(false); // isStdioMode = false
+      await getBaseConfigFresh(false); // isStdioMode = false
 
       expect(consoleOutput.some(o => o.includes("Umbraco MCP Configuration"))).toBe(true);
       expect(consoleOutput.some(o => o.includes("UMBRACO_CLIENT_ID"))).toBe(true);
@@ -516,7 +524,7 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await getServerConfigFresh(false); // isStdioMode = false
+      await getBaseConfigFresh(false); // isStdioMode = false
 
       // Should contain masked secret (****alue)
       const secretLog = consoleOutput.find(o => o.includes("UMBRACO_CLIENT_SECRET"));
@@ -531,9 +539,117 @@ describe("getServerConfig", () => {
       process.env.UMBRACO_BASE_URL = "http://localhost:5000";
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
 
-      await getServerConfigFresh(true); // isStdioMode = true
+      await getBaseConfigFresh(true); // isStdioMode = true
 
       expect(consoleOutput.some(o => o.includes("Umbraco MCP Configuration"))).toBe(false);
+    });
+  });
+
+  describe("Additional fields (custom config)", () => {
+    const customFields: ConfigFieldDefinition[] = [
+      { name: "myFeatureEnabled", envVar: "MY_FEATURE_ENABLED", cliFlag: "my-feature-enabled", type: "boolean" },
+      { name: "customEndpoints", envVar: "MY_CUSTOM_ENDPOINTS", cliFlag: "my-custom-endpoints", type: "csv" },
+      { name: "apiKey", envVar: "MY_API_KEY", cliFlag: "my-api-key", type: "string" },
+    ];
+
+    it("should parse additional string fields from env", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.env.MY_API_KEY = "my-secret-api-key";
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+
+      const { config, custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      expect(config.auth.clientId).toBe("test-client");
+      expect(custom.apiKey).toBe("my-secret-api-key");
+    });
+
+    it("should parse additional boolean fields from env", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.env.MY_FEATURE_ENABLED = "true";
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+
+      const { custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      expect(custom.myFeatureEnabled).toBe(true);
+    });
+
+    it("should parse additional CSV fields from env", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.env.MY_CUSTOM_ENDPOINTS = "endpoint1,endpoint2,endpoint3";
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+
+      const { custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      expect(custom.customEndpoints).toEqual(["endpoint1", "endpoint2", "endpoint3"]);
+    });
+
+    it("should parse additional fields from CLI", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.argv = [
+        "node", "index.js",
+        "--env", NON_EXISTENT_ENV_FILE,
+        "--my-api-key", "cli-api-key",
+        "--my-custom-endpoints", "cli-ep1,cli-ep2",
+      ];
+
+      const { custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      expect(custom.apiKey).toBe("cli-api-key");
+      expect(custom.customEndpoints).toEqual(["cli-ep1", "cli-ep2"]);
+    });
+
+    it("should prefer CLI over env for additional fields", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.env.MY_API_KEY = "env-api-key";
+      process.argv = [
+        "node", "index.js",
+        "--env", NON_EXISTENT_ENV_FILE,
+        "--my-api-key", "cli-api-key",
+      ];
+
+      const { custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      expect(custom.apiKey).toBe("cli-api-key");
+    });
+
+    it("should keep base config and custom config separate", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.env.UMBRACO_READONLY = "true";
+      process.env.MY_API_KEY = "my-api-key";
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+
+      const { config, custom } = await getServerConfigFresh(true, { additionalFields: customFields });
+
+      // Base config should have readonly
+      expect(config.readonly).toBe(true);
+      // Custom should have api key
+      expect(custom.apiKey).toBe("my-api-key");
+      // Custom should not have readonly
+      expect(custom).not.toHaveProperty("readonly");
+    });
+
+    it("should return empty custom object when no additional fields provided", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+
+      const { config, custom } = await getServerConfigFresh(true);
+
+      expect(config.auth.clientId).toBe("test-client");
+      expect(Object.keys(custom)).toHaveLength(0);
     });
   });
 });

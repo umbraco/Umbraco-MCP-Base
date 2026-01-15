@@ -46,9 +46,17 @@ export async function runAgentTest(
   // Build environment with tools included
   const env: Record<string, string> = {
     ...serverEnv,
-    UMBRACO_INCLUDE_TOOLS: toolsString,
+    ...options?.serverEnv,
     NODE_TLS_REJECT_UNAUTHORIZED: "0"
   };
+
+  // useServerFiltering is an agent runner setting (not a server config).
+  // When false (default): sets UMBRACO_INCLUDE_TOOLS to limit tools to the test's `tools` array.
+  // When true: doesn't set UMBRACO_INCLUDE_TOOLS, letting the server's own filtering
+  // (slices, collections, modes) determine which tools are exposed.
+  if (!options?.useServerFiltering && toolsString) {
+    env.UMBRACO_INCLUDE_TOOLS = toolsString;
+  }
 
   for await (const message of query({
     prompt,

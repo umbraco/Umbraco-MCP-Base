@@ -18,5 +18,8 @@ export default defineConfig({
   external: [
     "@anthropic-ai/claude-agent-sdk",
     "@jest/globals",
+    "dotenv",
+    "yargs",
+    "yargs/helpers",
   ],
 });
