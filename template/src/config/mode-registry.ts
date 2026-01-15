@@ -30,6 +30,18 @@ export const toolModes: ToolModeDefinition[] = [
     description: 'Example CRUD operations for demonstration',
     collections: ['example']
   },
+  {
+    name: 'example-2',
+    displayName: 'Example-2 Tools',
+    description: 'Second example collection for testing',
+    collections: ['example-2']
+  },
+  {
+    name: 'all-examples',
+    displayName: 'All Example Tools',
+    description: 'Both example collections combined',
+    collections: ['example', 'example-2']
+  },
   // Add your modes here as you build out your MCP server
   // {
   //   name: 'content',

@@ -26,6 +26,7 @@ import { getExampleUmbracoAddOnAPI } from "./api/generated/exampleApi.js";
 
 // Import tool collections
 import exampleCollection from "./tools/example/index.js";
+import example2Collection from "./tools/example-2/index.js";
 
 // Import MCP server chain configuration
 import { mcpServers } from "./config/mcp-servers.js";
@@ -96,7 +97,7 @@ const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(server
 // Register Tools with Filtering
 // ============================================================================
 
-const collections = [exampleCollection];
+const collections = [exampleCollection, example2Collection];
 let registeredToolCount = 0;
 
 for (const collection of collections) {
