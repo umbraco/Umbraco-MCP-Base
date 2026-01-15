@@ -108,15 +108,25 @@ export class McpClientManager {
   /**
    * Call a tool on a chained MCP server.
    * Used for internal delegation from local tools.
+   *
+   * @returns Tool result with optional structuredContent (when tool has outputSchema)
    */
   async callTool(
     serverName: string,
     toolName: string,
     args: Record<string, unknown>
-  ): Promise<{ content: Array<{ type: string; text?: string }> }> {
+  ): Promise<{
+    content: Array<{ type: string; text?: string }>;
+    structuredContent?: unknown;
+    isError?: boolean;
+  }> {
     const client = await this.connect(serverName);
     const result = await client.callTool({ name: toolName, arguments: args });
-    return result as { content: Array<{ type: string; text?: string }> };
+    return result as {
+      content: Array<{ type: string; text?: string }>;
+      structuredContent?: unknown;
+      isError?: boolean;
+    };
   }
 
   /**

@@ -13,7 +13,6 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   configureApiClient,
   createToolAnnotations,
-  createMcpClientManager,
   discoverProxiedTools,
   parseProxiedToolName,
   createCollectionConfigLoader,
@@ -27,6 +26,10 @@ import { getExampleUmbracoAddOnAPI } from "./api/generated/exampleApi.js";
 // Import tool collections
 import exampleCollection from "./tools/example/index.js";
 import example2Collection from "./tools/example-2/index.js";
+import chainedCollection from "./tools/chained/index.js";
+
+// Import MCP client manager (for chaining to other MCP servers)
+import { mcpClientManager } from "./mcp-client.js";
 
 // Import MCP server chain configuration
 import { mcpServers } from "./config/mcp-servers.js";
@@ -38,30 +41,6 @@ import { loadServerConfig, clearConfigCache } from "./config/server-config.js";
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
 configureApiClient(() => getExampleUmbracoAddOnAPI());
-
-// ============================================================================
-// MCP Client Manager (for chaining to other MCP servers)
-// ============================================================================
-
-/**
- * MCP Client Manager for chaining to other MCP servers.
- * Allows tools in this server to call tools on external MCP servers.
- *
- * Usage in tools:
- * ```typescript
- * import { mcpClientManager } from "../../index.js";
- * const result = await mcpClientManager.callTool("cms", "get-document", { id: "..." });
- * ```
- */
-export const mcpClientManager = createMcpClientManager({
-  // Pass through any filter configuration to chained servers
-  // filterConfig: { tools: [], slices: [], modes: [] },
-});
-
-// Register configured MCP servers
-for (const config of mcpServers) {
-  mcpClientManager.registerServer(config);
-}
 
 // ============================================================================
 // MCP Server Setup
@@ -97,7 +76,7 @@ const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(server
 // Register Tools with Filtering
 // ============================================================================
 
-const collections = [exampleCollection, example2Collection];
+const collections = [exampleCollection, example2Collection, chainedCollection];
 let registeredToolCount = 0;
 
 for (const collection of collections) {
