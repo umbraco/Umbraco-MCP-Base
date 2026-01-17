@@ -1,5 +1,5 @@
 {
-  "name": "umbraco-mcp-toolkit-plugins",
+  "name": "umbraco-mcp-server-sdk-plugins",
   "owner": {
     "name": "Umbraco Community",
     "email": "pjw@umbraco.com"
@@ -7,7 +7,7 @@
   "metadata": {
     "description": "Claude Code plugins for the Umbraco MCP Toolkit - professional skills for building MCP servers, testing, and API integration",
     "version": "1.0.0",
-    "homepage": "https://github.com/umbraco/umbraco-mcp-toolkit"
+    "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk"
   },
   "plugins": [
     {
@@ -21,7 +21,7 @@
         "email": "pjw@umbraco.com",
         "url": "https://github.com/hifi-phil"
       },
-      "homepage": "https://github.com/umbraco/umbraco-mcp-toolkit/tree/main/plugins/umbraco-mcp-skills",
+      "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk/tree/main/plugins/umbraco-mcp-skills",
       "keywords": [
         "mcp",
         "umbraco",

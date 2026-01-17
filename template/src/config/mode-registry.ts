@@ -7,7 +7,7 @@
  * This is the SINGLE SOURCE OF TRUTH for mode definitions in this project.
  */
 
-import type { ToolModeDefinition } from "@umbraco-cms/mcp-toolkit";
+import type { ToolModeDefinition } from "@umbraco-cms/mcp-server-sdk";
 
 /**
  * Tool mode definitions for this project.

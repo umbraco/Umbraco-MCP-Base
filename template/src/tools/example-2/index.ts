@@ -5,7 +5,7 @@
  * Uses simple mock tools that don't require API clients.
  */
 
-import { ToolCollectionExport } from "@umbraco-cms/mcp-toolkit";
+import { ToolCollectionExport } from "@umbraco-cms/mcp-server-sdk";
 import getWidgetTool from "./get/get-widget.js";
 import listWidgetsTool from "./get/list-widgets.js";
 import createWidgetTool from "./post/create-widget.js";

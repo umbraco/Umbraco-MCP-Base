@@ -6,6 +6,7 @@ const config: import("@jest/types").Config.InitialOptions = {
   projects: [
     "<rootDir>/packages/toolkit",
     "<rootDir>/template",
+    "<rootDir>/plugins",
   ],
   // Global options (these don't belong in project configs)
   verbose: true,

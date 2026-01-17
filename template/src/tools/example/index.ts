@@ -5,7 +5,7 @@
  * Replace this with your actual tools for your Umbraco add-on.
  */
 
-import { ToolCollectionExport } from "@umbraco-cms/mcp-toolkit";
+import { ToolCollectionExport } from "@umbraco-cms/mcp-server-sdk";
 import getExampleTool from "./get/get-example.js";
 import listExamplesTool from "./get/list-examples.js";
 import searchExamplesTool from "./get/search-examples.js";

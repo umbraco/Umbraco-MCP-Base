@@ -9,7 +9,7 @@ import {
   withStandardDecorators,
   createToolResult,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 const inputSchema = {
   skip: z.number().optional().default(0).describe("Number of items to skip"),

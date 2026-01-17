@@ -28,7 +28,7 @@
  * ## Configuration
  * Before using the helpers, configure the API client provider:
  * ```typescript
- * import { configureApiClient } from '@umbraco-cms/mcp-toolkit';
+ * import { configureApiClient } from '@umbraco-cms/mcp-server-sdk';
  * configureApiClient(() => MyApiClient.getClient());
  * ```
  */
@@ -54,7 +54,7 @@ export class UmbracoApiError extends Error {
  * Function type for providing the API client instance.
  * Configure this once at startup with configureApiClient().
  */
-export type ClientProvider<TClient = unknown> = () => TClient;
+export type ClientProvider<TClient = any> = () => TClient;
 
 // Store the configured client provider
 let clientProvider: ClientProvider | null = null;
@@ -93,7 +93,7 @@ export function getApiClient<TClient>(): TClient {
  * Function signature for API calls that return an AxiosResponse.
  * Use with CAPTURE_RAW_HTTP_RESPONSE to get the full response object.
  */
-export type ApiCallFn<T = unknown, TClient = unknown> = (client: TClient) => Promise<AxiosResponse<T>>;
+export type ApiCallFn<T = unknown, TClient = any> = (client: TClient) => Promise<AxiosResponse<T>>;
 
 /**
  * Options that configure Axios to return the raw HTTP response object instead of just the data.
@@ -185,7 +185,7 @@ function isSuccessStatus(status: number, acceptedStatusCodes?: number[]): boolea
  * Error handling is centralized in the withErrorHandling decorator.
  * @internal
  */
-async function executeApiCallInternal<T = unknown, TClient = unknown>(
+async function executeApiCallInternal<T = unknown, TClient = any>(
   apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>,
   options?: ApiCallOptions<T>
 ): Promise<CallToolResult> {
@@ -288,7 +288,7 @@ export function processVoidResponse(
  * );
  * ```
  */
-export function executeVoidApiCall<TClient = unknown>(
+export function executeVoidApiCall<TClient = any>(
   apiCall: (client: TClient) => Promise<AxiosResponse<ProblemDetails | void> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<void, TClient>(apiCall, { void: true });
@@ -319,7 +319,7 @@ export function executeVoidApiCall<TClient = unknown>(
  * );
  * ```
  */
-export function executeGetApiCall<T = unknown, TClient = unknown>(
+export function executeGetApiCall<T = unknown, TClient = any>(
   apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<T, TClient>(apiCall);
@@ -365,7 +365,7 @@ export type VoidApiCallOptions = Omit<ApiCallOptions, 'void' | 'transformData'>;
  * );
  * ```
  */
-export function executeVoidApiCallWithOptions<TClient = unknown>(
+export function executeVoidApiCallWithOptions<TClient = any>(
   apiCall: (client: TClient) => Promise<AxiosResponse<ProblemDetails | void> | unknown>,
   options?: VoidApiCallOptions
 ): Promise<CallToolResult> {
@@ -410,7 +410,7 @@ export function executeVoidApiCallWithOptions<TClient = unknown>(
  * );
  * ```
  */
-export function executeGetItemsApiCall<T = unknown, TClient = unknown>(
+export function executeGetItemsApiCall<T = unknown, TClient = any>(
   apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<T, TClient>(apiCall, {

@@ -63,7 +63,7 @@ import {
   withStandardDecorators,
   createToolResult,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 // Import the MCP client manager singleton
 // This is configured in mcp-client.ts and registers servers from mcp-servers.ts

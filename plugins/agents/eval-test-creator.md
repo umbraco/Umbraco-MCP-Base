@@ -33,7 +33,7 @@ __evals__/
 ```typescript
 // __evals__/setup.ts
 import path from "path";
-import { configureEvals } from "@umbraco-cms/mcp-toolkit/evals";
+import { configureEvals } from "@umbraco-cms/mcp-server-sdk/evals";
 
 configureEvals({
   mcpServerPath: path.resolve(process.cwd(), "dist/index.js"),
@@ -58,7 +58,7 @@ import {
   runScenarioTest,
   setupConsoleMock,
   getDefaultTimeoutMs,
-} from "@umbraco-cms/mcp-toolkit/evals";
+} from "@umbraco-cms/mcp-server-sdk/evals";
 
 const ENTITY_TOOLS = [
   "list-entities",

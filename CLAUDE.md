@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Monorepo for the Umbraco MCP (Model Context Protocol) toolkit - infrastructure for building MCP servers that expose Umbraco APIs to AI assistants.
+Monorepo for the Umbraco MCP (Model Context Protocol) Server SDK - infrastructure for building MCP servers that expose Umbraco APIs to AI assistants.
 
 ## Monorepo Structure
 
 | Workspace | Description | Published |
 |-----------|-------------|-----------|
-| `packages/toolkit/` | Core npm package `@umbraco-cms/mcp-toolkit` | Yes |
+| `packages/mcp-server-sdk/` | Core npm package `@umbraco-cms/mcp-server-sdk` | Yes |
 | `template/` | Starter kit for new MCP server projects | No |
 | `plugins/` | Claude Code plugins for Umbraco development | No |
 
@@ -20,21 +20,22 @@ Each workspace has its own CLAUDE.md with detailed guidance.
 
 ```bash
 npm install           # Install all workspace dependencies
-npm run build         # Build toolkit
-npm run test          # Test toolkit
+npm run build         # Build SDK
+npm run test          # Test SDK
 ```
 
-Workspace-specific commands use `-w` flag: `npm run build -w packages/toolkit`
+Workspace-specific commands use `-w` flag: `npm run build -w packages/mcp-server-sdk`
 
-## Toolkit Package Exports
+## SDK Package Exports
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `@umbraco-cms/mcp-toolkit` | Main: tool helpers, decorators, types, config loaders |
-| `@umbraco-cms/mcp-toolkit/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
-| `@umbraco-cms/mcp-toolkit/evals` | LLM eval framework: runScenarioTest, verification helpers |
-| `@umbraco-cms/mcp-toolkit/config` | Configuration loading |
-| `@umbraco-cms/mcp-toolkit/helpers` | API call helpers only |
+| `@umbraco-cms/mcp-server-sdk` | Main: tool helpers, decorators, types, config loaders |
+| `@umbraco-cms/mcp-server-sdk/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
+| `@umbraco-cms/mcp-server-sdk/evals` | LLM eval framework: runScenarioTest, verification helpers |
+| `@umbraco-cms/mcp-server-sdk/config` | Configuration loading |
+| `@umbraco-cms/mcp-server-sdk/helpers` | API call helpers only |
+| `@umbraco-cms/mcp-server-sdk/constants` | Umbraco well-known IDs |
 
 ## Core Concepts
 

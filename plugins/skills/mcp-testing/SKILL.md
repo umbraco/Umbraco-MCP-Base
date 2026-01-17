@@ -1,11 +1,11 @@
 ---
 name: mcp-testing
-description: Load MCP testing patterns for unit tests and eval tests using the @umbraco-cms/mcp-toolkit. Use when writing tests for MCP tools.
+description: Load MCP testing patterns for unit tests and eval tests using the @umbraco-cms/mcp-server-sdk. Use when writing tests for MCP tools.
 ---
 
 # MCP Testing Patterns
 
-This skill loads comprehensive testing patterns for MCP tools using `@umbraco-cms/mcp-toolkit/testing` and `@umbraco-cms/mcp-toolkit/evals`.
+This skill loads comprehensive testing patterns for MCP tools using `@umbraco-cms/mcp-server-sdk/testing` and `@umbraco-cms/mcp-server-sdk/evals`.
 
 ## When to Use
 
@@ -23,8 +23,8 @@ Use this skill when:
 import {
   setupTestEnvironment,
   createMockRequestHandlerExtra,
-} from "@umbraco-cms/mcp-toolkit/testing";
-import { configureApiClient } from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk/testing";
+import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
 import { getYourAPI } from "../../api/generated/yourApi.js";
 import yourTool from "../../tools/your-tool.js";
 
@@ -82,7 +82,7 @@ Eval tests use an LLM agent to test tools end-to-end.
 ```typescript
 // __evals__/setup.ts
 import path from "path";
-import { configureEvals } from "@umbraco-cms/mcp-toolkit/evals";
+import { configureEvals } from "@umbraco-cms/mcp-server-sdk/evals";
 
 configureEvals({
   mcpServerPath: path.resolve(process.cwd(), "dist/index.js"),
@@ -104,7 +104,7 @@ import {
   runScenarioTest,
   setupConsoleMock,
   getDefaultTimeoutMs,
-} from "@umbraco-cms/mcp-toolkit/evals";
+} from "@umbraco-cms/mcp-server-sdk/evals";
 
 describe("entity evals", () => {
   setupConsoleMock();

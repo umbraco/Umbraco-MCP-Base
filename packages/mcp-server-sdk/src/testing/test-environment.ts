@@ -15,7 +15,7 @@ import { jest } from "@jest/globals";
  *
  * Usage:
  * ```typescript
- * import { setupTestEnvironment } from "@umbraco-cms/mcp-toolkit/testing";
+ * import { setupTestEnvironment } from "@umbraco-cms/mcp-server-sdk/testing";
  *
  * describe("my-test", () => {
  *   setupTestEnvironment();
@@ -57,7 +57,7 @@ interface MswServer {
  *
  * Usage in jest-setup.ts (via setupFilesAfterEnv):
  * ```typescript
- * import { setupMswServer } from "@umbraco-cms/mcp-toolkit/testing";
+ * import { setupMswServer } from "@umbraco-cms/mcp-server-sdk/testing";
  * import { server } from "./mocks/server.js";
  * import { resetStore } from "./mocks/store.js";
  *

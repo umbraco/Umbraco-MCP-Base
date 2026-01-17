@@ -1,17 +1,17 @@
 # Umbraco MCP Skills
 
-Professional Claude Code skills for building Umbraco MCP servers using the `@umbraco-cms/mcp-toolkit`.
+Professional Claude Code skills for building Umbraco MCP servers using the `@umbraco-cms/mcp-server-sdk`.
 
 ## Quick Start
 
 Add the marketplace:
 ```bash
-/plugin marketplace add umbraco/umbraco-mcp-toolkit
+/plugin marketplace add umbraco/umbraco-mcp-server-sdk
 ```
 
 Install the plugin:
 ```bash
-/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-toolkit
+/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-server-sdk
 ```
 
 ## Available Skills
@@ -74,7 +74,7 @@ Loads comprehensive reference for:
 
 ## Toolkit Integration
 
-This plugin is designed for projects using `@umbraco-cms/mcp-toolkit`:
+This plugin is designed for projects using `@umbraco-cms/mcp-server-sdk`:
 
 ```typescript
 import {
@@ -84,7 +84,7 @@ import {
   createToolResult,
   withStandardDecorators,
   CAPTURE_RAW_HTTP_RESPONSE,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 ```
 
 ## Project Structure Expected
@@ -132,7 +132,7 @@ export default withStandardDecorators(MyTool);
 Creates tests following the pattern:
 
 ```typescript
-import { setupTestEnvironment, createMockRequestHandlerExtra } from "@umbraco-cms/mcp-toolkit/testing";
+import { setupTestEnvironment, createMockRequestHandlerExtra } from "@umbraco-cms/mcp-server-sdk/testing";
 
 describe("my-tool", () => {
   setupTestEnvironment();
@@ -152,7 +152,7 @@ describe("my-tool", () => {
 Creates LLM-based acceptance tests:
 
 ```typescript
-import { runScenarioTest } from "@umbraco-cms/mcp-toolkit/evals";
+import { runScenarioTest } from "@umbraco-cms/mcp-server-sdk/evals";
 
 it("should complete workflow",
   runScenarioTest({

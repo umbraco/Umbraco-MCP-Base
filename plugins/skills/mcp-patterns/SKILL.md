@@ -1,11 +1,11 @@
 ---
 name: mcp-patterns
-description: Load MCP development patterns and best practices for building tools with the @umbraco-cms/mcp-toolkit. Use when starting tool development or needing pattern reference.
+description: Load MCP development patterns and best practices for building tools with the @umbraco-cms/mcp-server-sdk. Use when starting tool development or needing pattern reference.
 ---
 
 # MCP Development Patterns
 
-This skill loads comprehensive patterns for building MCP tools using the `@umbraco-cms/mcp-toolkit`.
+This skill loads comprehensive patterns for building MCP tools using the `@umbraco-cms/mcp-server-sdk`.
 
 ## When to Use
 
@@ -29,7 +29,7 @@ import {
   createToolResult,
   CAPTURE_RAW_HTTP_RESPONSE,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 const MyTool = {
   name: "tool-name",
@@ -55,7 +55,7 @@ export default withStandardDecorators(MyTool);
 Configure once at server startup:
 
 ```typescript
-import { configureApiClient } from "@umbraco-cms/mcp-toolkit";
+import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
 import { getMyAPI } from "./api/generated/myApi.js";
 
 configureApiClient(() => getMyAPI());

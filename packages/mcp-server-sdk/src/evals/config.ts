@@ -55,7 +55,7 @@ let config: EvalConfig = {
  *
  * @example
  * ```typescript
- * import { configureEvals } from '@umbraco-cms/mcp-toolkit/evals';
+ * import { configureEvals } from '@umbraco-cms/mcp-server-sdk/evals';
  * import path from 'path';
  *
  * configureEvals({

@@ -15,7 +15,7 @@ import {
   getServerConfig,
   type ConfigFieldDefinition,
   type UmbracoServerConfig,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 // ============================================================================
 // Custom Config Interface

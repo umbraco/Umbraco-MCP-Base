@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with the `@umbraco-cms/mcp-toolkit` package.
+This file provides guidance to Claude Code (claude.ai/code) when working with the `@umbraco-cms/mcp-server-sdk` package.
 
 ## Package Overview
 
-Core npm package providing infrastructure for building Umbraco MCP servers. Published to npm as `@umbraco-cms/mcp-toolkit`.
+Core npm package providing infrastructure for building Umbraco MCP servers. Published to npm as `@umbraco-cms/mcp-server-sdk`.
 
 ## Commands
 
@@ -44,6 +44,7 @@ src/
 | `./config` | getServerConfig |
 | `./helpers` | API call helpers only |
 | `./types` | Type definitions only |
+| `./constants` | Umbraco well-known IDs (BLANK_UUID, media type IDs, etc.) |
 
 ## Key Exports
 

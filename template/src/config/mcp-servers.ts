@@ -13,7 +13,7 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
-import type { McpServerConfig } from "@umbraco-cms/mcp-toolkit";
+import type { McpServerConfig } from "@umbraco-cms/mcp-server-sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

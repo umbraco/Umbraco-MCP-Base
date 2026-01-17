@@ -1,5 +1,5 @@
 {
-  "name": "my-umbraco-mcp-server",
+  "name": "@umbraco-cms/mcp-template",
   "version": "1.0.0",
   "type": "module",
   "description": "MCP server for my Umbraco add-on",
@@ -33,7 +33,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@umbraco-cms/mcp-toolkit": "file:../packages/toolkit",
+    "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",

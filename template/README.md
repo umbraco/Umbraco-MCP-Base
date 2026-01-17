@@ -1,6 +1,6 @@
 # My Umbraco MCP Server
 
-MCP server template for Umbraco add-ons using the @umbraco-cms/mcp-toolkit.
+MCP server template for Umbraco add-ons using the @umbraco-cms/mcp-server-sdk.
 
 ## Getting Started
 
@@ -85,7 +85,7 @@ import {
   executeGetApiCall,
   CAPTURE_RAW_HTTP_RESPONSE,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 const inputSchema = {
   id: z.string().uuid(),
@@ -116,7 +116,7 @@ import {
   setupTestEnvironment,
   createSnapshotResult,
   createMockRequestHandlerExtra,
-} from "@umbraco-cms/mcp-toolkit/testing";
+} from "@umbraco-cms/mcp-server-sdk/testing";
 
 describe("my-tool", () => {
   setupTestEnvironment();

@@ -7,7 +7,7 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
-import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-toolkit/evals";
+import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-server-sdk/evals";
 
 // Get the directory of this file (works regardless of cwd)
 const __filename = fileURLToPath(import.meta.url);

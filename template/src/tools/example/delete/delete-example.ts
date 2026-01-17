@@ -9,7 +9,7 @@ import {
   executeVoidApiCall,
   CAPTURE_RAW_HTTP_RESPONSE,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 import type { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { deleteItemParams } from "../../../api/generated/exampleApi.zod.js";
 

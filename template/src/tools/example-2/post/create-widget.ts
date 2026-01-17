@@ -9,7 +9,7 @@ import {
   withStandardDecorators,
   createToolResult,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 import { v4 as uuid } from "uuid";
 
 const inputSchema = {

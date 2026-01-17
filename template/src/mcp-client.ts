@@ -39,7 +39,7 @@
  * See `src/tools/chained/get-chained-info.ts` for a complete example.
  */
 
-import { createMcpClientManager } from "@umbraco-cms/mcp-toolkit";
+import { createMcpClientManager } from "@umbraco-cms/mcp-server-sdk";
 import { mcpServers } from "./config/mcp-servers.js";
 
 export const mcpClientManager = createMcpClientManager({

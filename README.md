@@ -1,12 +1,12 @@
-# Umbraco MCP Toolkit
+# Umbraco MCP Server SDK
 
-This monorepo contains the Umbraco MCP (Model Context Protocol) toolkit for building MCP servers that expose Umbraco APIs to AI assistants.
+This monorepo contains the Umbraco MCP (Model Context Protocol) Server SDK for building MCP servers that expose Umbraco APIs to AI assistants.
 
 ## Packages
 
-### [@umbraco-cms/mcp-toolkit](./packages/toolkit)
+### [@umbraco-cms/mcp-server-sdk](./packages/mcp-server-sdk)
 
-The core toolkit package providing:
+The core SDK package providing:
 - Tool result formatting and error handling (ProblemDetails aware)
 - Structured content helpers with type safety
 - Tool decorators (error handling, validation, composition)
@@ -16,7 +16,7 @@ The core toolkit package providing:
 
 **Install from npm:**
 ```bash
-npm install @umbraco-cms/mcp-toolkit
+npm install @umbraco-cms/mcp-server-sdk
 ```
 
 ### [Template](./template)
@@ -24,7 +24,7 @@ npm install @umbraco-cms/mcp-toolkit
 A starter kit for creating new Umbraco MCP server extensions. Copy this folder to start a new project.
 
 **Features:**
-- Pre-configured with `@umbraco-cms/mcp-toolkit`
+- Pre-configured with `@umbraco-cms/mcp-server-sdk`
 - Simple example tool collection
 - Example test with builder pattern
 - Orval integration ready for any Umbraco OpenAPI spec
@@ -39,13 +39,13 @@ A starter kit for creating new Umbraco MCP server extensions. Copy this folder t
 3. Configure Orval for your Umbraco add-on's OpenAPI spec
 4. Add your tool collections
 
-### Building the Toolkit
+### Building the SDK
 
 ```bash
 # Install dependencies
 npm install
 
-# Build the toolkit
+# Build the SDK
 npm run build
 
 # Run tests
@@ -54,7 +54,7 @@ npm run test
 
 ## Who Is This For?
 
-This toolkit is designed for:
+This SDK is designed for:
 
 1. **Umbraco Add-on Developers** - Creating MCP extensions for:
    - Umbraco Commerce
@@ -70,9 +70,9 @@ This toolkit is designed for:
 ## Architecture
 
 ```
-umbraco-mcp-toolkit/
+umbraco-mcp-server-sdk/
 ├── packages/
-│   └── toolkit/           # @umbraco-cms/mcp-toolkit (npm package)
+│   └── mcp-server-sdk/    # @umbraco-cms/mcp-server-sdk (npm package)
 │       ├── src/
 │       │   ├── helpers/   # Tool result, API call, decorators
 │       │   ├── config/    # Collection/slice/mode configuration

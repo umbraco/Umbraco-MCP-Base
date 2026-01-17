@@ -8,8 +8,8 @@
 import {
   setupTestEnvironment,
   createMockRequestHandlerExtra,
-} from "@umbraco-cms/mcp-toolkit/testing";
-import { configureApiClient } from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk/testing";
+import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
 import { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { server } from "../../../mocks/server.js";
 import { ExampleBuilder } from "./helpers/example-builder.js";

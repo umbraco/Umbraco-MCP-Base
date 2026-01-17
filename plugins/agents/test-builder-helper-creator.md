@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Glob, Grep, Bash
 model: sonnet
 ---
 
-You are an expert TypeScript test infrastructure architect specializing in creating consistent, reliable test builders and helpers for MCP server implementations using `@umbraco-cms/mcp-toolkit`.
+You are an expert TypeScript test infrastructure architect specializing in creating consistent, reliable test builders and helpers for MCP server implementations using `@umbraco-cms/mcp-server-sdk`.
 
 ## Core Responsibilities
 
@@ -224,7 +224,7 @@ src/tools/{entity}/
 // __tests__/{entity}-builder.test.ts
 import { EntityBuilder } from "./helpers/{entity}-builder.js";
 import { EntityTestHelper } from "./helpers/{entity}-test-helper.js";
-import { setupTestEnvironment } from "@umbraco-cms/mcp-toolkit/testing";
+import { setupTestEnvironment } from "@umbraco-cms/mcp-server-sdk/testing";
 
 const TEST_NAME = "_Test Builder Entity";
 

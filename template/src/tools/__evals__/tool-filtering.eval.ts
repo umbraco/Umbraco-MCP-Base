@@ -19,7 +19,7 @@ import {
   getShortToolName,
   getDefaultTimeoutMs,
   setupConsoleMock,
-} from "@umbraco-cms/mcp-toolkit/evals";
+} from "@umbraco-cms/mcp-server-sdk/evals";
 
 /**
  * Base env vars required for all filtering tests.

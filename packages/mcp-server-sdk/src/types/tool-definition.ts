@@ -27,6 +27,7 @@ export interface ToolAnnotations {
 /**
  * Generic user model interface for tool enablement checks.
  * Implement this interface to provide user context to tool enabled checks.
+ * Any user model with these optional properties can be used.
  */
 export interface UserModel {
   /** Unique identifier for the user */
@@ -37,8 +38,6 @@ export interface UserModel {
   email?: string;
   /** User's groups or roles */
   groups?: Array<{ id?: string; name?: string }>;
-  /** Additional user properties */
-  [key: string]: unknown;
 }
 
 /**
@@ -48,7 +47,7 @@ export interface UserModel {
  * @example
  * ```typescript
  * // In your project's slice-registry.ts
- * import { baseSliceNames } from "@umbraco-cms/mcp-toolkit";
+ * import { baseSliceNames } from "@umbraco-cms/mcp-server-sdk";
  *
  * export const toolSliceNames = [
  *   ...baseSliceNames,
@@ -75,12 +74,12 @@ export const allBaseSliceNames: readonly string[] = [...baseSliceNames, 'other']
  *
  * @typeParam InputArgs - Zod schema shape for input parameters
  * @typeParam OutputArgs - Zod schema for output validation
- * @typeParam TUser - User model type for enabled checks
+ * @typeParam TUser - User model type for enabled checks (defaults to any for maximum flexibility)
  */
 export interface ToolDefinition<
   InputArgs extends undefined | ZodRawShape = undefined,
   OutputArgs extends undefined | ZodRawShape | ZodType = undefined,
-  TUser = UserModel
+  TUser = any
 > {
   /** Unique tool name */
   name: string;

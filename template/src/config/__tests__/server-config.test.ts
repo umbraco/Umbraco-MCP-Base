@@ -13,7 +13,7 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
 // Mock the toolkit's getServerConfig before importing our module
 const mockGetServerConfig = jest.fn();
-jest.unstable_mockModule("@umbraco-cms/mcp-toolkit", () => ({
+jest.unstable_mockModule("@umbraco-cms/mcp-server-sdk", () => ({
   getServerConfig: mockGetServerConfig,
 }));
 
@@ -210,8 +210,9 @@ describe("Server Config", () => {
     it("should return all custom field definitions", () => {
       const fields = getCustomFieldDefinitions();
 
-      expect(fields).toHaveLength(4);
+      expect(fields).toHaveLength(5);
       expect(fields.map(f => f.name)).toEqual([
+        "disableMcpChaining",
         "experimentalFeatures",
         "customEndpoints",
         "externalApiKey",

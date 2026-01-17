@@ -18,7 +18,7 @@ import {
   createCollectionConfigLoader,
   shouldIncludeTool,
   type CollectionConfiguration,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 // Import the Orval-generated API client
 import { getExampleUmbracoAddOnAPI } from "./api/generated/exampleApi.js";

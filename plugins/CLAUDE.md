@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Plugin Overview
 
-Claude Code plugin providing skills and agents for building Umbraco MCP servers using `@umbraco-cms/mcp-toolkit`. Not published to npm (distributed via Claude Code marketplace).
+Claude Code plugin providing skills and agents for building Umbraco MCP servers using `@umbraco-cms/mcp-server-sdk`. Not published to npm (distributed via Claude Code marketplace).
 
 ## Commands
 
@@ -75,8 +75,8 @@ Tests verify skills and agents produce correct output:
 
 Users install via Claude Code:
 ```bash
-/plugin marketplace add umbraco/umbraco-mcp-toolkit
-/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-toolkit
+/plugin marketplace add umbraco/umbraco-mcp-server-sdk
+/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-server-sdk
 ```
 
 ## Writing Skills

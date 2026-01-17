@@ -1,5 +1,5 @@
 /**
- * @umbraco-cms/mcp-toolkit
+ * @umbraco-cms/mcp-server-sdk
  *
  * Umbraco-specific MCP infrastructure and patterns for building MCP servers
  * that expose Umbraco APIs.

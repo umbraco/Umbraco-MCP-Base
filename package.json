@@ -1,24 +1,25 @@
 {
-  "name": "umbraco-mcp-toolkit-monorepo",
+  "name": "umbraco-mcp-server-sdk-monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "Umbraco MCP Toolkit monorepo",
+  "description": "Umbraco MCP Server SDK monorepo",
   "workspaces": [
     "packages/*",
-    "template"
+    "template",
+    "plugins"
   ],
   "scripts": {
-    "build": "npm run build -w packages/toolkit",
-    "clean": "npm run clean -w packages/toolkit",
-    "compile": "npm run compile -w packages/toolkit",
-    "test": "npm run test -w packages/toolkit"
+    "build": "npm run build -w packages/mcp-server-sdk",
+    "clean": "npm run clean -w packages/mcp-server-sdk",
+    "compile": "npm run compile -w packages/mcp-server-sdk",
+    "test": "npm run test -w packages/mcp-server-sdk"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/umbraco/umbraco-mcp-toolkit.git"
+    "url": "git+https://github.com/umbraco/umbraco-mcp-server-sdk.git"
   },
   "keywords": [
     "Umbraco",

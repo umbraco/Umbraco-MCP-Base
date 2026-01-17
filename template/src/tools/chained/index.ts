@@ -23,7 +23,7 @@
  * See `get-chained-info.ts` for a fully documented example.
  */
 
-import { ToolCollectionExport } from "@umbraco-cms/mcp-toolkit";
+import { ToolCollectionExport } from "@umbraco-cms/mcp-server-sdk";
 import getChainedInfoTool from "./get-chained-info.js";
 
 const collection: ToolCollectionExport = {

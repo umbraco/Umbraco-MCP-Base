@@ -12,7 +12,7 @@
  *   createMcpClientManager,
  *   discoverProxiedTools,
  *   type McpServerConfig
- * } from "@umbraco-cms/mcp-toolkit";
+ * } from "@umbraco-cms/mcp-server-sdk";
  *
  * // Create manager with filter passthrough
  * const manager = createMcpClientManager({

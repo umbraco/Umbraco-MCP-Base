@@ -18,7 +18,7 @@ import {
   runScenarioTest,
   setupConsoleMock,
   getDefaultTimeoutMs,
-} from "@umbraco-cms/mcp-toolkit/evals";
+} from "@umbraco-cms/mcp-server-sdk/evals";
 
 describe("Example CRUD Operations", () => {
   setupConsoleMock();

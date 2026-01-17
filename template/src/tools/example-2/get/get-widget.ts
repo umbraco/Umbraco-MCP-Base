@@ -9,7 +9,7 @@ import {
   withStandardDecorators,
   createToolResult,
   ToolDefinition,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 
 const inputSchema = {
   id: z.uuid().describe("The widget ID"),

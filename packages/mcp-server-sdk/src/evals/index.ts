@@ -9,7 +9,7 @@
  *   configureEvals,
  *   runScenarioTest,
  *   setupConsoleMock
- * } from "@umbraco-cms/mcp-toolkit/evals";
+ * } from "@umbraco-cms/mcp-server-sdk/evals";
  *
  * // Configure before running tests
  * configureEvals({

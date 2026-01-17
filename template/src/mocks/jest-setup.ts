@@ -5,7 +5,7 @@
  * It sets up MSW server globally so it only starts once for all tests.
  */
 
-import { setupMswServer } from "@umbraco-cms/mcp-toolkit/testing";
+import { setupMswServer } from "@umbraco-cms/mcp-server-sdk/testing";
 import { server } from "./server.js";
 import { resetStore } from "./store.js";
 

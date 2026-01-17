@@ -22,7 +22,7 @@ import {
   getApiClient,
   ToolDefinition,
   ToolValidationError,
-} from "@umbraco-cms/mcp-toolkit";
+} from "@umbraco-cms/mcp-server-sdk";
 import type { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { z } from "zod";
 

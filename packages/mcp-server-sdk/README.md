@@ -1,16 +1,16 @@
-# @umbraco-cms/mcp-toolkit
+# @umbraco-cms/mcp-server-sdk
 
 Umbraco-specific MCP infrastructure and patterns for building MCP servers that expose Umbraco APIs.
 
 ## Installation
 
 ```bash
-npm install @umbraco-cms/mcp-toolkit
+npm install @umbraco-cms/mcp-server-sdk
 ```
 
 ## Overview
 
-This toolkit provides reusable infrastructure for building MCP (Model Context Protocol) servers that expose Umbraco APIs to AI assistants. It includes:
+This SDK provides reusable infrastructure for building MCP (Model Context Protocol) servers that expose Umbraco APIs to AI assistants. It includes:
 
 - **Tool result formatting** - Standardized response formatting with ProblemDetails error handling
 - **Tool decorators** - Error handling, validation, and composition patterns
@@ -27,7 +27,7 @@ This toolkit provides reusable infrastructure for building MCP (Model Context Pr
 At application startup, configure the API client provider:
 
 ```typescript
-import { configureApiClient } from '@umbraco-cms/mcp-toolkit';
+import { configureApiClient } from '@umbraco-cms/mcp-server-sdk';
 import { MyApiClient } from './api/client.js';
 
 configureApiClient(() => MyApiClient.getClient());
@@ -42,7 +42,7 @@ import {
   executeGetApiCall,
   CAPTURE_RAW_HTTP_RESPONSE,
   ToolDefinition,
-} from '@umbraco-cms/mcp-toolkit';
+} from '@umbraco-cms/mcp-server-sdk';
 
 const inputSchema = {
   id: z.string().uuid().describe('The item ID'),
@@ -69,7 +69,7 @@ export default withStandardDecorators(getItemTool);
 ### 3. Create Tool Collections
 
 ```typescript
-import { ToolCollectionExport } from '@umbraco-cms/mcp-toolkit';
+import { ToolCollectionExport } from '@umbraco-cms/mcp-server-sdk';
 import getItemTool from './get/get-item.js';
 import createItemTool from './post/create-item.js';
 
@@ -97,7 +97,7 @@ export default collection;
 Creates a standardized MCP tool result with structured content.
 
 ```typescript
-import { createToolResult } from '@umbraco-cms/mcp-toolkit';
+import { createToolResult } from '@umbraco-cms/mcp-server-sdk';
 
 // Success response with data
 return createToolResult({ name: 'Test', id: '123' });
@@ -114,7 +114,7 @@ return createToolResult({ id: '123' }, true, [{ type: 'text', text: 'Created' }]
 Creates an error tool result with ProblemDetails format.
 
 ```typescript
-import { createToolResultError } from '@umbraco-cms/mcp-toolkit';
+import { createToolResultError } from '@umbraco-cms/mcp-server-sdk';
 
 return createToolResultError({
   status: 404,
@@ -132,7 +132,7 @@ return createToolResultError({
 Executes a GET API call with automatic error handling.
 
 ```typescript
-import { executeGetApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-toolkit';
+import { executeGetApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-server-sdk';
 
 return executeGetApiCall((client) =>
   client.getDataTypeById(id, CAPTURE_RAW_HTTP_RESPONSE)
@@ -144,7 +144,7 @@ return executeGetApiCall((client) =>
 Executes a void API call (DELETE, PUT without response body).
 
 ```typescript
-import { executeVoidApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-toolkit';
+import { executeVoidApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-server-sdk';
 
 return executeVoidApiCall((client) =>
   client.deleteDataTypeById(id, CAPTURE_RAW_HTTP_RESPONSE)
@@ -156,7 +156,7 @@ return executeVoidApiCall((client) =>
 Executes a GET API call and wraps the result as `{ items: data }`.
 
 ```typescript
-import { executeGetItemsApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-toolkit';
+import { executeGetItemsApiCall, CAPTURE_RAW_HTTP_RESPONSE } from '@umbraco-cms/mcp-server-sdk';
 
 return executeGetItemsApiCall((client) =>
   client.getTreeAncestors(params, CAPTURE_RAW_HTTP_RESPONSE)
@@ -170,7 +170,7 @@ return executeGetItemsApiCall((client) =>
 Applies all standard decorators: error handling and pre-execution checks.
 
 ```typescript
-import { withStandardDecorators } from '@umbraco-cms/mcp-toolkit';
+import { withStandardDecorators } from '@umbraco-cms/mcp-server-sdk';
 
 export default withStandardDecorators({
   name: 'my-tool',
@@ -190,7 +190,7 @@ Wraps a tool with standardized error handling. Catches errors and converts them 
 Configure a custom pre-execution hook (e.g., for version checking).
 
 ```typescript
-import { configurePreExecutionHook } from '@umbraco-cms/mcp-toolkit';
+import { configurePreExecutionHook } from '@umbraco-cms/mcp-server-sdk';
 
 configurePreExecutionHook(() => {
   if (versionMismatch) {
@@ -211,7 +211,7 @@ configurePreExecutionHook(() => {
 Custom error class for business logic validation errors.
 
 ```typescript
-import { ToolValidationError } from '@umbraco-cms/mcp-toolkit';
+import { ToolValidationError } from '@umbraco-cms/mcp-server-sdk';
 
 throw new ToolValidationError({
   title: 'Invalid Input',
@@ -268,7 +268,7 @@ Valid slice names for tool categorization:
 Creates a configuration loader for collection-based tool filtering.
 
 ```typescript
-import { createCollectionConfigLoader, ToolModeDefinition } from '@umbraco-cms/mcp-toolkit';
+import { createCollectionConfigLoader, ToolModeDefinition } from '@umbraco-cms/mcp-server-sdk';
 
 const modes: ToolModeDefinition[] = [
   {
@@ -289,7 +289,7 @@ const config = loader.loadFromConfig(serverConfig);
 
 ## Testing Utilities
 
-Import from `@umbraco-cms/mcp-toolkit/testing`:
+Import from `@umbraco-cms/mcp-server-sdk/testing`:
 
 ```typescript
 import {
@@ -297,7 +297,7 @@ import {
   createSnapshotResult,
   createMockRequestHandlerExtra,
   BLANK_UUID,
-} from '@umbraco-cms/mcp-toolkit/testing';
+} from '@umbraco-cms/mcp-server-sdk/testing';
 
 describe('my-tool', () => {
   // Handles console.error mocking
@@ -326,14 +326,14 @@ describe('my-tool', () => {
 
 For LLM-based acceptance testing using Claude Agent SDK.
 
-Import from `@umbraco-cms/mcp-toolkit/evals`:
+Import from `@umbraco-cms/mcp-server-sdk/evals`:
 
 ```typescript
 import {
   configureEvals,
   runScenarioTest,
   verifyRequiredToolCalls,
-} from '@umbraco-cms/mcp-toolkit/evals';
+} from '@umbraco-cms/mcp-server-sdk/evals';
 
 // Configure before tests
 configureEvals({
@@ -373,14 +373,15 @@ interface EvalConfig {
 
 ## Subpath Exports
 
-The toolkit provides several subpath exports for tree-shaking:
+The SDK provides several subpath exports for tree-shaking:
 
-- `@umbraco-cms/mcp-toolkit` - Main exports
-- `@umbraco-cms/mcp-toolkit/testing` - Testing utilities
-- `@umbraco-cms/mcp-toolkit/evals` - Eval testing framework
-- `@umbraco-cms/mcp-toolkit/config` - Configuration utilities
-- `@umbraco-cms/mcp-toolkit/helpers` - Helper functions
-- `@umbraco-cms/mcp-toolkit/types` - Type definitions
+- `@umbraco-cms/mcp-server-sdk` - Main exports
+- `@umbraco-cms/mcp-server-sdk/testing` - Testing utilities
+- `@umbraco-cms/mcp-server-sdk/evals` - Eval testing framework
+- `@umbraco-cms/mcp-server-sdk/config` - Configuration utilities
+- `@umbraco-cms/mcp-server-sdk/helpers` - Helper functions
+- `@umbraco-cms/mcp-server-sdk/types` - Type definitions
+- `@umbraco-cms/mcp-server-sdk/constants` - Umbraco well-known IDs
 
 ## Requirements
 

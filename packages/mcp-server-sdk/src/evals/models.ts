@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import { ClaudeModels } from "@umbraco-cms/mcp-toolkit/evals";
+ * import { ClaudeModels } from "@umbraco-cms/mcp-server-sdk/evals";
  *
  * configureEvals({
  *   defaultModel: ClaudeModels.Haiku,

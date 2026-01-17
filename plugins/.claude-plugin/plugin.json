@@ -7,7 +7,7 @@
     "email": "pjw@umbraco.com",
     "url": "https://github.com/hifi-phil"
   },
-  "homepage": "https://github.com/umbraco/umbraco-mcp-toolkit",
+  "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk",
   "license": "MIT",
   "keywords": [
     "mcp",
