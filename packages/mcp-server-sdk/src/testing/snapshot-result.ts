@@ -142,7 +142,7 @@ export function normalizeObject(obj: any, idToReplace?: string, normalizeIdRefs:
     normalized.src = normalized.src.replace(/\/media\/[a-z0-9]+\//i, "/media/NORMALIZED_PATH/");
   }
 
-  // Normalize block results (contentKey) and batch results (name.id)
+  // Normalize block results (contentKey), batch results (id, name.id)
   if (normalized.results && Array.isArray(normalized.results)) {
     normalized.results = normalized.results.map((r: any) => {
       const result: any = { ...r };
@@ -152,7 +152,12 @@ export function normalizeObject(obj: any, idToReplace?: string, normalizeIdRefs:
         result.contentKey = r.contentKey ? BLANK_UUID : undefined;
       }
 
-      // Normalize nested name.id (for batch operations like create-media-multiple)
+      // Normalize direct id field (for batch operations like create-media-multiple)
+      if (r.id && typeof r.id === "string") {
+        result.id = BLANK_UUID;
+      }
+
+      // Normalize nested name.id (for legacy batch operations)
       if (r.name && typeof r.name === "object" && r.name.id) {
         result.name = { ...r.name, id: BLANK_UUID };
       }

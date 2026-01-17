@@ -18,8 +18,8 @@
  * Claude model identifiers for eval tests.
  */
 export const ClaudeModels = {
-  /** Claude 3.5 Haiku - Fast and cost-effective (latest Haiku) */
-  Haiku: "claude-3-5-haiku-20241022",
+  /** Claude 4.5 Haiku - Fast and cost-effective */
+  Haiku: "claude-haiku-4-5-20250514",
 
   /** Claude 4.5 Sonnet - Balanced performance and cost */
   Sonnet: "claude-sonnet-4-5-20250514",

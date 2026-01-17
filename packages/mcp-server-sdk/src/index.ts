@@ -181,3 +181,11 @@ export {
   MEDIA_TYPE_VECTOR_GRAPHICS,
   STANDARD_MEDIA_TYPES,
 } from "./constants/constants.js";
+
+// ============================================================================
+// File Utilities
+// ============================================================================
+
+export {
+  detectFileExtensionFromBuffer,
+} from "./file/detect-file-extension.js";
