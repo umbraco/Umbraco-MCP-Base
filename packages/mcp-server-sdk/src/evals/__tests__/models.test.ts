@@ -9,7 +9,7 @@ import { ClaudeModels } from "../models.js";
 
 describe("ClaudeModels", () => {
   it("should export Haiku model ID", () => {
-    expect(ClaudeModels.Haiku).toBe("claude-3-5-haiku-20241022");
+    expect(ClaudeModels.Haiku).toBe("claude-haiku-4-5-20250514");
   });
 
   it("should export Sonnet model ID", () => {

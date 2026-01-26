@@ -189,3 +189,25 @@ export {
 export {
   detectFileExtensionFromBuffer,
 } from "./file/detect-file-extension.js";
+
+// ============================================================================
+// HTTP Utilities
+// ============================================================================
+
+export {
+  // Singleton exports (recommended for most use cases)
+  UmbracoAxios,
+  initializeUmbracoAxios,
+  isUmbracoAxiosInitialized,
+  clearUmbracoAxiosToken,
+  UmbracoManagementClient,
+  // Factory for advanced use cases
+  createUmbracoAxiosClient,
+  // Orval helpers
+  orvalImportFixer,
+  // Types
+  type UmbracoAxiosAuthConfig,
+  type UmbracoManagementClientOptions,
+  type CreateUmbracoAxiosClientOptions,
+  type UmbracoAxiosClientResult,
+} from "./http/index.js";

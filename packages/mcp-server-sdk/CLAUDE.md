@@ -23,6 +23,7 @@ npm run clean          # Remove dist/
 ```
 src/
 ├── helpers/           # Tool result formatting, API call helpers, decorators
+├── http/              # Axios client, OAuth auth, Orval mutator
 ├── types/             # ToolDefinition, ToolCollectionExport, etc.
 ├── config/            # Server configuration loading (getServerConfig)
 ├── tool-filtering/    # Mode/slice/collection filtering logic
@@ -61,6 +62,12 @@ src/
 - `executeVoidApiCall` - DELETE/PUT/POST without response body
 - `CAPTURE_RAW_HTTP_RESPONSE` - Required option for all API calls
 - `configureApiClient` - Set up the API client provider
+
+**HTTP Client:**
+- `UmbracoAxios` - Pre-configured Axios instance with OAuth
+- `initializeUmbracoAxios` - Initialize with baseUrl, clientId, clientSecret
+- `UmbracoManagementClient` - Orval mutator for generated API clients
+- `createUmbracoAxiosClient` - Factory for custom client instances (advanced)
 
 **Tool Filtering:**
 - `createCollectionConfigLoader` - Load filter config from registries

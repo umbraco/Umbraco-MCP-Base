@@ -40,7 +40,7 @@
  */
 
 import { createMcpClientManager } from "@umbraco-cms/mcp-server-sdk";
-import { mcpServers } from "./config/mcp-servers.js";
+import { mcpServers } from "../config/mcp-servers.js";
 
 export const mcpClientManager = createMcpClientManager({
   // Pass through any filter configuration to chained servers

@@ -4,7 +4,7 @@
  * Types for organizing tools into collections.
  */
 
-import { ToolDefinition, UserModel } from "./tool-definition.js";
+import { ToolDefinition } from "./tool-definition.js";
 
 /**
  * Metadata describing a tool collection.
@@ -23,9 +23,9 @@ export interface ToolCollectionMetadata {
 /**
  * Export interface for a tool collection module.
  *
- * @typeParam TUser - User model type for tool enabled checks
+ * @typeParam TUser - User model type for tool enabled checks (defaults to any)
  */
-export interface ToolCollectionExport<TUser = UserModel> {
+export interface ToolCollectionExport<TUser = any> {
   /** Collection metadata */
   metadata: ToolCollectionMetadata;
   /** Function that returns tools filtered by user permissions */

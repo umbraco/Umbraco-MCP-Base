@@ -8,6 +8,7 @@
 
 import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -21,22 +22,21 @@ import {
 } from "@umbraco-cms/mcp-server-sdk";
 
 // Import the Orval-generated API client
-import { getExampleUmbracoAddOnAPI } from "./api/generated/exampleApi.js";
+import { getExampleUmbracoAddOnAPI } from "./umbraco-api/api/generated/exampleApi.js";
 
 // Import tool collections
-import exampleCollection from "./tools/example/index.js";
-import example2Collection from "./tools/example-2/index.js";
-import chainedCollection from "./tools/chained/index.js";
+import exampleCollection from "./umbraco-api/tools/example/index.js";
+import example2Collection from "./umbraco-api/tools/example-2/index.js";
+import chainedCollection from "./umbraco-api/tools/chained/index.js";
 
 // Import MCP client manager (for chaining to other MCP servers)
-import { mcpClientManager } from "./mcp-client.js";
+import { mcpClientManager } from "./umbraco-api/mcp-client.js";
 
 // Import MCP server chain configuration
 import { mcpServers } from "./config/mcp-servers.js";
 
 // Import registries for tool filtering
-import { allModes, allModeNames, allSliceNames } from "./config/index.js";
-import { loadServerConfig, clearConfigCache } from "./config/server-config.js";
+import { allModes, allModeNames, allSliceNames, loadServerConfig, clearConfigCache } from "./config/index.js";
 
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
@@ -49,7 +49,7 @@ configureApiClient(() => getExampleUmbracoAddOnAPI());
 // Create MCP server
 const server = new McpServer({
   name: "my-umbraco-mcp",
-  version: "1.0.0",
+  version: packageJson.version,
 });
 
 // ============================================================================
