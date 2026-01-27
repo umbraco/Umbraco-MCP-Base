@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-server-sdk",
-  "version": "1.0.0-beta.1",
+  "version": "17.0.0-beta.1",
   "type": "module",
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",
@@ -52,7 +52,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/umbraco/umbraco-mcp-server-sdk.git"
+    "url": "git+https://github.com/umbraco/Umbraco-MCP-Base.git"
   },
   "keywords": [
     "Umbraco",
@@ -63,9 +63,9 @@
   "author": "Umbraco HQ",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/umbraco/umbraco-mcp-server-sdk/issues"
+    "url": "https://github.com/umbraco/Umbraco-MCP-Base/issues"
   },
-  "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk#readme",
+  "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "axios": "^1.8.4",
