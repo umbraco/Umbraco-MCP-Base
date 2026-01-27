@@ -19,7 +19,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/umbraco/umbraco-mcp-server-sdk.git"
+    "url": "git+https://github.com/umbraco/Umbraco-MCP-Base.git"
   },
   "keywords": [
     "Umbraco",

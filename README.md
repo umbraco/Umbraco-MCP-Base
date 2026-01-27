@@ -70,7 +70,7 @@ This SDK is designed for:
 ## Architecture
 
 ```
-umbraco-mcp-server-sdk/
+Umbraco-MCP-Base/
 ├── packages/
 │   └── mcp-server-sdk/    # @umbraco-cms/mcp-server-sdk (npm package)
 │       ├── src/
