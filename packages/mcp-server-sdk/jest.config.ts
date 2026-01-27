@@ -21,6 +21,16 @@ const config: JestConfigWithTsJest = {
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/**/__tests__/**"],
   coverageDirectory: "coverage",
+  reporters: [
+    "default",
+    [
+      "jest-junit",
+      {
+        outputDirectory: ".",
+        outputName: "junit.xml",
+      },
+    ],
+  ],
 };
 
 export default config;

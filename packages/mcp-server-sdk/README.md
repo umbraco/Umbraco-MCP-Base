@@ -90,6 +90,71 @@ export default collection;
 
 ## API Reference
 
+### HTTP Client
+
+The SDK provides a pre-configured Axios client for Umbraco Management API with OAuth authentication.
+
+#### `initializeUmbracoAxios(config)`
+
+Initialize the HTTP client at application startup. Must be called before making API requests.
+
+```typescript
+import { initializeUmbracoAxios } from '@umbraco-cms/mcp-server-sdk';
+
+initializeUmbracoAxios({
+  baseUrl: 'https://localhost:44391',
+  clientId: 'my-client-id',
+  clientSecret: 'my-client-secret'
+});
+```
+
+#### `UmbracoAxios`
+
+Pre-configured Axios instance with:
+- Automatic OAuth token refresh
+- Self-signed certificate support in development
+- Query string serialization for arrays
+- Error logging
+
+```typescript
+import { UmbracoAxios } from '@umbraco-cms/mcp-server-sdk';
+
+// Direct use (after initialization)
+const response = await UmbracoAxios.get('/umbraco/management/api/v1/document');
+```
+
+#### `UmbracoManagementClient`
+
+Orval mutator for generated API clients. Configure in your Orval config:
+
+```typescript
+// orval.config.ts
+export default {
+  myApi: {
+    output: {
+      target: './src/api/client.ts',
+      override: {
+        mutator: {
+          path: '@umbraco-cms/mcp-server-sdk',
+          name: 'UmbracoManagementClient',
+        }
+      }
+    }
+  }
+};
+```
+
+#### `createUmbracoAxiosClient(options)`
+
+Factory for creating isolated client instances (advanced use cases like testing or multiple Umbraco instances).
+
+```typescript
+import { createUmbracoAxiosClient } from '@umbraco-cms/mcp-server-sdk';
+
+const { client, mutator, initialize, clearToken } = createUmbracoAxiosClient();
+initialize({ baseUrl, clientId, clientSecret });
+```
+
 ### Tool Helpers
 
 #### `createToolResult(structuredContent?, includeStructured?, content?)`
@@ -322,6 +387,91 @@ describe('my-tool', () => {
 - `normalizeObject(obj, id?)` - Normalizes a single object
 - `normalizeErrorResponse(obj, id?)` - Normalizes error responses
 
+## MCP Chaining
+
+Chain multiple MCP servers together, enabling internal delegation and tool proxying.
+
+### Basic Usage
+
+```typescript
+import {
+  createMcpClientManager,
+  discoverProxiedTools,
+  proxiedToolsToDefinitions,
+} from '@umbraco-cms/mcp-server-sdk';
+
+// Create manager with filter passthrough
+const manager = createMcpClientManager({
+  filterConfig: { slices: ['read', 'list'] }
+});
+
+// Register a chained MCP server
+manager.registerServer({
+  name: 'cms',
+  command: 'npx',
+  args: ['-y', '@umbraco-cms/mcp-dev'],
+  env: {
+    UMBRACO_BASE_URL: process.env.UMBRACO_BASE_URL,
+    UMBRACO_CLIENT_ID: process.env.UMBRACO_CLIENT_ID,
+    UMBRACO_CLIENT_SECRET: process.env.UMBRACO_CLIENT_SECRET,
+  },
+  proxyTools: true
+});
+
+// Internal delegation - call chained server tools programmatically
+const result = await manager.callTool('cms', 'get-document', { id: '...' });
+
+// Tool proxying - expose chained tools to parent client
+const proxiedTools = await discoverProxiedTools(manager);
+const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
+```
+
+### Proxy Utilities
+
+- `discoverProxiedTools(manager)` - Discover all tools from registered servers
+- `isProxiedToolName(name)` - Check if a tool name is a proxied tool
+- `parseProxiedToolName(name)` - Parse server and tool name from proxied name
+- `createProxyHandler(manager)` - Create a handler for proxied tool calls
+- `proxiedToolsToDefinitions(tools, manager)` - Convert to ToolDefinition array
+
+## Version Check
+
+Verify Umbraco server version compatibility at startup.
+
+```typescript
+import {
+  checkUmbracoVersion,
+  getVersionCheckMessage,
+  clearVersionCheckMessage,
+  isToolExecutionBlocked,
+} from '@umbraco-cms/mcp-server-sdk';
+
+// Check version at startup
+await checkUmbracoVersion({
+  mcpVersion: '16.0.0',
+  client: {
+    getServerInformation: async () => {
+      const response = await api.getServerInformation();
+      return { version: response.version };
+    }
+  }
+});
+
+// Get warning message (if any)
+const message = getVersionCheckMessage();
+if (message) {
+  console.warn(message);
+}
+
+// Check if tools should be blocked
+if (isToolExecutionBlocked()) {
+  // Handle version mismatch
+}
+
+// Clear after user acknowledges
+clearVersionCheckMessage();
+```
+
 ## Eval Testing
 
 For LLM-based acceptance testing using Claude Agent SDK.
@@ -369,6 +519,71 @@ interface EvalConfig {
   defaultTimeout?: number;    // Test timeout in ms
   verbose?: boolean;          // Enable verbose logging
 }
+```
+
+## Server Configuration
+
+Load server configuration from environment variables and CLI arguments.
+
+```typescript
+import { getServerConfig } from '@umbraco-cms/mcp-server-sdk';
+
+const { config, errors, help } = getServerConfig({
+  name: 'my-mcp-server',
+  version: '1.0.0',
+  fields: [
+    { name: 'baseUrl', env: 'UMBRACO_BASE_URL', required: true, type: 'string' },
+    { name: 'clientId', env: 'UMBRACO_CLIENT_ID', required: true, type: 'string' },
+    { name: 'clientSecret', env: 'UMBRACO_CLIENT_SECRET', required: true, type: 'string', secret: true },
+    { name: 'readonly', env: 'UMBRACO_READONLY', type: 'boolean', default: false },
+  ]
+});
+
+if (help) {
+  console.log(help);
+  process.exit(0);
+}
+
+if (errors.length > 0) {
+  console.error('Configuration errors:', errors);
+  process.exit(1);
+}
+
+// config.baseUrl, config.clientId, etc. are now available
+```
+
+## Constants
+
+Well-known Umbraco IDs for common operations.
+
+```typescript
+import {
+  BLANK_UUID,
+  FOLDER_MEDIA_TYPE_ID,
+  IMAGE_MEDIA_TYPE_ID,
+  FILE_MEDIA_TYPE_ID,
+  STANDARD_MEDIA_TYPES,
+} from '@umbraco-cms/mcp-server-sdk';
+
+// Use in tool implementations
+if (STANDARD_MEDIA_TYPES.includes(mediaTypeId)) {
+  // Handle standard media type
+}
+```
+
+Available constants:
+- `BLANK_UUID` - Empty UUID for testing/snapshots
+- Media type IDs: `FOLDER_MEDIA_TYPE_ID`, `IMAGE_MEDIA_TYPE_ID`, `FILE_MEDIA_TYPE_ID`, `VIDEO_MEDIA_TYPE_ID`, `AUDIO_MEDIA_TYPE_ID`, `ARTICLE_MEDIA_TYPE_ID`, `VECTOR_GRAPHICS_MEDIA_TYPE_ID`
+- Data type IDs: `TextString_DATA_TYPE_ID`, `MEDIA_PICKER_DATA_TYPE_ID`, `MEMBER_PICKER_DATA_TYPE_ID`, `TAG_DATA_TYPE_ID`
+- User group IDs: `TRANSLATORS_USER_GROUP_ID`, `WRITERS_USER_GROUP_ID`
+
+## File Utilities
+
+```typescript
+import { detectFileExtensionFromBuffer } from '@umbraco-cms/mcp-server-sdk';
+
+// Detect file extension from binary data
+const extension = detectFileExtensionFromBuffer(buffer); // e.g., 'png', 'jpg', 'pdf'
 ```
 
 ## Subpath Exports
