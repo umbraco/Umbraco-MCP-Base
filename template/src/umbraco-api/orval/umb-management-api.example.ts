@@ -33,8 +33,8 @@ export const UmbManagementApiOrvalConfig = defineConfig({
     output: {
       mode: "split",
       clean: true,
-      target: "./src/api/umbracoManagementAPI",
-      schemas: "./src/api/schemas",
+      target: "./src/umbraco-api/api/umbracoManagementAPI",
+      schemas: "./src/umbraco-api/api/schemas",
       client: "axios",
       override: {
         mutator: {
@@ -59,7 +59,7 @@ export const UmbManagementApiOrvalConfig = defineConfig({
   //   output: {
   //     mode: "split",
   //     client: "zod",
-  //     target: "./src/api/",
+  //     target: "./src/umbraco-api/api/",
   //     fileExtension: ".zod.ts",
   //     override: {
   //       zod: {

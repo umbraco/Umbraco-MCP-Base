@@ -18,37 +18,40 @@ npm run test:evals     # LLM eval tests (requires ANTHROPIC_API_KEY)
 npm run test:all       # Both unit and eval tests
 ```
 
-**Single test:** `node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=src/path/__tests__/file.test.ts`
+**Single test:** `npm test -- --testPathPattern=src/path/__tests__/file.test.ts`
+
+**Always use npm scripts** (`npm run compile`, `npm test`, `npm run build`) — never run `node`, `npx tsc`, or `jest` directly.
 
 ## Source Structure
 
 ```
 src/
-├── api/
-│   ├── client.ts              # API client configuration
-│   └── generated/             # Orval-generated client and Zod schemas
+├── umbraco-api/
+│   ├── api/
+│   │   ├── client.ts          # API client configuration
+│   │   └── generated/         # Orval-generated client and Zod schemas
+│   ├── tools/
+│   │   └── {collection-name}/
+│   │       ├── index.ts       # ToolCollectionExport
+│   │       ├── get/           # GET tools
+│   │       ├── post/          # POST tools
+│   │       ├── put/           # PUT tools
+│   │       ├── delete/        # DELETE tools
+│   │       ├── __tests__/     # Integration tests
+│   │       └── __evals__/     # LLM eval tests
+│   └── mcp-client.ts          # MCP chaining client instance
 ├── config/
 │   ├── index.ts               # Exports all config
 │   ├── server-config.ts       # Custom config field definitions
 │   ├── slice-registry.ts      # Valid slice names
 │   ├── mode-registry.ts       # Mode-to-collection mappings
 │   └── mcp-servers.ts         # Chained MCP server configs
-├── tools/
-│   └── {collection-name}/
-│       ├── index.ts           # ToolCollectionExport
-│       ├── get/               # GET tools
-│       ├── post/              # POST tools
-│       ├── put/               # PUT tools
-│       ├── delete/            # DELETE tools
-│       ├── __tests__/         # Unit tests
-│       └── __evals__/         # LLM eval tests
 ├── mocks/
 │   ├── server.ts              # MSW server setup
 │   ├── handlers.ts            # API mock handlers
 │   ├── store.ts               # In-memory mock data
 │   └── jest-setup.ts          # Test setup file
 ├── testing/                   # Test helpers specific to this project
-├── mcp-client.ts              # MCP chaining client instance
 └── index.ts                   # Server entry point
 ```
 
@@ -90,8 +93,9 @@ Custom fields defined in `config/server-config.ts`.
 
 ## Testing
 
-**Unit tests (`__tests__/`):**
-- Use MSW for API mocking (configured in `mocks/`)
+**Integration tests (`__tests__/`):**
+- Run against the real Umbraco instance — no mocking
+- Require a running Umbraco instance with an API user configured (see below)
 - Call `setupTestEnvironment()` in describe block
 - Use builder pattern for test data (e.g., `ExampleBuilder`)
 - Test tool handlers directly
@@ -102,12 +106,26 @@ Custom fields defined in `config/server-config.ts`.
 - Use `runScenarioTest` with prompt, tools, requiredTools, successPattern
 - Run with `--runInBand` to avoid parallel API calls
 
+## API User Setup
+
+Integration tests require an API user in Umbraco. **You must create this manually via the Umbraco backoffice UI:**
+
+1. Go to **Settings > Users** in the Umbraco backoffice
+2. Create an API user with:
+   - **Client ID:** `umbraco-back-office-mcp`
+   - **Client Secret:** `1234567890`
+3. Grant the user appropriate permissions for the APIs being tested
+4. Add these to your `.env` file:
+   ```
+   UMBRACO_CLIENT_ID=umbraco-back-office-mcp
+   UMBRACO_CLIENT_SECRET=1234567890
+   ```
+
 ## API Client
 
 Uses Orval to generate typed client from OpenAPI spec:
-1. Place OpenAPI spec in `src/api/`
-2. Configure `orval.config.ts`
-3. Run `npm run generate`
-4. Client and Zod schemas generated to `src/api/generated/`
+1. Configure `orval.config.ts` with the Swagger URL
+2. Run `npm run generate`
+3. Client and Zod schemas generated to `src/umbraco-api/api/generated/`
 
 Always pass `CAPTURE_RAW_HTTP_RESPONSE` to API methods when using toolkit helpers.

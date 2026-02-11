@@ -13,6 +13,7 @@
     "compile": "tsc --noEmit",
     "watch": "tsup --config tsup.config.ts --watch",
     "generate": "orval --config orval.config.ts",
+    "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__",
     "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --forceExit",

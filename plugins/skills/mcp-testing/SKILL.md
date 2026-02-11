@@ -1,83 +1,22 @@
 ---
 name: mcp-testing
-description: Load MCP testing patterns for unit tests and eval tests using the @umbraco-cms/mcp-server-sdk. Use when writing tests for MCP tools.
+description: Load MCP eval testing patterns using @umbraco-cms/mcp-server-sdk/evals. Use when writing LLM-based acceptance tests for MCP tools.
 ---
 
-# MCP Testing Patterns
+# MCP Eval Testing Patterns
 
-This skill loads comprehensive testing patterns for MCP tools using `@umbraco-cms/mcp-server-sdk/testing` and `@umbraco-cms/mcp-server-sdk/evals`.
+This skill loads eval testing patterns for MCP tools using `@umbraco-cms/mcp-server-sdk/evals`. Eval tests verify tools work correctly when driven by an LLM agent.
+
+For integration tests, use `/build-tools-tests` instead.
 
 ## When to Use
 
 Use this skill when:
-- Creating unit tests for MCP tools
-- Setting up eval/acceptance tests
-- Understanding test infrastructure
-- Debugging test failures
+- Creating eval/acceptance tests for MCP tools
+- Verifying tools work correctly in LLM-driven workflows
+- Debugging eval test failures
 
-## Unit Testing
-
-### Setup Pattern
-
-```typescript
-import {
-  setupTestEnvironment,
-  createMockRequestHandlerExtra,
-} from "@umbraco-cms/mcp-server-sdk/testing";
-import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
-import { getYourAPI } from "../../api/generated/yourApi.js";
-import yourTool from "../../tools/your-tool.js";
-
-// Enable mock API
-process.env.USE_MOCK_API = "true";
-
-// Configure client (required for helpers)
-configureApiClient(() => getYourAPI());
-
-describe("your-tool", () => {
-  setupTestEnvironment();
-
-  it("should work", async () => {
-    const context = createMockRequestHandlerExtra();
-    const result = await yourTool.handler({ param: "value" }, context);
-
-    expect(result.structuredContent).toBeDefined();
-  });
-});
-```
-
-### Key Testing Utilities
-
-- `setupTestEnvironment()` - Suppresses console.error in tests
-- `createMockRequestHandlerExtra()` - Creates mock MCP context for handler calls
-
-### Test Structure
-
-```
-__tests__/
-└── {entity}/
-    ├── create-{entity}.test.ts
-    ├── get-{entity}.test.ts
-    └── delete-{entity}.test.ts
-```
-
-### Assertions
-
-```typescript
-// Success response
-expect(result.structuredContent).toBeDefined();
-const content = result.structuredContent as any;
-expect(content.fieldName).toBe("expectedValue");
-
-// Error response
-expect(result.isError).toBe(true);
-```
-
-## Eval Testing
-
-Eval tests use an LLM agent to test tools end-to-end.
-
-### Setup
+## Setup
 
 ```typescript
 // __evals__/setup.ts
@@ -95,7 +34,7 @@ configureEvals({
 });
 ```
 
-### Test Pattern
+## Test Pattern
 
 ```typescript
 import "./setup.js";
@@ -125,48 +64,73 @@ describe("entity evals", () => {
 });
 ```
 
-### Running Tests
+## Key Concepts
+
+### runScenarioTest Options
+
+| Option | Purpose |
+|--------|---------|
+| `prompt` | Step-by-step instructions for the LLM |
+| `tools` | Tools available to the LLM agent |
+| `requiredTools` | Tools that must be called for the test to pass |
+| `successPattern` | String the LLM must output to indicate success |
+
+### Writing Good Prompts
+
+- Use numbered step-by-step instructions
+- Be explicit about what to do with results ("get details for the first one")
+- Use unique identifiers with timestamps to avoid collisions
+- End with a specific success phrase ("Say 'Workflow completed'")
+- Search for IDs dynamically — don't hardcode them
+
+### Grouping Related Tools
+
+Group tools that work together in a single eval test to verify the workflow:
+
+```typescript
+it(
+  "should create, list, and delete",
+  runScenarioTest({
+    prompt: `Complete these tasks:
+1. Create a form named "Test Form ${Date.now()}"
+2. List all forms and confirm the new one appears
+3. Delete the form you created
+4. Say "CRUD workflow completed"`,
+    tools: ["create-form", "list-forms", "delete-form"],
+    requiredTools: ["create-form", "list-forms", "delete-form"],
+    successPattern: "CRUD workflow completed",
+  }),
+  getDefaultTimeoutMs()
+);
+```
+
+## Running Eval Tests
 
 ```bash
-# Unit tests
-npm test
-
-# Eval tests (requires build first)
+# Build first (evals run against dist/)
 npm run build
+
+# Run all evals
 npm run test:evals
 
-# Verbose eval output
+# Run specific eval file
+npm run test:evals -- __evals__/entity.eval.ts
+
+# Verbose mode shows full LLM conversation
 E2E_VERBOSITY=verbose npm run test:evals
 ```
 
-## Test Best Practices
+## Best Practices
 
-### Unit Tests
-- Use `TEST_` prefix for constants
-- Each test creates fresh data
-- Clean up after tests if creating real entities
-- Focus on happy path + basic error cases
-- 2-3 tests per tool maximum
-
-### Eval Tests
-- Always build before running
-- Use unique identifiers (timestamps)
-- Clear step-by-step prompts
-- Search for IDs dynamically
-- Enable verbose mode during development
+- Always build before running evals (`npm run build`)
+- Use unique identifiers (timestamps) to avoid test data collisions
+- Clear step-by-step prompts work better than vague instructions
+- Search for IDs dynamically — don't assume IDs exist
+- Enable verbose mode during development to see the full conversation
+- Keep `maxBudgetUsd` low to catch inefficient tool usage
 
 ## Debugging
 
-### Unit Tests
-```bash
-# Run specific test
-npm test -- __tests__/entity/get-entity.test.ts
-
-# With verbose output
-npm test -- --verbose
-```
-
-### Eval Tests
 ```bash
 # Verbose mode shows full conversation
 E2E_VERBOSITY=verbose npm run test:evals
@@ -179,7 +143,8 @@ npm run test:evals -- __evals__/entity.eval.ts
 
 | Issue | Solution |
 |-------|----------|
-| "API client not configured" | Call `configureApiClient()` before tests |
-| Mock not working | Ensure `USE_MOCK_API=true` |
-| Handler not defined | Import tool correctly |
 | Eval timeout | Increase `maxTurns` or simplify prompt |
+| Wrong tool selected | Improve tool description clarity |
+| Missing parameters | Add examples to tool descriptions |
+| Tool not found | Check tool name matches exactly |
+| Budget exceeded | Simplify workflow or increase `maxBudgetUsd` |

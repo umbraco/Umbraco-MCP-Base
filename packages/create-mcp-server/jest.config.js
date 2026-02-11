@@ -1,6 +1,6 @@
 /** @type {import('jest').Config} */
 export default {
-  displayName: "plugins",
+  displayName: "create-mcp-server",
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
@@ -15,10 +15,6 @@ export default {
       },
     ],
   },
-  transformIgnorePatterns: [
-    "node_modules/(?!(@anthropic-ai/claude-agent-sdk)/)",
-  ],
-  testMatch: ["**/__evals__/**/*.eval.ts", "**/__tests__/**/*.test.ts"],
-  testPathIgnorePatterns: ["/node_modules/"],
-  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
+  testMatch: ["**/__tests__/**/*.test.ts"],
+  testPathIgnorePatterns: ["/node_modules/", "/dist/"],
 };
