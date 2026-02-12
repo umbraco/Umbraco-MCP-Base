@@ -24,8 +24,10 @@ plugins/
 │   │   └── SKILL.md       # Testing patterns reference
 │   ├── build-tools/
 │   │   └── SKILL.md       # Tool collection generator
-│   └── build-tools-tests/
-│       └── SKILL.md       # Integration test generator
+│   ├── build-tools-tests/
+│   │   └── SKILL.md       # Integration test generator
+│   └── build-evals/
+│       └── SKILL.md       # Eval test generator
 ├── agents/
 │   ├── mcp-tool-creator.md
 │   ├── mcp-tool-description-writer.md
@@ -50,6 +52,7 @@ Knowledge skills loaded via slash commands:
 | mcp-testing | `/mcp-testing` | Eval test patterns (LLM-driven acceptance tests) |
 | build-tools | `/build-tools` | Generate tool collections from `.discover.json` |
 | build-tools-tests | `/build-tools-tests` | Generate integration tests for tool collections |
+| build-evals | `/build-evals` | Generate LLM eval tests for tool collections |
 
 ## Agents
 

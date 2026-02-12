@@ -113,7 +113,7 @@ describe("runInit", () => {
 
       // Verify evals were removed
       const evalFiles = [...mockFs.files.keys()].filter((k) =>
-        k.includes("__evals__")
+        k.includes("tests/evals")
       );
       expect(evalFiles).toHaveLength(0);
 

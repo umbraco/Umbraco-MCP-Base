@@ -18,26 +18,49 @@ Use this skill when:
 
 ## Setup
 
+Eval tests live in `tests/evals/` with a dedicated Jest config. The setup file is loaded automatically via `setupFilesAfterEnv` — test files do NOT need to import it.
+
+### `tests/evals/helpers/e2e-setup.ts`
+
 ```typescript
-// __evals__/setup.ts
 import path from "path";
-import { configureEvals } from "@umbraco-cms/mcp-server-sdk/evals";
+import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-server-sdk/evals";
 
 configureEvals({
   mcpServerPath: path.resolve(process.cwd(), "dist/index.js"),
   mcpServerName: "my-mcp-server",
   serverEnv: { USE_MOCK_API: "true" },
-  defaultModel: "claude-3-5-haiku-20241022",
+  defaultModel: ClaudeModels.Haiku,
   defaultMaxTurns: 10,
   defaultMaxBudgetUsd: 0.25,
   defaultTimeoutMs: 60000,
 });
 ```
 
+### `tests/evals/jest.config.ts`
+
+```typescript
+import type { Config } from "jest";
+
+const config: Config = {
+  preset: "ts-jest/presets/js-with-ts-esm",
+  testEnvironment: "node",
+  extensionsToTreatAsEsm: [".ts"],
+  rootDir: "../..",
+  testMatch: ["<rootDir>/tests/evals/**/*.test.ts"],
+  setupFilesAfterEnv: ["<rootDir>/tests/evals/helpers/e2e-setup.ts"],
+  maxConcurrency: 1,
+  maxWorkers: 1,
+  testTimeout: 120000,
+};
+
+export default config;
+```
+
 ## Test Pattern
 
 ```typescript
-import "./setup.js";
+// tests/evals/entity-crud.test.ts
 import { describe, it } from "@jest/globals";
 import {
   runScenarioTest,
@@ -114,7 +137,7 @@ npm run build
 npm run test:evals
 
 # Run specific eval file
-npm run test:evals -- __evals__/entity.eval.ts
+npm run test:evals -- --testPathPattern="entity"
 
 # Verbose mode shows full LLM conversation
 E2E_VERBOSITY=verbose npm run test:evals
@@ -136,7 +159,7 @@ E2E_VERBOSITY=verbose npm run test:evals
 E2E_VERBOSITY=verbose npm run test:evals
 
 # Run specific eval file
-npm run test:evals -- __evals__/entity.eval.ts
+npm run test:evals -- --testPathPattern="entity"
 ```
 
 ## Common Issues

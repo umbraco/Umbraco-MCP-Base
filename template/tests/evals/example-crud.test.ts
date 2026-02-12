@@ -12,7 +12,6 @@
  * require a real Umbraco instance.
  */
 
-import "./setup.js"; // Must be first - configures eval framework
 import { describe, it } from "@jest/globals";
 import {
   runScenarioTest,
@@ -48,4 +47,3 @@ Report on each step as you complete it.`,
     timeout
   );
 });
-

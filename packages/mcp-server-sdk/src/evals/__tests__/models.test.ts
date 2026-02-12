@@ -9,15 +9,15 @@ import { ClaudeModels } from "../models.js";
 
 describe("ClaudeModels", () => {
   it("should export Haiku model ID", () => {
-    expect(ClaudeModels.Haiku).toBe("claude-haiku-4-5-20250514");
+    expect(ClaudeModels.Haiku).toBe("claude-haiku-4-5-20251001");
   });
 
   it("should export Sonnet model ID", () => {
-    expect(ClaudeModels.Sonnet).toBe("claude-sonnet-4-5-20250514");
+    expect(ClaudeModels.Sonnet).toBe("claude-sonnet-4-5-20250929");
   });
 
   it("should export Opus model ID", () => {
-    expect(ClaudeModels.Opus).toBe("claude-opus-4-5-20251101");
+    expect(ClaudeModels.Opus).toBe("claude-opus-4-6");
   });
 
   it("should have exactly 3 model entries", () => {
@@ -44,11 +44,11 @@ describe("ClaudeModels", () => {
     expect(ClaudeModels.Opus).toMatch(modelIdPattern);
   });
 
-  it("should have model IDs with date suffixes", () => {
-    const datePattern = /\d{8}$/;
+  it("should have model IDs with date suffixes or version numbers", () => {
+    const suffixPattern = /(\d{8}|[\d.-]+)$/;
 
-    expect(ClaudeModels.Haiku).toMatch(datePattern);
-    expect(ClaudeModels.Sonnet).toMatch(datePattern);
-    expect(ClaudeModels.Opus).toMatch(datePattern);
+    expect(ClaudeModels.Haiku).toMatch(suffixPattern);
+    expect(ClaudeModels.Sonnet).toMatch(suffixPattern);
+    expect(ClaudeModels.Opus).toMatch(suffixPattern);
   });
 });

@@ -14,7 +14,7 @@ npm run compile        # Type-check only
 npm run generate       # Generate API client from OpenAPI spec (Orval)
 npm run inspect        # Run MCP inspector
 npm run test           # Unit tests only
-npm run test:evals     # LLM eval tests (requires ANTHROPIC_API_KEY)
+npm run test:evals     # LLM eval tests (requires Claude Code subscription or ANTHROPIC_API_KEY)
 npm run test:all       # Both unit and eval tests
 ```
 
@@ -37,8 +37,7 @@ src/
 │   │       ├── post/          # POST tools
 │   │       ├── put/           # PUT tools
 │   │       ├── delete/        # DELETE tools
-│   │       ├── __tests__/     # Integration tests
-│   │       └── __evals__/     # LLM eval tests
+│   │       └── __tests__/     # Integration tests
 │   └── mcp-client.ts          # MCP chaining client instance
 ├── config/
 │   ├── index.ts               # Exports all config
@@ -53,6 +52,12 @@ src/
 │   └── jest-setup.ts          # Test setup file
 ├── testing/                   # Test helpers specific to this project
 └── index.ts                   # Server entry point
+tests/
+└── evals/
+    ├── jest.config.ts         # Separate Jest config for evals
+    ├── helpers/
+    │   └── e2e-setup.ts       # configureEvals setup (loaded via setupFilesAfterEnv)
+    └── *.test.ts              # LLM eval test files
 ```
 
 ## Configuration
@@ -100,10 +105,12 @@ Custom fields defined in `config/server-config.ts`.
 - Use builder pattern for test data (e.g., `ExampleBuilder`)
 - Test tool handlers directly
 
-**Eval tests (`__evals__/`):**
+**Eval tests (`tests/evals/`):**
 - LLM-based acceptance tests using Claude Agent SDK
-- Require `ANTHROPIC_API_KEY` environment variable
+- Require Claude Code subscription or `ANTHROPIC_API_KEY`
 - Use `runScenarioTest` with prompt, tools, requiredTools, successPattern
+- Separate Jest config at `tests/evals/jest.config.ts`
+- Setup loaded automatically via `setupFilesAfterEnv` (no per-file import needed)
 - Run with `--runInBand` to avoid parallel API calls
 
 ## API User Setup

@@ -15,7 +15,6 @@
  * instance is required.
  */
 
-import "../example/__evals__/setup.js";
 import { describe, it, expect } from "@jest/globals";
 import {
   runAgentTest,

@@ -218,11 +218,11 @@ describe("removeChaining", () => {
 // ── removeEvals ─────────────────────────────────────────────────────────────
 
 describe("removeEvals", () => {
-  it("should remove __evals__ directories", () => {
+  it("should remove tests/evals directory", () => {
     removeEvals(PROJECT_DIR);
 
     const remaining = [...mockFs.files.keys()].filter((k) =>
-      k.includes("__evals__")
+      k.includes("tests/evals")
     );
     expect(remaining).toHaveLength(0);
   });
@@ -234,15 +234,6 @@ describe("removeEvals", () => {
       mockFs.files.get(path.resolve(PROJECT_DIR, "package.json"))!
     );
     expect(pkg.scripts?.["test:evals"]).toBeUndefined();
-  });
-
-  it("should update jest.config.ts testMatch", () => {
-    removeEvals(PROJECT_DIR);
-
-    const jestConfig = mockFs.files.get(
-      path.resolve(PROJECT_DIR, "jest.config.ts")
-    )!;
-    expect(jestConfig).not.toContain("__evals__");
   });
 
   it("should be idempotent", () => {

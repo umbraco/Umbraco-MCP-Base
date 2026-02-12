@@ -35,16 +35,12 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/umbraco-api/api/openapi.yaml",
   "src/umbraco-api/mcp-client.ts",
   "src/umbraco-api/orval/umb-management-api.example.ts",
-  "src/umbraco-api/tools/__evals__/mcp-chaining.eval.ts",
-  "src/umbraco-api/tools/__evals__/tool-filtering.eval.ts",
   "src/umbraco-api/tools/chained/get-chained-info.ts",
   "src/umbraco-api/tools/chained/index.ts",
   "src/umbraco-api/tools/example-2/get/get-widget.ts",
   "src/umbraco-api/tools/example-2/get/list-widgets.ts",
   "src/umbraco-api/tools/example-2/index.ts",
   "src/umbraco-api/tools/example-2/post/create-widget.ts",
-  "src/umbraco-api/tools/example/__evals__/example-crud.eval.ts",
-  "src/umbraco-api/tools/example/__evals__/setup.ts",
   "src/umbraco-api/tools/example/__tests__/create-example.test.ts",
   "src/umbraco-api/tools/example/__tests__/delete-example.test.ts",
   "src/umbraco-api/tools/example/__tests__/get-example.test.ts",
@@ -61,6 +57,11 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/umbraco-api/tools/example/index.ts",
   "src/umbraco-api/tools/example/post/create-example.ts",
   "src/umbraco-api/tools/example/put/update-example.ts",
+  "tests/evals/example-crud.test.ts",
+  "tests/evals/helpers/e2e-setup.ts",
+  "tests/evals/jest.config.ts",
+  "tests/evals/mcp-chaining.test.ts",
+  "tests/evals/tool-filtering.test.ts",
   "tsconfig.json",
   "tsup.config.ts",
 ]
@@ -227,9 +228,9 @@ exports[`template structure should produce expected package.json for sample proj
     "generate": "orval --config orval.config.ts",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__",
-    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand --forceExit"
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
+    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -245,6 +246,7 @@ exports[`template structure should produce expected package.json for sample proj
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0",
     "axios": "^1.8.4",

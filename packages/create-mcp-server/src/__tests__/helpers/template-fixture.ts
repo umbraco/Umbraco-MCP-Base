@@ -41,10 +41,11 @@ const FIXTURE_FILES = [
   "src/umbraco-api/tools/example-2/index.ts",
   "src/umbraco-api/tools/chained/index.ts",
   "src/umbraco-api/tools/chained/get-chained-info.ts",
-  "src/umbraco-api/tools/example/__evals__/example-crud.eval.ts",
-  "src/umbraco-api/tools/example/__evals__/setup.ts",
-  "src/umbraco-api/tools/__evals__/tool-filtering.eval.ts",
-  "src/umbraco-api/tools/__evals__/mcp-chaining.eval.ts",
+  "tests/evals/jest.config.ts",
+  "tests/evals/helpers/e2e-setup.ts",
+  "tests/evals/example-crud.test.ts",
+  "tests/evals/tool-filtering.test.ts",
+  "tests/evals/mcp-chaining.test.ts",
   "src/testing/mock-mcp-server.ts",
 ];
 

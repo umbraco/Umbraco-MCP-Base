@@ -22,18 +22,26 @@ Every eval test creates a feedback loop. When you run with verbose mode, you'll 
 ## Test Structure
 
 ### Location
+
+All eval tests live in `tests/evals/` with a dedicated Jest config:
+
 ```
-__evals__/
-├── setup.ts           # Eval framework configuration
-└── your-feature.eval.ts
+tests/evals/
+├── jest.config.ts           # Separate Jest config for evals
+├── helpers/
+│   └── e2e-setup.ts         # configureEvals setup (loaded via setupFilesAfterEnv)
+├── entity-crud.test.ts      # Eval test files (*.test.ts)
+└── entity-read.test.ts
 ```
 
-### Setup File Pattern
+### Setup
+
+The setup file at `tests/evals/helpers/e2e-setup.ts` is loaded automatically via `setupFilesAfterEnv` in `jest.config.ts`. Test files do **NOT** need to import it.
 
 ```typescript
-// __evals__/setup.ts
+// tests/evals/helpers/e2e-setup.ts
 import path from "path";
-import { configureEvals } from "@umbraco-cms/mcp-server-sdk/evals";
+import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-server-sdk/evals";
 
 configureEvals({
   mcpServerPath: path.resolve(process.cwd(), "dist/index.js"),
@@ -42,7 +50,7 @@ configureEvals({
     USE_MOCK_API: "true",
     // Add other env vars as needed
   },
-  defaultModel: "claude-3-5-haiku-20241022",
+  defaultModel: ClaudeModels.Haiku,
   defaultMaxTurns: 10,
   defaultMaxBudgetUsd: 0.25,
   defaultTimeoutMs: 60000,
@@ -52,7 +60,7 @@ configureEvals({
 ### Test File Pattern
 
 ```typescript
-import "./setup.js";
+// tests/evals/entity-crud.test.ts
 import { describe, it } from "@jest/globals";
 import {
   runScenarioTest,
@@ -119,6 +127,9 @@ npm run build
 
 # Run eval tests
 npm run test:evals
+
+# Run specific test file
+npm run test:evals -- --testPathPattern="entity"
 
 # Verbose output (see full conversation)
 E2E_VERBOSITY=verbose npm run test:evals

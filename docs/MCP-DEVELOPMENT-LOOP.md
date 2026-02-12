@@ -170,25 +170,24 @@ UMBRACO_CLIENT_SECRET=...
 
 ### Step 5.1: Create Eval Tests
 
-Eval tests verify tools work correctly when used by an LLM:
+Use the `/build-evals` skill to generate eval tests for tool collections:
 
-```typescript
-// __evals__/product-tools.eval.ts
-describe('product tools', () => {
-  it('should list and get products', async () => {
-    const result = await runEvalScenario({
-      prompt: 'List all products, then get details for the first one',
-      tools: ['list-products', 'get-product'],
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toContain('list-products');
-    expect(result.toolCalls).toContain('get-product');
-  });
-});
+```bash
+/build-evals           # Build evals for all collections
+/build-evals form      # Build evals for a single collection
 ```
 
-**Group related tools** in eval tests to verify they work together as expected.
+For each collection, the skill will:
+1. Read existing tool files to understand available operations
+2. Create eval setup (`tests/evals/helpers/e2e-setup.ts`) with API mode detection (mock vs real)
+3. Design workflow scenarios (CRUD lifecycle, read-only, search, hierarchy)
+4. Create eval test files grouping related tools by workflow
+5. Build and run: `npm run build && npm run test:evals`
+6. Iterate on prompts if tests fail
+
+Collections that already have eval test files in `tests/evals/` are skipped.
+
+**Key difference from integration tests:** Eval tests group related tools into workflow scenarios (1-2 files per collection) rather than testing each tool individually.
 
 ### Step 5.2: Evaluate Chaining Value
 
@@ -248,7 +247,7 @@ Common issues revealed by evals:
 - [ ] Constants and env vars configured
 
 ### Phase 5: Evaluation
-- [ ] Eval tests created for tool groups
+- [ ] Eval tests created with `/build-evals` skill
 - [ ] Chaining value assessed
 - [ ] Iterated based on eval feedback
 - [ ] Tool descriptions refined
@@ -264,6 +263,7 @@ Common issues revealed by evals:
 | `/build-tools` skill | 4 | Orchestrates tool generation per collection |
 | `/build-tools-tests` skill | 4 | Orchestrates integration test generation per collection |
 | `/mcp-patterns` | 4 | Tool implementation patterns reference |
+| `/build-evals` skill | 5 | Orchestrates eval test generation per collection |
 | `/mcp-testing` | 4-5 | Testing patterns reference (unit + eval) |
 | `mcp-tool-creator` agent | 4 | Creates tools following patterns |
 | `mcp-tool-reviewer` agent | 4 | Reviews tools for LLM-readiness |

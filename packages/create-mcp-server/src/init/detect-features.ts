@@ -16,25 +16,6 @@ export interface DetectResult {
   features?: ProjectFeatures;
 }
 
-function findEvalsDirectories(dir: string): string[] {
-  const evalsDirs: string[] = [];
-  if (!fs.existsSync(dir)) return evalsDirs;
-
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (entry.name === "__evals__") {
-        evalsDirs.push(path.join(dir, entry.name));
-      } else if (entry.name !== "node_modules" && entry.name !== "dist") {
-        evalsDirs.push(
-          ...findEvalsDirectories(path.join(dir, entry.name))
-        );
-      }
-    }
-  }
-  return evalsDirs;
-}
-
 export function detectFeatures(projectDir: string): DetectResult {
   const resolvedDir = path.resolve(projectDir);
   const result: DetectResult = {
@@ -90,8 +71,7 @@ export function detectFeatures(projectDir: string): DetectResult {
       fs.existsSync(
         path.join(resolvedDir, "src/umbraco-api/tools/example-2")
       ),
-    hasEvals:
-      findEvalsDirectories(path.join(resolvedDir, "src")).length > 0,
+    hasEvals: fs.existsSync(path.join(resolvedDir, "tests/evals")),
   };
 
   return result;
