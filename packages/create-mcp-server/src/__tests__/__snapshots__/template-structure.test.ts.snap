@@ -1,0 +1,272 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`template structure should match the expected file listing 1`] = `
+[
+  ".claude/settings.json",
+  ".env.example",
+  "CLAUDE.md",
+  "README.md",
+  "demo-site/.gitkeep",
+  "jest.config.ts",
+  "jest.setup.ts",
+  "orval.config.ts",
+  "package.json",
+  "scripts/start-umbraco.ps1",
+  "scripts/start-umbraco.sh",
+  "src/auth/auth-policies.ts",
+  "src/auth/index.ts",
+  "src/config/__tests__/server-config.test.ts",
+  "src/config/index.ts",
+  "src/config/mcp-servers.ts",
+  "src/config/mode-registry.ts",
+  "src/config/server-config.ts",
+  "src/config/slice-registry.ts",
+  "src/constants/constants.ts",
+  "src/constants/index.ts",
+  "src/index.ts",
+  "src/mocks/handlers.ts",
+  "src/mocks/jest-setup.ts",
+  "src/mocks/server.ts",
+  "src/mocks/store.ts",
+  "src/testing/mock-mcp-server.ts",
+  "src/umbraco-api/api/client.ts",
+  "src/umbraco-api/api/generated/exampleApi.ts",
+  "src/umbraco-api/api/generated/exampleApi.zod.ts",
+  "src/umbraco-api/api/openapi.yaml",
+  "src/umbraco-api/mcp-client.ts",
+  "src/umbraco-api/orval/umb-management-api.example.ts",
+  "src/umbraco-api/tools/__evals__/mcp-chaining.eval.ts",
+  "src/umbraco-api/tools/__evals__/tool-filtering.eval.ts",
+  "src/umbraco-api/tools/chained/get-chained-info.ts",
+  "src/umbraco-api/tools/chained/index.ts",
+  "src/umbraco-api/tools/example-2/get/get-widget.ts",
+  "src/umbraco-api/tools/example-2/get/list-widgets.ts",
+  "src/umbraco-api/tools/example-2/index.ts",
+  "src/umbraco-api/tools/example-2/post/create-widget.ts",
+  "src/umbraco-api/tools/example/__evals__/example-crud.eval.ts",
+  "src/umbraco-api/tools/example/__evals__/setup.ts",
+  "src/umbraco-api/tools/example/__tests__/create-example.test.ts",
+  "src/umbraco-api/tools/example/__tests__/delete-example.test.ts",
+  "src/umbraco-api/tools/example/__tests__/get-example.test.ts",
+  "src/umbraco-api/tools/example/__tests__/helpers/example-builder.ts",
+  "src/umbraco-api/tools/example/__tests__/helpers/example-test-helper.ts",
+  "src/umbraco-api/tools/example/__tests__/list-examples.test.ts",
+  "src/umbraco-api/tools/example/__tests__/search-examples.test.ts",
+  "src/umbraco-api/tools/example/__tests__/setup.ts",
+  "src/umbraco-api/tools/example/__tests__/update-example.test.ts",
+  "src/umbraco-api/tools/example/delete/delete-example.ts",
+  "src/umbraco-api/tools/example/get/get-example.ts",
+  "src/umbraco-api/tools/example/get/list-examples.ts",
+  "src/umbraco-api/tools/example/get/search-examples.ts",
+  "src/umbraco-api/tools/example/index.ts",
+  "src/umbraco-api/tools/example/post/create-example.ts",
+  "src/umbraco-api/tools/example/put/update-example.ts",
+  "tsconfig.json",
+  "tsup.config.ts",
+]
+`;
+
+exports[`template structure should produce expected README.md for sample project 1`] = `
+"# My-Commerce-MCP
+
+MCP server template for Umbraco add-ons using the @umbraco-cms/mcp-server-sdk.
+
+## Getting Started
+
+### 1. Install Dependencies
+
+\`\`\`bash
+npm install
+\`\`\`
+
+### 2. Configure Environment
+
+Copy \`.env.example\` to \`.env\` and fill in your Umbraco connection details:
+
+\`\`\`bash
+cp .env.example .env
+\`\`\`
+
+### 3. Generate API Client (Optional)
+
+If you have an OpenAPI spec for your add-on:
+
+1. Update \`orval.config.ts\` to point to your spec
+2. Run the generator:
+
+\`\`\`bash
+npm run generate
+\`\`\`
+
+### 4. Build and Test
+
+\`\`\`bash
+# Build the server
+npm run build
+
+# Run tests
+npm test
+
+# Test with MCP Inspector
+npm run inspect
+\`\`\`
+
+## Project Structure
+
+\`\`\`
+├── src/
+│   ├── api/
+│   │   ├── client.ts           # Axios client configuration
+│   │   └── generated/          # Orval-generated API code
+│   ├── tools/
+│   │   └── example/            # Example tool collection
+│   │       ├── get/
+│   │       ├── post/
+│   │       └── index.ts
+│   └── index.ts                # Server entry point
+├── __tests__/
+│   └── example/                # Example tests
+├── package.json
+├── tsconfig.json
+├── tsup.config.ts
+├── jest.config.ts
+├── orval.config.ts
+└── .env.example
+\`\`\`
+
+## Adding Your Own Tools
+
+1. Create a new folder under \`src/tools/\` for your tool collection
+2. Create tool files following the example pattern:
+   - \`get/\` for GET operations
+   - \`post/\` for POST operations
+   - \`put/\` for PUT operations
+   - \`delete/\` for DELETE operations
+3. Create an \`index.ts\` that exports the collection
+4. Register the collection in \`src/index.ts\`
+
+### Tool Pattern Example
+
+\`\`\`typescript
+import { z } from "zod";
+import {
+  withStandardDecorators,
+  executeGetApiCall,
+  CAPTURE_RAW_HTTP_RESPONSE,
+  ToolDefinition,
+} from "@umbraco-cms/mcp-server-sdk";
+
+const inputSchema = {
+  id: z.string().uuid(),
+};
+
+const myTool: ToolDefinition<typeof inputSchema> = {
+  name: "my-tool",
+  description: "Does something useful",
+  inputSchema,
+  slices: ["read"],
+  annotations: { readOnlyHint: true },
+  handler: async ({ id }) => {
+    return executeGetApiCall((client) =>
+      client.getMyItem(id, CAPTURE_RAW_HTTP_RESPONSE)
+    );
+  },
+};
+
+export default withStandardDecorators(myTool);
+\`\`\`
+
+## Testing
+
+Tests use Jest with the MCP toolkit's testing helpers:
+
+\`\`\`typescript
+import {
+  setupTestEnvironment,
+  createSnapshotResult,
+  createMockRequestHandlerExtra,
+} from "@umbraco-cms/mcp-server-sdk/testing";
+
+describe("my-tool", () => {
+  setupTestEnvironment();
+
+  it("should do something", async () => {
+    const result = await myTool.handler({ id: "..." }, createMockRequestHandlerExtra());
+    expect(createSnapshotResult(result)).toMatchSnapshot();
+  });
+});
+\`\`\`
+
+## Publishing
+
+1. Update \`package.json\` with your package name and details
+2. Build: \`npm run build\`
+3. Publish: \`npm publish\`
+
+## License
+
+MIT
+"
+`;
+
+exports[`template structure should produce expected package.json for sample project 1`] = `
+"{
+  "name": "my-commerce-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for My-Commerce-MCP",
+  "main": "dist/index.js",
+  "bin": {
+    "my-commerce-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsup --config tsup.config.ts",
+    "compile": "tsc --noEmit",
+    "watch": "tsup --config tsup.config.ts --watch",
+    "generate": "orval --config orval.config.ts",
+    "start:umbraco": "bash scripts/start-umbraco.sh",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__",
+    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand --forceExit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "Umbraco",
+    "MCP",
+    "Model Context Protocol"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@umbraco-cms/mcp-server-sdk": "^17.0.0",
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0",
+    "uuid": "^11.1.0",
+    "yargs": "^18.0.0",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "@types/uuid": "^10.0.0",
+    "@types/yargs": "^17.0.33",
+    "jest": "^29.7.0",
+    "msw": "^2.12.7",
+    "orval": "^7.8.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.3.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}"
+`;
