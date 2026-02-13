@@ -25,7 +25,13 @@ Read `.discover.json` in the project root for the declared API scope: which coll
 - `src/config/slice-registry.ts` — what slices are defined (CRUD categories, tree, search, publish, etc.)
 - `src/config/mode-registry.ts` — what modes exist and which collections they map to
 
-### 4. Read Tool Descriptions
+### 4. Read Ignored Endpoints
+
+Read `docs/analysis/IGNORED_ENDPOINTS.md` if it exists. This file lists API endpoints that have been **deliberately excluded** from the MCP server — they are not gaps to fill. Common reasons: security implications, import/export functionality unsuitable for MCP, deprecated endpoints, or endpoints with better alternatives.
+
+**Never suggest building tools for ignored endpoints.** These are settled decisions. If the file doesn't exist, the project hasn't categorized its ignored endpoints yet — suggest running `/update-ignored-endpoints` first.
+
+### 5. Read Tool Descriptions
 
 Skim key tool files to assess description quality. Look at the `name`, `description`, `slices`, and `annotations` fields.
 
@@ -39,7 +45,9 @@ Skim key tool files to assess description quality. Look at the `name`, `descript
 
 **Endpoint coverage:** What percentage of discovered API endpoints have corresponding tools? Which collections are complete vs. sparse?
 
-- 80%+ coverage: good foundation, focus on quality improvements
+**Important:** Exclude ignored endpoints from gap calculations. Endpoints listed in `docs/analysis/IGNORED_ENDPOINTS.md` are deliberately out of scope — they are not missing, they are intentionally skipped. Only count unimplemented endpoints that are *not* in the ignored list as actual gaps.
+
+- 80%+ coverage (excluding ignored): good foundation, focus on quality improvements
 - 50-80%: significant gaps, prioritize completing high-value collections
 - <50%: early stage, focus on breadth before depth
 
@@ -82,7 +90,7 @@ Step back from individual tools and ask: what does this MCP *do*?
 
 Prioritization order:
 
-1. **Complete CRUD gaps** in existing collections — highest value because it completes workflows users already have partial access to
+1. **Complete CRUD gaps** in existing collections (excluding ignored endpoints) — highest value because it completes workflows users already have partial access to
 2. **Add list/search tools** where only get-by-id exists — the LLM can't use get-by-id if it doesn't know valid IDs
 3. **Add composite tools** for common multi-step patterns revealed by eval traces — reduces turns and cost
 4. **New collections** for undiscovered API areas — expands capability breadth

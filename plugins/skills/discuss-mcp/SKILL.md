@@ -64,6 +64,8 @@ When advising on MCP improvements, follow these principles:
 
 6. **Iterate, don't overhaul.** Prefer small, measurable improvements over large rewrites. One description fix that drops turns from 5 to 3 is more valuable than a speculative restructuring.
 
+7. **Respect ignored endpoints.** Read `docs/analysis/IGNORED_ENDPOINTS.md` before suggesting new tools. Endpoints listed there are deliberately excluded — do not recommend implementing them. They represent settled decisions about scope.
+
 ## Multiple Topics
 
 If the developer's question spans multiple paths (e.g., "my evals are slow and I think I need composite tools"), read both sub-files and synthesize. Start with the most pressing concern — usually trace optimization reveals whether chaining is actually needed.
