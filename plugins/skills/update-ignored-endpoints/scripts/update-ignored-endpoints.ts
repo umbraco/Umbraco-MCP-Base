@@ -28,6 +28,15 @@ interface CategorizedEndpoints {
   [category: string]: string[];
 }
 
+interface CategorizedResult {
+  /** Endpoints matched to collections in .discover.json */
+  declared: CategorizedEndpoints;
+  /** Endpoints matched to tool directories NOT in .discover.json */
+  undeclared: CategorizedEndpoints;
+  /** Endpoints that didn't match any collection */
+  uncategorized: string[];
+}
+
 /**
  * Title-case a hyphenated collection name.
  * e.g. "document-type" -> "Document Type", "form" -> "Form"
@@ -40,43 +49,61 @@ function titleCase(name: string): string {
 }
 
 /**
- * Categorize ignored endpoints by matching against collection names from .discover.json.
- * Falls back to a single "Uncategorized" group when no manifest exists.
+ * Categorize ignored endpoints by matching against collection names.
+ *
+ * Two-pass matching:
+ * 1. Match against .discover.json collections (declared)
+ * 2. Match remaining against tool directories not in .discover.json (undeclared)
+ * 3. Whatever's left is uncategorized
  */
 function categorizeIgnoredEndpoints(
   allEndpoints: string[],
   toolToEndpointMap: ToolToEndpointMap,
-  manifest: DiscoverManifest | null
-): CategorizedEndpoints {
+  manifest: DiscoverManifest | null,
+  undeclaredCollections: string[]
+): CategorizedResult {
   const implementedEndpoints = new Set(Object.keys(toolToEndpointMap));
   const ignoredEndpoints = allEndpoints.filter(e => !implementedEndpoints.has(e));
 
-  const categories: CategorizedEndpoints = {};
-
   if (!manifest) {
-    // No manifest — put everything in one group
-    categories['Uncategorized'] = ignoredEndpoints.sort();
-    return categories;
+    return { declared: {}, undeclared: {}, uncategorized: ignoredEndpoints.sort() };
   }
 
-  const collectionTokens = buildCollectionTokens(manifest.collections);
+  const declaredTokens = buildCollectionTokens(manifest.collections);
+  const undeclaredTokens = buildCollectionTokens(undeclaredCollections);
+
+  const declared: CategorizedEndpoints = {};
+  const undeclared: CategorizedEndpoints = {};
+  const uncategorized: string[] = [];
 
   for (const endpoint of ignoredEndpoints) {
-    const matched = matchEndpointToCollection(endpoint, collectionTokens);
-    let category = matched ? titleCase(matched) : 'Other';
-
-    if (!categories[category]) {
-      categories[category] = [];
+    // First pass: declared collections
+    const declaredMatch = matchEndpointToCollection(endpoint, declaredTokens);
+    if (declaredMatch) {
+      const category = titleCase(declaredMatch);
+      if (!declared[category]) declared[category] = [];
+      declared[category].push(endpoint);
+      continue;
     }
-    categories[category].push(endpoint);
+
+    // Second pass: undeclared tool directories
+    const undeclaredMatch = matchEndpointToCollection(endpoint, undeclaredTokens);
+    if (undeclaredMatch) {
+      const category = titleCase(undeclaredMatch);
+      if (!undeclared[category]) undeclared[category] = [];
+      undeclared[category].push(endpoint);
+      continue;
+    }
+
+    uncategorized.push(endpoint);
   }
 
-  // Sort endpoints within each category
-  for (const category in categories) {
-    categories[category].sort();
-  }
+  // Sort within each group
+  for (const cat in declared) declared[cat].sort();
+  for (const cat in undeclared) undeclared[cat].sort();
+  uncategorized.sort();
 
-  return categories;
+  return { declared, undeclared, uncategorized };
 }
 
 /**
@@ -133,10 +160,25 @@ function humanizeEndpointName(endpoint: string): string {
 }
 
 /**
+ * Render a list of categorized endpoints as markdown sections.
+ */
+function renderEndpointCategories(lines: string[], categories: CategorizedEndpoints): void {
+  const sorted = Object.keys(categories).sort();
+  for (const category of sorted) {
+    const endpoints = categories[category];
+    lines.push(`### ${category} (${endpoints.length} endpoints)`);
+    for (const endpoint of endpoints) {
+      lines.push(`- \`${endpoint}\` - ${humanizeEndpointName(endpoint)}`);
+    }
+    lines.push('');
+  }
+}
+
+/**
  * Generate the updated IGNORED_ENDPOINTS.md content.
  */
 function generateUpdatedDoc(
-  categories: CategorizedEndpoints,
+  result: CategorizedResult,
   totalIgnored: number,
   existingRationale: string
 ): string {
@@ -148,21 +190,45 @@ function generateUpdatedDoc(
     '- Have security implications',
     '- Are deprecated or have better alternatives',
     '- Are not applicable in the MCP context',
-    '',
-    '## Ignored by Category',
     ''
   ];
 
-  // Sort categories alphabetically
-  const sortedCategories = Object.keys(categories).sort();
-
-  for (const category of sortedCategories) {
-    const endpoints = categories[category];
-    lines.push(`### ${category} (${endpoints.length} endpoints)`);
-    for (const endpoint of endpoints) {
-      lines.push(`- \`${endpoint}\` - ${humanizeEndpointName(endpoint)}`);
-    }
+  // Declared collections (from .discover.json)
+  const declaredCategories = Object.keys(result.declared);
+  if (declaredCategories.length > 0) {
+    lines.push('## Ignored by Collection');
     lines.push('');
+    renderEndpointCategories(lines, result.declared);
+  }
+
+  // Undeclared collections (tool directories not in .discover.json)
+  const undeclaredCategories = Object.keys(result.undeclared);
+  if (undeclaredCategories.length > 0) {
+    lines.push('## Not in .discover.json');
+    lines.push('');
+    lines.push('These endpoints match tool directories not listed in `.discover.json`:');
+    lines.push('');
+    renderEndpointCategories(lines, result.undeclared);
+  }
+
+  // Uncategorized (no match at all), grouped by inferred resource name
+  if (result.uncategorized.length > 0) {
+    lines.push('## Uncategorized');
+    lines.push('');
+    lines.push('These endpoints do not match any known collection:');
+    lines.push('');
+
+    // Group by first word after verb prefix
+    const groups: CategorizedEndpoints = {};
+    for (const endpoint of result.uncategorized) {
+      const withoutVerb = endpoint.replace(/^(get|post|put|delete|create|update|search|patch)/, '');
+      const match = withoutVerb.match(/^([A-Z][a-z]*)/);
+      const group = match ? match[1] : 'Other';
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(endpoint);
+    }
+
+    renderEndpointCategories(lines, groups);
   }
 
   lines.push(`## Total Ignored: ${totalIgnored} endpoints`);
@@ -216,16 +282,36 @@ async function main() {
     console.log('No .discover.json found, endpoints will be uncategorized');
   }
 
+  // Find tool directories not in .discover.json
+  let undeclaredCollections: string[] = [];
+  if (manifest && fs.existsSync(toolsDir)) {
+    const manifestSet = new Set(manifest.collections);
+    const toolDirEntries = fs.readdirSync(toolsDir, { withFileTypes: true });
+    undeclaredCollections = toolDirEntries
+      .filter(e => e.isDirectory() && !manifestSet.has(e.name))
+      .map(e => e.name);
+    if (undeclaredCollections.length > 0) {
+      console.log(`Found ${undeclaredCollections.length} tool directories not in .discover.json: ${undeclaredCollections.join(', ')}`);
+    }
+  }
+
   console.log('\nCategorizing ignored endpoints...');
-  const categories = categorizeIgnoredEndpoints(allEndpoints, toolToEndpointMap, manifest);
-  const totalIgnored = Object.values(categories).reduce((sum, arr) => sum + arr.length, 0);
-  console.log(`Found ${totalIgnored} ignored endpoints across ${Object.keys(categories).length} categories`);
+  const result = categorizeIgnoredEndpoints(allEndpoints, toolToEndpointMap, manifest, undeclaredCollections);
+  const totalIgnored =
+    Object.values(result.declared).reduce((sum, arr) => sum + arr.length, 0) +
+    Object.values(result.undeclared).reduce((sum, arr) => sum + arr.length, 0) +
+    result.uncategorized.length;
+  const categoryCount =
+    Object.keys(result.declared).length +
+    Object.keys(result.undeclared).length +
+    (result.uncategorized.length > 0 ? 1 : 0);
+  console.log(`Found ${totalIgnored} ignored endpoints across ${categoryCount} categories`);
 
   console.log('\nReading existing rationales...');
   const existingRationale = readExistingRationales(ignoredEndpointsFile);
 
   console.log(`\nGenerating updated documentation...`);
-  const updatedContent = generateUpdatedDoc(categories, totalIgnored, existingRationale);
+  const updatedContent = generateUpdatedDoc(result, totalIgnored, existingRationale);
 
   console.log(`Writing to: ${ignoredEndpointsFile}`);
   fs.mkdirSync(path.dirname(ignoredEndpointsFile), { recursive: true });
