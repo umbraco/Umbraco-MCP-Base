@@ -369,6 +369,8 @@ npm run compile    # Full type check
 npm test           # All integration tests
 ```
 
+Then run `/count-mcp-tools` to confirm all collections have tests. All collections should show "yes" in the Tests column. If any show "no", report which collections are missing integration tests.
+
 Report what was generated:
 - Number of collections with tests
 - Number of test files per collection (should be: 1 builder test + 1 per tool)

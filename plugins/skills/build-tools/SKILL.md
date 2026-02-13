@@ -223,6 +223,8 @@ After all collections are built:
 npm run compile    # Full type check
 ```
 
+Then run `/count-mcp-tools` to confirm all collections are covered. All collections from `.discover.json` should show tool count > 0. If any show "Not started", report which collections were missed.
+
 Report what was generated:
 - Number of collections created
 - Number of tools per collection

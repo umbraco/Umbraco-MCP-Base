@@ -347,6 +347,8 @@ npm run build
 npm run test:evals
 ```
 
+Then run `/count-mcp-tools` to confirm all collections have evals. All collections should show "yes" in the Evals column. If any show "no", note which collections are missing eval tests (may be acceptable for some collections).
+
 Report what was generated:
 - Number of collections with eval tests
 - Number of eval test files per collection
