@@ -16,22 +16,32 @@ SHOW_TOOLS=true npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/count-mcp-tools/scripts/cou
 
 This provides: tool counts by collection, gap analysis against `.discover.json`, endpoint coverage percentages, test and eval status.
 
-### 2. Read Discovery Manifest
+### 2. List Chained Server Tools
+
+Discover what tools are available from configured chained MCP servers:
+
+```bash
+npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts
+```
+
+This shows the tools available from chained servers — the building blocks for composite tools. Use `count-tools.ts` for local source-level analysis, `list-chained-tools.ts` for the chained server inventory.
+
+### 3. Read Discovery Manifest
 
 Read `.discover.json` in the project root for the declared API scope: which collections are expected, the Swagger URL, and base URL.
 
-### 3. Read Registries
+### 4. Read Registries
 
 - `src/config/slice-registry.ts` — what slices are defined (CRUD categories, tree, search, publish, etc.)
 - `src/config/mode-registry.ts` — what modes exist and which collections they map to
 
-### 4. Read Ignored Endpoints
+### 5. Read Ignored Endpoints
 
 Read `docs/analysis/IGNORED_ENDPOINTS.md` if it exists. This file lists API endpoints that have been **deliberately excluded** from the MCP server — they are not gaps to fill. Common reasons: security implications, import/export functionality unsuitable for MCP, deprecated endpoints, or endpoints with better alternatives.
 
 **Never suggest building tools for ignored endpoints.** These are settled decisions. If the file doesn't exist, the project hasn't categorized its ignored endpoints yet — suggest running `/update-ignored-endpoints` first.
 
-### 5. Read Tool Descriptions
+### 6. Read Tool Descriptions
 
 Skim key tool files to assess description quality. Look at the `name`, `description`, `slices`, and `annotations` fields.
 

@@ -33,6 +33,27 @@ Local tool that calls one or more tools on chained servers, adding business logi
 **Key source file:**
 - `template/src/umbraco-api/tools/chained/get-chained-info.ts` — working composite example
 
+## Gathering Data
+
+Before discussing chained tool design, discover what tools the chained servers offer:
+
+### List Chained Server Tools
+
+```bash
+npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts
+```
+
+To include input schemas (useful for understanding tool capabilities):
+
+```bash
+SHOW_SCHEMAS=true npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts
+```
+
+This imports the project's `src/config/mcp-servers.ts`, connects to each configured server, and lists all available tools. Use this to understand:
+- What building blocks are available for composite tools
+- Whether proxy tools cover the needed functionality or composites would add value
+- What multi-tool patterns could be simplified into single composite tools
+
 ## Decision Framework
 
 Use this to decide which pattern fits:

@@ -2,7 +2,7 @@
 name: discuss-mcp
 description: Advisory skill for reflecting on and improving an MCP server — trace analysis, chained tool design, and behavioral coverage review.
 user_invocable: true
-allowed-tools: Bash(npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(COLLECTION=* npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(LOG_FILE=* npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/count-mcp-tools/scripts/count-tools.ts*), Bash(SHOW_TOOLS=true npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/count-mcp-tools/scripts/count-tools.ts*)
+allowed-tools: Bash(npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(COLLECTION=* npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(LOG_FILE=* npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/analyze-traces.ts*), Bash(npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/count-mcp-tools/scripts/count-tools.ts*), Bash(SHOW_TOOLS=true npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/count-mcp-tools/scripts/count-tools.ts*), Bash(npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts*), Bash(SHOW_SCHEMAS=true npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts*), Bash(MCP_SERVERS_PATH=* npx tsx ${CLAUDE_PLUGIN_ROOT}/skills/discuss-mcp/scripts/list-chained-tools.ts*)
 ---
 
 # Discuss MCP
