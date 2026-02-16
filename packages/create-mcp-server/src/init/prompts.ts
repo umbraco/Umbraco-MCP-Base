@@ -260,7 +260,7 @@ export async function promptSwaggerUrl(): Promise<string> {
   return url;
 }
 
-export type DatabaseChoice = "localdb" | "connection-string";
+export type DatabaseChoice = "sqlite" | "localdb" | "sqlserver" | "sqlazure";
 
 export interface DatabaseConfig {
   type: DatabaseChoice;
@@ -272,39 +272,49 @@ export async function promptDatabase(): Promise<DatabaseConfig> {
     {
       type: "select",
       name: "choice",
-      message: "SQL Server database for this instance:",
+      message: "Database for this instance:",
       choices: [
+        {
+          title: "SQLite (Recommended)",
+          description: "Embedded database, no setup required",
+          value: "sqlite",
+        },
         {
           title: "LocalDB",
           description: "SQL Server LocalDB (Windows only)",
           value: "localdb",
         },
         {
-          title: "Connection string",
-          description: "Provide a SQL Server connection string (Docker, remote, etc.)",
-          value: "connection-string",
+          title: "SQL Server",
+          description: "Full SQL Server (requires connection string)",
+          value: "sqlserver",
+        },
+        {
+          title: "SQL Azure",
+          description: "Azure SQL Database (requires connection string)",
+          value: "sqlazure",
         },
       ],
     },
     { onCancel }
   );
 
-  if (choice === "connection-string") {
+  if (choice === "sqlserver" || choice === "sqlazure") {
     const { connectionString } = await prompts(
       {
         type: "text",
         name: "connectionString",
-        message: "SQL Server connection string:",
+        message: "Connection string:",
         validate: (value) =>
           value.trim().length > 0 ? true : "Connection string is required",
       },
       { onCancel }
     );
 
-    return { type: "connection-string", connectionString };
+    return { type: choice, connectionString };
   }
 
-  return { type: "localdb" };
+  return { type: choice };
 }
 
 export async function promptInstallPsw(): Promise<boolean> {

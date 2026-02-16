@@ -3,10 +3,13 @@
 exports[`template structure should match the expected file listing 1`] = `
 [
   ".claude/settings.json",
+  ".discover.json",
   ".env.example",
   "CLAUDE.md",
   "README.md",
   "demo-site/.gitkeep",
+  "docs/analysis/IGNORED_ENDPOINTS.md",
+  "docs/analysis/api-endpoints-analysis.md",
   "jest.config.ts",
   "jest.setup.ts",
   "orval.config.ts",
