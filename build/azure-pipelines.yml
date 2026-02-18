@@ -114,7 +114,7 @@ stages:
 
 - stage: Deploy_Npm
   displayName: 'NPM release'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  condition: succeeded()  # TODO: restore main-only gate: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   dependsOn:
     - BuildAndTest
   jobs:
@@ -155,8 +155,8 @@ stages:
             fi
 
             echo "Publishing ${name}@${version} with tag ${tag}"
-            npm publish "${tgz[0]}" --tag "$tag" --access public
-          displayName: Publish SDK to npm
+            npm publish "${tgz[0]}" --tag "$tag" --access public --dry-run
+          displayName: Publish SDK to npm (dry-run)
           workingDirectory: $(Pipeline.Workspace)/sdk-package
 
     - job: PublishCLI
@@ -196,6 +196,6 @@ stages:
             fi
 
             echo "Publishing ${name}@${version} with tag ${tag}"
-            npm publish "${tgz[0]}" --tag "$tag" --access public
-          displayName: Publish CLI to npm
+            npm publish "${tgz[0]}" --tag "$tag" --access public --dry-run
+          displayName: Publish CLI to npm (dry-run)
           workingDirectory: $(Pipeline.Workspace)/cli-package
