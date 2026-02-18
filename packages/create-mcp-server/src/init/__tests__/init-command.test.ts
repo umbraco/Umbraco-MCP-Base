@@ -44,7 +44,7 @@ const mockPromptFeatureChoices = jest.fn<() => Promise<Record<string, boolean>>>
 const mockPromptPackageSelection = jest.fn<() => Promise<string>>();
 const mockGetInstanceLocation = jest.fn<() => { path: string; label: string }>();
 const mockPromptSwaggerUrl = jest.fn<() => Promise<string>>();
-const mockPromptDatabase = jest.fn<() => Promise<{ type: string }>>();
+const mockPromptConnectionString = jest.fn<() => Promise<string>>();
 const mockPromptInstallPsw = jest.fn<() => Promise<boolean>>();
 
 jest.unstable_mockModule("../prompts.js", () => ({
@@ -53,7 +53,7 @@ jest.unstable_mockModule("../prompts.js", () => ({
   promptPackageSelection: mockPromptPackageSelection,
   getInstanceLocation: mockGetInstanceLocation,
   promptSwaggerUrl: mockPromptSwaggerUrl,
-  promptDatabase: mockPromptDatabase,
+  promptConnectionString: mockPromptConnectionString,
   promptInstallPsw: mockPromptInstallPsw,
 }));
 
@@ -196,7 +196,7 @@ describe("runInit", () => {
         path: path.join(PROJECT_DIR, "demo-site"),
         label: "demo-site",
       });
-      mockPromptDatabase.mockResolvedValue({ type: "sqlite" });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
       mockPromptFeatureChoices.mockResolvedValue({
         removeMocks: false,
         removeChaining: false,
@@ -220,7 +220,7 @@ describe("runInit", () => {
           packageName: "Umbraco.Commerce",
           projectName: "demo-site",
           solutionName: "demo-site",
-          databaseType: "SQLite",
+          databaseType: "SQLServer",
         })
       );
 
@@ -249,7 +249,7 @@ describe("runInit", () => {
         path: path.join(PROJECT_DIR, "demo-site"),
         label: "demo-site",
       });
-      mockPromptDatabase.mockResolvedValue({ type: "sqlite" });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
       mockPromptFeatureChoices.mockResolvedValue({
         removeMocks: false,
         removeChaining: false,
@@ -282,7 +282,7 @@ describe("runInit", () => {
         path: path.join(PROJECT_DIR, "demo-site"),
         label: "demo-site",
       });
-      mockPromptDatabase.mockResolvedValue({ type: "sqlite" });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
       mockPromptFeatureChoices.mockResolvedValue({
         removeMocks: false,
         removeChaining: false,
@@ -338,7 +338,7 @@ describe("runInit", () => {
         path: path.join(PROJECT_DIR, "demo-site"),
         label: "demo-site",
       });
-      mockPromptDatabase.mockResolvedValue({ type: "sqlite" });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
       mockPromptFeatureChoices.mockResolvedValue({
         removeMocks: false,
         removeChaining: false,

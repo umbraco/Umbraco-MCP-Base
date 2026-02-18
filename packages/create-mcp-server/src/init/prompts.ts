@@ -260,61 +260,19 @@ export async function promptSwaggerUrl(): Promise<string> {
   return url;
 }
 
-export type DatabaseChoice = "sqlite" | "localdb" | "sqlserver" | "sqlazure";
-
-export interface DatabaseConfig {
-  type: DatabaseChoice;
-  connectionString?: string;
-}
-
-export async function promptDatabase(): Promise<DatabaseConfig> {
-  const { choice } = await prompts(
+export async function promptConnectionString(): Promise<string> {
+  const { connectionString } = await prompts(
     {
-      type: "select",
-      name: "choice",
-      message: "Database for this instance:",
-      choices: [
-        {
-          title: "SQLite (Recommended)",
-          description: "Embedded database, no setup required",
-          value: "sqlite",
-        },
-        {
-          title: "LocalDB",
-          description: "SQL Server LocalDB (Windows only)",
-          value: "localdb",
-        },
-        {
-          title: "SQL Server",
-          description: "Full SQL Server (requires connection string)",
-          value: "sqlserver",
-        },
-        {
-          title: "SQL Azure",
-          description: "Azure SQL Database (requires connection string)",
-          value: "sqlazure",
-        },
-      ],
+      type: "text",
+      name: "connectionString",
+      message: "SQL Server connection string:",
+      validate: (value) =>
+        value.trim().length > 0 ? true : "Connection string is required",
     },
     { onCancel }
   );
 
-  if (choice === "sqlserver" || choice === "sqlazure") {
-    const { connectionString } = await prompts(
-      {
-        type: "text",
-        name: "connectionString",
-        message: "Connection string:",
-        validate: (value) =>
-          value.trim().length > 0 ? true : "Connection string is required",
-      },
-      { onCancel }
-    );
-
-    return { type: choice, connectionString };
-  }
-
-  return { type: choice };
+  return connectionString;
 }
 
 export async function promptInstallPsw(): Promise<boolean> {

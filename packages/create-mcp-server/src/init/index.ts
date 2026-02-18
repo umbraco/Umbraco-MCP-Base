@@ -9,14 +9,13 @@ import { removeEvals } from "./remove-evals.js";
 import { setupInstance } from "./setup-instance.js";
 import { detectPsw, installPsw } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
-import type { DatabaseConfig } from "./prompts.js";
 import {
   promptUmbracoSetup,
   promptFeatureChoices,
   promptPackageSelection,
   getInstanceLocation,
   promptSwaggerUrl,
-  promptDatabase,
+  promptConnectionString,
   promptInstallPsw,
 } from "./prompts.js";
 
@@ -94,12 +93,12 @@ export async function runInit(dir?: string): Promise<void> {
   let packageName: string | undefined;
   let instanceLocation: { path: string; label: string } | undefined;
   let swaggerUrl: string | undefined;
-  let databaseConfig: DatabaseConfig | undefined;
+  let connectionString: string | undefined;
 
   if (umbracoChoice === "create") {
+    connectionString = await promptConnectionString();
     packageName = await promptPackageSelection();
     instanceLocation = getInstanceLocation(projectDir);
-    databaseConfig = await promptDatabase();
   } else if (umbracoChoice === "existing") {
     swaggerUrl = await promptSwaggerUrl();
   }
@@ -120,7 +119,7 @@ export async function runInit(dir?: string): Promise<void> {
       const result = await setupInstance({
         packageName,
         instanceDir: instanceLocation.path,
-        database: databaseConfig,
+        connectionString,
       });
 
       instanceCreated = true;

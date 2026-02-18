@@ -1,37 +1,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { DatabaseConfig } from "./prompts.js";
 import { buildWithPsw } from "./psw-cli.js";
 
 export interface SetupInstanceOptions {
   packageName: string;
   instanceDir: string;
   instanceName?: string;
-  database?: DatabaseConfig;
+  connectionString?: string;
 }
 
 export interface SetupInstanceResult {
   instanceDir: string;
   adminEmail: string;
   adminPassword: string;
-}
-
-/** Map prompt database choices to PSW --database-type values. */
-function mapDatabaseType(db?: DatabaseConfig): string {
-  if (!db) return "SQLite";
-
-  switch (db.type) {
-    case "sqlite":
-      return "SQLite";
-    case "localdb":
-      return "LocalDB";
-    case "sqlserver":
-      return "SQLServer";
-    case "sqlazure":
-      return "SQLAzure";
-    default:
-      return "SQLite";
-  }
 }
 
 export async function setupInstance(
@@ -69,7 +50,8 @@ export async function setupInstance(
     projectName: dirName,
     solutionName: dirName,
     runDir: parentDir,
-    databaseType: mapDatabaseType(opts.database),
+    databaseType: "SQLServer",
+    connectionString: opts.connectionString,
     adminEmail,
     adminPassword,
   });

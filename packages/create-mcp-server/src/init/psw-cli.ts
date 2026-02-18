@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import pc from "picocolors";
 
@@ -14,13 +17,13 @@ export interface PswBuildOptions {
   solutionName: string;
   runDir: string;
   databaseType: string;
+  connectionString?: string;
   adminEmail?: string;
   adminPassword?: string;
 }
 
 export interface PswBuildResult {
   success: boolean;
-  output?: string;
 }
 
 export class PswError extends Error {
@@ -34,6 +37,29 @@ export class PswError extends Error {
 }
 
 /**
+ * Resolve the full path to the PSW executable.
+ * .NET global tools install to ~/.dotnet/tools/ which may not be in PATH.
+ */
+function resolvePswPath(): string {
+  const toolsDir = path.join(os.homedir(), ".dotnet", "tools");
+  const exe = process.platform === "win32" ? "psw.exe" : "psw";
+  const fullPath = path.join(toolsDir, exe);
+  if (fs.existsSync(fullPath)) {
+    return fullPath;
+  }
+  return "psw";
+}
+
+/** Build env with ~/.dotnet/tools on PATH. */
+function buildEnv(): NodeJS.ProcessEnv {
+  const dotnetToolsDir = path.join(os.homedir(), ".dotnet", "tools");
+  return {
+    ...process.env,
+    PATH: `${dotnetToolsDir}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
+}
+
+/**
  * Detect whether PSW CLI is installed as a global dotnet tool.
  */
 export function detectPsw(): PswDetectResult {
@@ -44,7 +70,6 @@ export function detectPsw(): PswDetectResult {
     });
 
     for (const line of output.split("\n")) {
-      // dotnet tool list output: "package-id    version    commands"
       const lower = line.toLowerCase();
       if (lower.includes("packagescriptwriter.cli")) {
         const parts = line.trim().split(/\s+/);
@@ -85,62 +110,58 @@ export function installPsw(): void {
 }
 
 /**
- * Build an Umbraco instance using the PSW CLI.
+ * Build an Umbraco instance using PSW CLI v1.2.0-alpha01.
+ *
+ * Uses `--auto-run --no-run --no-interaction` to have PSW generate and
+ * execute the full installation script (template install, solution, project,
+ * packages) while skipping `dotnet run`.
  *
  * Uses execFileSync to avoid shell injection from user-provided values
  * like connection strings.
  */
 export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
+  const pswPath = resolvePswPath();
+  const env = buildEnv();
+  const cwd = opts.runDir;
+
   const args: string[] = [
-    "-p",
-    opts.packageName,
-    "-n",
-    opts.projectName,
-    "-s",
-    opts.solutionName,
-    "-k",
-    "clean",
+    "-d",
+    "-p", opts.packageName,
+    "-n", opts.projectName,
+    "-s", opts.solutionName,
+    "-k", "clean",
     "-u",
-    "--database-type",
-    opts.databaseType,
-    "--admin-email",
-    opts.adminEmail ?? "admin@test.com",
-    "--admin-password",
-    opts.adminPassword ?? "SecurePass1234",
+    "--database-type", opts.databaseType,
+    "--admin-email", opts.adminEmail ?? "admin@test.com",
+    "--admin-password", opts.adminPassword ?? "SecurePass1234",
     "--auto-run",
+    "--no-run",
     "--no-interaction",
-    "--output",
-    "json",
-    "--run-dir",
-    opts.runDir,
+    ...(opts.connectionString
+      ? ["--connection-string", opts.connectionString]
+      : []),
   ];
 
   console.log(pc.dim(`  $ psw ${args.join(" ")}`));
 
   try {
-    const output = execFileSync("psw", args, {
+    execFileSync(pswPath, args, {
       encoding: "utf-8",
-      timeout: 600_000,
+      timeout: 300_000,
+      stdio: "inherit",
+      cwd,
+      env,
     });
-
-    return { success: true, output };
   } catch (error: unknown) {
     const exitCode =
       error && typeof error === "object" && "status" in error
         ? (error as { status: number }).status
         : 1;
-
-    const messages: Record<number, string> = {
-      2: "PSW validation error — check package names and database type",
-      3: "PSW network error — NuGet or template feed unreachable",
-      4: "PSW execution error — dotnet script failed",
-      5: "PSW filesystem error — check directory permissions",
-    };
-
-    const message =
-      messages[exitCode] ??
-      `PSW failed with exit code ${exitCode}: ${error instanceof Error ? error.message : error}`;
-
-    throw new PswError(message, exitCode);
+    throw new PswError(
+      `PSW failed with exit code ${exitCode}`,
+      exitCode,
+    );
   }
+
+  return { success: true };
 }
