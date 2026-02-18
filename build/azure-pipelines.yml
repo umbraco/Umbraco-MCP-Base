@@ -93,15 +93,6 @@ stages:
     - script: npm test -w $(cliPackagePath)
       displayName: 'Run CLI tests'
 
-    - task: PublishTestResults@2
-      displayName: 'Publish test results'
-      condition: succeededOrFailed()
-      inputs:
-        testResultsFormat: 'JUnit'
-        testResultsFiles: '**/junit.xml'
-        failTaskOnFailedTests: true
-        failTaskOnMissingResultsFile: false
-
     - script: npm pack --pack-destination $(Build.ArtifactStagingDirectory)
       displayName: 'Create NPM package'
       workingDirectory: $(cliPackagePath)
