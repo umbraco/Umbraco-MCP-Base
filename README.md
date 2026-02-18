@@ -19,25 +19,38 @@ The core SDK package providing:
 npm install @umbraco-cms/mcp-server-sdk
 ```
 
+### [create-umbraco-mcp-server](./packages/create-mcp-server)
+
+CLI tool for scaffolding, configuring, and discovering APIs for new MCP server projects. Covers the first three phases of the [development workflow](./docs/CREATE-MCP-SERVER.md):
+
+1. **Create** — scaffold a new project
+2. **Init** — configure Umbraco instance and features
+3. **Discover** — analyze APIs and plan tool collections
+
+```bash
+npx create-umbraco-mcp-server my-mcp-server
+```
+
+### [Claude Code Plugin](./plugins)
+
+Skills and agents for building Umbraco MCP servers in Claude Code. Covers Phases 4-5 of the [development workflow](./docs/CREATE-MCP-SERVER.md) — tool implementation, testing, and LLM evaluation.
+
 ### [Template](./template)
 
-A starter kit for creating new Umbraco MCP server extensions. Copy this folder to start a new project.
-
-**Features:**
-- Pre-configured with `@umbraco-cms/mcp-server-sdk`
-- Simple example tool collection
-- Example test with builder pattern
-- Orval integration ready for any Umbraco OpenAPI spec
-- TypeScript setup with path aliases
+The starter kit bundled by `create-umbraco-mcp-server`. Pre-configured with the SDK, example tools, tests, and Orval integration.
 
 ## Getting Started
 
-### Using the Template
+### Create a New MCP Server
 
-1. Copy the `/template` folder to a new location
-2. Update `package.json` with your project details
-3. Configure Orval for your Umbraco add-on's OpenAPI spec
-4. Add your tool collections
+```bash
+npx create-umbraco-mcp-server my-mcp-server
+cd my-mcp-server
+npm install
+npx create-umbraco-mcp-server init
+```
+
+See the full [development workflow documentation](./docs/CREATE-MCP-SERVER.md) for all five phases.
 
 ### Building the SDK
 
@@ -72,22 +85,32 @@ This SDK is designed for:
 ```
 Umbraco-MCP-Base/
 ├── packages/
-│   └── mcp-server-sdk/    # @umbraco-cms/mcp-server-sdk (npm package)
-│       ├── src/
-│       │   ├── helpers/   # Tool result, API call, decorators
-│       │   ├── config/    # Collection/slice/mode configuration
-│       │   ├── testing/   # Snapshot normalization, test setup
-│       │   ├── evals/     # LLM-based acceptance testing
-│       │   └── types/     # Tool and collection types
-│       └── package.json
+│   ├── mcp-server-sdk/        # @umbraco-cms/mcp-server-sdk (npm package)
+│   │   ├── src/
+│   │   │   ├── helpers/       # Tool result, API call, decorators
+│   │   │   ├── config/        # Collection/slice/mode configuration
+│   │   │   ├── testing/       # Snapshot normalization, test setup
+│   │   │   ├── evals/         # LLM-based acceptance testing
+│   │   │   └── types/         # Tool and collection types
+│   │   └── package.json
+│   │
+│   └── create-mcp-server/     # create-umbraco-mcp-server CLI (npm package)
+│       └── src/
+│           ├── scaffold.ts    # Phase 1: project scaffolding
+│           ├── init/          # Phase 2: instance setup, feature config
+│           └── discover/      # Phase 3: API discovery, client generation
 │
-├── template/              # Starter kit (not published)
+├── plugins/                   # Claude Code skills & agents (not published)
+│   ├── skills/                # /build-tools, /build-evals, /mcp-patterns, etc.
+│   └── agents/                # mcp-tool-creator, mcp-tool-reviewer, etc.
+│
+├── template/                  # Starter kit bundled by create-mcp-server
 │   ├── src/
 │   │   └── tools/
 │   ├── __tests__/
 │   └── package.json
 │
-└── package.json           # Monorepo root
+└── package.json               # Monorepo root
 ```
 
 ## License
