@@ -46,11 +46,12 @@ stages:
       displayName: 'Run tests'
 
     - task: PublishTestResults@2
-      displayName: 'Publish test results'
+      displayName: 'Publish SDK test results'
       condition: succeededOrFailed()
       inputs:
         testResultsFormat: 'JUnit'
-        testResultsFiles: '**/junit.xml'
+        testResultsFiles: '$(sdkPackagePath)/junit.xml'
+        testRunTitle: 'SDK Tests'
         failTaskOnFailedTests: true
         failTaskOnMissingResultsFile: false
 
@@ -94,11 +95,12 @@ stages:
       displayName: 'Run CLI tests'
 
     - task: PublishTestResults@2
-      displayName: 'Publish test results'
+      displayName: 'Publish CLI test results'
       condition: succeededOrFailed()
       inputs:
         testResultsFormat: 'JUnit'
-        testResultsFiles: '**/junit.xml'
+        testResultsFiles: '$(cliPackagePath)/junit.xml'
+        testRunTitle: 'CLI Tests'
         failTaskOnFailedTests: true
         failTaskOnMissingResultsFile: false
 
