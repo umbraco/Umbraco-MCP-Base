@@ -7,15 +7,16 @@ import { removeExamples } from "./remove-examples.js";
 import { removeChaining } from "./remove-chaining.js";
 import { removeEvals } from "./remove-evals.js";
 import { setupInstance } from "./setup-instance.js";
+import { detectPsw, installPsw } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
-import type { DatabaseConfig } from "./prompts.js";
 import {
   promptUmbracoSetup,
   promptFeatureChoices,
   promptPackageSelection,
   getInstanceLocation,
   promptSwaggerUrl,
-  promptDatabase,
+  promptConnectionString,
+  promptInstallPsw,
 } from "./prompts.js";
 
 export async function runInit(dir?: string): Promise<void> {
@@ -62,29 +63,53 @@ export async function runInit(dir?: string): Promise<void> {
   );
 
   // Step 2: Umbraco instance setup
-  const umbracoChoice = await promptUmbracoSetup();
+  let umbracoChoice = await promptUmbracoSetup();
 
-  // Step 3: If creating/existing, gather instance details immediately
+  // Step 3: If creating, ensure PSW CLI is available
+  if (umbracoChoice === "create") {
+    const psw = detectPsw();
+    if (!psw.installed) {
+      const shouldInstall = await promptInstallPsw();
+      if (shouldInstall) {
+        try {
+          installPsw();
+        } catch (error) {
+          console.log(
+            pc.yellow(
+              `\nPSW CLI installation failed: ${error instanceof Error ? error.message : error}`
+            )
+          );
+          console.log(pc.dim("Skipping instance creation.\n"));
+          umbracoChoice = "skip";
+        }
+      } else {
+        console.log(pc.dim("\nSkipping instance creation.\n"));
+        umbracoChoice = "skip";
+      }
+    }
+  }
+
+  // Step 4: If creating/existing, gather instance details
   let packageName: string | undefined;
   let instanceLocation: { path: string; label: string } | undefined;
   let swaggerUrl: string | undefined;
-  let databaseConfig: DatabaseConfig | undefined;
+  let connectionString: string | undefined;
 
   if (umbracoChoice === "create") {
+    connectionString = await promptConnectionString();
     packageName = await promptPackageSelection();
     instanceLocation = getInstanceLocation(projectDir);
-    databaseConfig = await promptDatabase();
   } else if (umbracoChoice === "existing") {
     swaggerUrl = await promptSwaggerUrl();
   }
 
-  // Step 4: Feature questions
+  // Step 5: Feature questions
   console.log();
   const featureChoices = await promptFeatureChoices(features);
 
   console.log(); // blank line before actions
 
-  // Step 5: Execute - build instance
+  // Step 6: Execute - build instance
   let instanceCreated = false;
   if (umbracoChoice === "create" && packageName && instanceLocation) {
     console.log(
@@ -94,7 +119,7 @@ export async function runInit(dir?: string): Promise<void> {
       const result = await setupInstance({
         packageName,
         instanceDir: instanceLocation.path,
-        database: databaseConfig,
+        connectionString,
       });
 
       instanceCreated = true;
@@ -127,7 +152,7 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 6: Apply OpenAPI configuration
+  // Step 7: Apply OpenAPI configuration
   if (swaggerUrl) {
     const updated = configureOpenApi(projectDir, swaggerUrl);
     if (updated) {
@@ -135,7 +160,7 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 7: Apply feature removals
+  // Step 8: Apply feature removals
   if (featureChoices.removeMocks) {
     removeMocks(projectDir);
   }
@@ -149,7 +174,7 @@ export async function runInit(dir?: string): Promise<void> {
     removeEvals(projectDir);
   }
 
-  // Step 8: Summary
+  // Step 9: Summary
   console.log(pc.bold(pc.green("\nConfiguration complete:")));
 
   if (instanceCreated) {

@@ -260,51 +260,19 @@ export async function promptSwaggerUrl(): Promise<string> {
   return url;
 }
 
-export type DatabaseChoice = "localdb" | "connection-string";
-
-export interface DatabaseConfig {
-  type: DatabaseChoice;
-  connectionString?: string;
-}
-
-export async function promptDatabase(): Promise<DatabaseConfig> {
-  const { choice } = await prompts(
+export async function promptConnectionString(): Promise<string> {
+  const { connectionString } = await prompts(
     {
-      type: "select",
-      name: "choice",
-      message: "SQL Server database for this instance:",
-      choices: [
-        {
-          title: "LocalDB",
-          description: "SQL Server LocalDB (Windows only)",
-          value: "localdb",
-        },
-        {
-          title: "Connection string",
-          description: "Provide a SQL Server connection string (Docker, remote, etc.)",
-          value: "connection-string",
-        },
-      ],
+      type: "text",
+      name: "connectionString",
+      message: "SQL Server connection string:",
+      validate: (value) =>
+        value.trim().length > 0 ? true : "Connection string is required",
     },
     { onCancel }
   );
 
-  if (choice === "connection-string") {
-    const { connectionString } = await prompts(
-      {
-        type: "text",
-        name: "connectionString",
-        message: "SQL Server connection string:",
-        validate: (value) =>
-          value.trim().length > 0 ? true : "Connection string is required",
-      },
-      { onCancel }
-    );
-
-    return { type: "connection-string", connectionString };
-  }
-
-  return { type: "localdb" };
+  return connectionString;
 }
 
 export async function promptInstallPsw(): Promise<boolean> {
