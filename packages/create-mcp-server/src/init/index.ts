@@ -38,7 +38,7 @@ export async function runInit(dir?: string): Promise<void> {
     }
     console.log(
       pc.dim(
-        "\nRun 'npx create-umbraco-mcp-server <name>' to create a new project first."
+        "\nRun 'npx @umbraco-cms/create-umbraco-mcp-server <name>' to create a new project first."
       )
     );
     process.exit(1);
@@ -220,7 +220,7 @@ export async function runInit(dir?: string): Promise<void> {
   let step = 1;
   if (instanceCreated) {
     console.log(pc.dim(`  ${step++}. Start the Umbraco instance: npm run start:umbraco`));
-    console.log(pc.dim(`  ${step++}. (in a separate terminal) npx create-umbraco-mcp-server discover`));
+    console.log(pc.dim(`  ${step++}. (in a separate terminal) npx @umbraco-cms/create-umbraco-mcp-server discover`));
   } else if (swaggerUrl) {
     console.log(pc.dim(`  ${step++}. npm run generate`));
   }

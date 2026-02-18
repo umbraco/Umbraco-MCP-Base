@@ -12,12 +12,14 @@ variables:
     value: '22.x'
   - name: sdkPackagePath
     value: 'packages/mcp-server-sdk'
+  - name: cliPackagePath
+    value: 'packages/create-mcp-server'
 
 stages:
 - stage: BuildAndTest
   displayName: 'Build & Test'
   jobs:
-  - job: Build
+  - job: BuildSDK
     displayName: 'Build SDK Package'
     steps:
     - task: NodeTool@0
@@ -57,10 +59,58 @@ stages:
       workingDirectory: $(sdkPackagePath)
 
     - task: PublishPipelineArtifact@1
-      displayName: 'Publish NPM package to artifacts'
+      displayName: 'Publish SDK package to artifacts'
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)'
-        artifact: 'npm-package'
+        artifact: 'sdk-package'
+
+  - job: BuildCLI
+    displayName: 'Build CLI Package'
+    steps:
+    - task: NodeTool@0
+      displayName: 'Use Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: '$(nodeVersion)'
+
+    - task: Cache@2
+      displayName: 'Cache node_modules'
+      inputs:
+        key: 'npm | "$(Agent.OS)" | package-lock.json'
+        restoreKeys: |
+          npm | "$(Agent.OS)"
+          npm
+        path: 'node_modules'
+
+    - script: npm ci
+      displayName: 'Install dependencies'
+
+    - script: npm run build
+      displayName: 'Build SDK (workspace dependency)'
+
+    - script: npm run build -w $(cliPackagePath)
+      displayName: 'Build CLI'
+
+    - script: npm test -w $(cliPackagePath)
+      displayName: 'Run CLI tests'
+
+    - task: PublishTestResults@2
+      displayName: 'Publish test results'
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/junit.xml'
+        failTaskOnFailedTests: true
+        failTaskOnMissingResultsFile: false
+
+    - script: npm pack --pack-destination $(Build.ArtifactStagingDirectory)
+      displayName: 'Create NPM package'
+      workingDirectory: $(cliPackagePath)
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish CLI package to artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'cli-package'
 
 - stage: Deploy_Npm
   displayName: 'NPM release'
@@ -68,8 +118,8 @@ stages:
   dependsOn:
     - BuildAndTest
   jobs:
-    - job: Publish
-      displayName: Push to NPM
+    - job: PublishSDK
+      displayName: Publish SDK to NPM
       steps:
         - checkout: self
         - task: NodeTool@0
@@ -77,38 +127,75 @@ stages:
           inputs:
             versionSpec: '$(nodeVersion)'
         - download: current
-          artifact: 'npm-package'
+          artifact: 'sdk-package'
         - bash: echo "@umbraco-cms:registry=https://registry.npmjs.org" >> .npmrc
-          workingDirectory: $(Pipeline.Workspace)/npm-package
+          workingDirectory: $(Pipeline.Workspace)/sdk-package
           displayName: Add scoped registry to .npmrc
         - task: npmAuthenticate@0
           displayName: Authenticate with npm
           inputs:
-            workingFile: $(Pipeline.Workspace)/npm-package/.npmrc
+            workingFile: $(Pipeline.Workspace)/sdk-package/.npmrc
             customEndpoint: "NPM - Umbraco Backoffice"
         - script: |
-            # Setup temp npm project to load in defaults from the local .npmrc
             npm init -y
-
-            # Find the first .tgz file in the current directory
-            files=( ./*.tgz )
-
-            # Extract version from package.json in the tarball
-            tar -tf "${files[0]}" | grep package/package.json | head -1 | xargs tar -xf "${files[0]}" --strip-components=1
+            tgz=(*.tgz)
+            tar -xf "${tgz[0]}" --strip-components=1 package/package.json
+            name=$(node -p "require('./package.json').name")
             version=$(node -p "require('./package.json').version")
 
-            # Determine tag based on version
-            if [[ "${version}" == *"alpha"* ]]; then
-              tag="alpha"
-            elif [[ "${version}" == *"beta"* ]]; then
-              tag="beta"
-            elif [[ "${version}" == *"rc"* ]]; then
-              tag="rc"
-            else
-              tag="latest"
+            if npm view "${name}@${version}" version 2>/dev/null; then
+              echo "##[warning]Skipping ${name}@${version} — already published"
+              exit 0
             fi
 
-            echo "Publishing version ${version} with tag ${tag}"
-            npm publish "${files[0]}" --tag $tag --access public
-          displayName: Push to npm with dynamic tagging
-          workingDirectory: $(Pipeline.Workspace)/npm-package
+            if [[ "$version" == *"alpha"* ]]; then tag="alpha"
+            elif [[ "$version" == *"beta"* ]]; then tag="beta"
+            elif [[ "$version" == *"rc"* ]]; then tag="rc"
+            else tag="latest"
+            fi
+
+            echo "Publishing ${name}@${version} with tag ${tag}"
+            npm publish "${tgz[0]}" --tag "$tag" --access public
+          displayName: Publish SDK to npm
+          workingDirectory: $(Pipeline.Workspace)/sdk-package
+
+    - job: PublishCLI
+      displayName: Publish CLI to NPM
+      steps:
+        - checkout: self
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: 'cli-package'
+        - bash: echo "@umbraco-cms:registry=https://registry.npmjs.org" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/cli-package
+          displayName: Add scoped registry to .npmrc
+        - task: npmAuthenticate@0
+          displayName: Authenticate with npm
+          inputs:
+            workingFile: $(Pipeline.Workspace)/cli-package/.npmrc
+            customEndpoint: "NPM - Umbraco Backoffice"
+        - script: |
+            npm init -y
+            tgz=(*.tgz)
+            tar -xf "${tgz[0]}" --strip-components=1 package/package.json
+            name=$(node -p "require('./package.json').name")
+            version=$(node -p "require('./package.json').version")
+
+            if npm view "${name}@${version}" version 2>/dev/null; then
+              echo "##[warning]Skipping ${name}@${version} — already published"
+              exit 0
+            fi
+
+            if [[ "$version" == *"alpha"* ]]; then tag="alpha"
+            elif [[ "$version" == *"beta"* ]]; then tag="beta"
+            elif [[ "$version" == *"rc"* ]]; then tag="rc"
+            else tag="latest"
+            fi
+
+            echo "Publishing ${name}@${version} with tag ${tag}"
+            npm publish "${tgz[0]}" --tag "$tag" --access public
+          displayName: Publish CLI to npm
+          workingDirectory: $(Pipeline.Workspace)/cli-package

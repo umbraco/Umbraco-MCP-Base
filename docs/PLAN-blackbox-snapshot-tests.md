@@ -1,8 +1,8 @@
-# Black-Box & Snapshot Testing for create-umbraco-mcp-server
+# Black-Box & Snapshot Testing for @umbraco-cms/create-umbraco-mcp-server
 
 ## Context
 
-The `create-umbraco-mcp-server` CLI has three commands (scaffold, init, discover) with good test coverage of individual module functions, but the tests are slow because they scaffold real projects via `execSync` (30s timeouts). The command orchestrators (`runInit`, `runDiscover`, `main`) have zero test coverage. We want fast, deterministic black-box tests that mock at the edges (fs, prompts, fetch, execSync) and snapshot tests to catch unintended template changes.
+The `@umbraco-cms/create-umbraco-mcp-server` CLI has three commands (scaffold, init, discover) with good test coverage of individual module functions, but the tests are slow because they scaffold real projects via `execSync` (30s timeouts). The command orchestrators (`runInit`, `runDiscover`, `main`) have zero test coverage. We want fast, deterministic black-box tests that mock at the edges (fs, prompts, fetch, execSync) and snapshot tests to catch unintended template changes.
 
 ## Approach
 

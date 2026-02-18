@@ -9,7 +9,7 @@ if [ ! -f "$SITE_DIR"/*.csproj ] 2>/dev/null; then
   echo "No Umbraco instance found in demo-site/"
   echo ""
   echo "Create one with:"
-  echo "  npx create-umbraco-mcp-server init"
+  echo "  npx @umbraco-cms/create-umbraco-mcp-server init"
   exit 1
 fi
 

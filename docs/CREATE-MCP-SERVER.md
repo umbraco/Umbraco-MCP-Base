@@ -16,7 +16,7 @@ A CLI toolkit and Claude Code plugin for building MCP servers that expose Umbrac
 Scaffold a new MCP server project.
 
 ```bash
-npx create-umbraco-mcp-server my-mcp-server
+npx @umbraco-cms/create-umbraco-mcp-server my-mcp-server
 ```
 
 This creates a ready-to-go project structure:
@@ -31,7 +31,7 @@ This creates a ready-to-go project structure:
 ```
 cd my-mcp-server
 npm install
-npx create-umbraco-mcp-server init
+npx @umbraco-cms/create-umbraco-mcp-server init
 ```
 
 ---
@@ -41,7 +41,7 @@ npx create-umbraco-mcp-server init
 Configure the project and optionally create an Umbraco instance.
 
 ```bash
-npx create-umbraco-mcp-server init
+npx @umbraco-cms/create-umbraco-mcp-server init
 ```
 
 ### Umbraco Instance Setup
@@ -71,7 +71,7 @@ For each detected feature, you choose to keep or remove:
 
 ```
 1. Start the Umbraco instance: npm run start:umbraco
-2. (in a separate terminal) npx create-umbraco-mcp-server discover
+2. (in a separate terminal) npx @umbraco-cms/create-umbraco-mcp-server discover
 ```
 
 ---
@@ -81,7 +81,7 @@ For each detected feature, you choose to keep or remove:
 Analyze a running Umbraco instance's APIs and plan tool collections.
 
 ```bash
-npx create-umbraco-mcp-server discover
+npx @umbraco-cms/create-umbraco-mcp-server discover
 ```
 
 **Prerequisite:** The Umbraco instance must be running.

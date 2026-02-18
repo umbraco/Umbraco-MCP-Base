@@ -1,5 +1,5 @@
 {
-  "name": "create-umbraco-mcp-server",
+  "name": "@umbraco-cms/create-umbraco-mcp-server",
   "version": "17.0.0-beta.1",
   "type": "module",
   "description": "Create a new Umbraco MCP server project",

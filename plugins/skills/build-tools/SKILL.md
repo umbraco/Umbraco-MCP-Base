@@ -1,6 +1,6 @@
 ---
 name: build-tools
-description: Build MCP tool collections from discovered API groups. Reads .discover.json and generates tools and collection registrations. Use after running 'npx create-umbraco-mcp-server discover'.
+description: Build MCP tool collections from discovered API groups. Reads .discover.json and generates tools and collection registrations. Use after running 'npx @umbraco-cms/create-umbraco-mcp-server discover'.
 user_invocable: true
 ---
 
@@ -13,7 +13,7 @@ Generate MCP tool collections from the API groups selected during discovery. Thi
 ## Prerequisites
 
 Before running, ensure:
-1. You have run `npx create-umbraco-mcp-server discover` (`.discover.json` exists)
+1. You have run `npx @umbraco-cms/create-umbraco-mcp-server discover` (`.discover.json` exists)
 2. The API client has been generated (`src/umbraco-api/api/generated/` directory exists — if not, run `npm run generate`)
 
 ## Arguments
@@ -48,7 +48,7 @@ Read `.discover.json` from the project root:
 }
 ```
 
-If an argument was provided, filter to only that collection. If `.discover.json` doesn't exist, tell the user to run `npx create-umbraco-mcp-server discover` first.
+If an argument was provided, filter to only that collection. If `.discover.json` doesn't exist, tell the user to run `npx @umbraco-cms/create-umbraco-mcp-server discover` first.
 
 ### Step 1: Check Generated Client
 

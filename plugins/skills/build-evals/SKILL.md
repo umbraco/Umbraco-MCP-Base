@@ -65,7 +65,7 @@ Read `.discover.json` from the project root:
 }
 ```
 
-If an argument was provided, filter to only that collection. If `.discover.json` doesn't exist, tell the user to run `npx create-umbraco-mcp-server discover` first.
+If an argument was provided, filter to only that collection. If `.discover.json` doesn't exist, tell the user to run `npx @umbraco-cms/create-umbraco-mcp-server discover` first.
 
 ### Step 1: Check Prerequisites
 

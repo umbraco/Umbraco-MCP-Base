@@ -23,7 +23,7 @@ Each phase builds on the previous. The goal is to create a lean, well-tested MCP
 Use the scaffolding CLI to create a new MCP server project:
 
 ```bash
-npx create-umbraco-mcp-server my-mcp-server
+npx @umbraco-cms/create-umbraco-mcp-server my-mcp-server
 cd my-mcp-server
 npm install
 ```
@@ -43,7 +43,7 @@ This creates a project with:
 Run the init command to configure the project and optionally create an Umbraco instance:
 
 ```bash
-npx create-umbraco-mcp-server init
+npx @umbraco-cms/create-umbraco-mcp-server init
 ```
 
 This wizard helps you:
@@ -69,7 +69,7 @@ npm run start:umbraco
 With the Umbraco instance running, use the `discover` command to automate API discovery, client generation, and planning:
 
 ```bash
-npx create-umbraco-mcp-server discover
+npx @umbraco-cms/create-umbraco-mcp-server discover
 ```
 
 This interactive command will:
@@ -225,7 +225,7 @@ Common issues revealed by evals:
 ## Summary Checklist
 
 ### Phase 1: Create
-- [ ] Scaffolded project with `create-umbraco-mcp-server`
+- [ ] Scaffolded project with `@umbraco-cms/create-umbraco-mcp-server`
 
 ### Phase 2: Init
 - [ ] Ran `init` to configure project and create Umbraco instance
@@ -233,7 +233,7 @@ Common issues revealed by evals:
 
 ### Phase 3: Discovery & Planning
 - [ ] Umbraco instance running with package installed
-- [ ] Ran `create-umbraco-mcp-server discover` to analyze APIs
+- [ ] Ran `@umbraco-cms/create-umbraco-mcp-server discover` to analyze APIs
 - [ ] API client generated with Orval
 - [ ] Discovery report reviewed (groups, operations, slices, permissions)
 - [ ] Mode and slice registries updated
@@ -258,8 +258,8 @@ Common issues revealed by evals:
 
 | Resource | Phase | Purpose |
 |----------|-------|---------|
-| `create-umbraco-mcp-server init` | 2 | Project setup and configuration |
-| `create-umbraco-mcp-server discover` | 3 | API discovery, client generation, and planning |
+| `@umbraco-cms/create-umbraco-mcp-server init` | 2 | Project setup and configuration |
+| `@umbraco-cms/create-umbraco-mcp-server discover` | 3 | API discovery, client generation, and planning |
 | `/build-tools` skill | 4 | Orchestrates tool generation per collection |
 | `/build-tools-tests` skill | 4 | Orchestrates integration test generation per collection |
 | `/mcp-patterns` | 4 | Tool implementation patterns reference |

@@ -19,7 +19,7 @@ The core SDK package providing:
 npm install @umbraco-cms/mcp-server-sdk
 ```
 
-### [create-umbraco-mcp-server](./packages/create-mcp-server)
+### [@umbraco-cms/create-umbraco-mcp-server](./packages/create-mcp-server)
 
 CLI tool for scaffolding, configuring, and discovering APIs for new MCP server projects. Covers the first three phases of the [development workflow](./docs/CREATE-MCP-SERVER.md):
 
@@ -28,7 +28,7 @@ CLI tool for scaffolding, configuring, and discovering APIs for new MCP server p
 3. **Discover** — analyze APIs and plan tool collections
 
 ```bash
-npx create-umbraco-mcp-server my-mcp-server
+npx @umbraco-cms/create-umbraco-mcp-server my-mcp-server
 ```
 
 ### [Claude Code Plugin](./plugins)
@@ -37,17 +37,17 @@ Skills and agents for building Umbraco MCP servers in Claude Code. Covers Phases
 
 ### [Template](./template)
 
-The starter kit bundled by `create-umbraco-mcp-server`. Pre-configured with the SDK, example tools, tests, and Orval integration.
+The starter kit bundled by `@umbraco-cms/create-umbraco-mcp-server`. Pre-configured with the SDK, example tools, tests, and Orval integration.
 
 ## Getting Started
 
 ### Create a New MCP Server
 
 ```bash
-npx create-umbraco-mcp-server my-mcp-server
+npx @umbraco-cms/create-umbraco-mcp-server my-mcp-server
 cd my-mcp-server
 npm install
-npx create-umbraco-mcp-server init
+npx @umbraco-cms/create-umbraco-mcp-server init
 ```
 
 See the full [development workflow documentation](./docs/CREATE-MCP-SERVER.md) for all five phases.
@@ -94,7 +94,7 @@ Umbraco-MCP-Base/
 │   │   │   └── types/         # Tool and collection types
 │   │   └── package.json
 │   │
-│   └── create-mcp-server/     # create-umbraco-mcp-server CLI (npm package)
+│   └── create-mcp-server/     # @umbraco-cms/create-umbraco-mcp-server CLI (npm package)
 │       └── src/
 │           ├── scaffold.ts    # Phase 1: project scaffolding
 │           ├── init/          # Phase 2: instance setup, feature config

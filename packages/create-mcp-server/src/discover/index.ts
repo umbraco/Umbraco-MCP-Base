@@ -38,7 +38,7 @@ export async function runDiscover(dir?: string): Promise<void> {
     }
     console.log(
       pc.dim(
-        "\nRun 'npx create-umbraco-mcp-server <name>' to create a new project first."
+        "\nRun 'npx @umbraco-cms/create-umbraco-mcp-server <name>' to create a new project first."
       )
     );
     process.exit(1);

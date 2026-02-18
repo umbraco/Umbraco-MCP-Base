@@ -1,4 +1,4 @@
-# create-umbraco-mcp-server
+# @umbraco-cms/create-umbraco-mcp-server
 
 Scaffold a new Umbraco MCP server project.
 
@@ -6,13 +6,13 @@ Scaffold a new Umbraco MCP server project.
 
 ```bash
 # With project name
-npx create-umbraco-mcp-server My-Umbraco-MCP
+npx @umbraco-cms/create-umbraco-mcp-server My-Umbraco-MCP
 
 # Interactive mode
-npx create-umbraco-mcp-server
+npx @umbraco-cms/create-umbraco-mcp-server
 
 # Also works with npm create
-npm create umbraco-mcp-server My-Umbraco-MCP
+npm create @umbraco-cms/umbraco-mcp-server My-Umbraco-MCP
 ```
 
 ## What it does
