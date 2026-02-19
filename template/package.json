@@ -36,7 +36,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
-    "axios": "^1.8.4",
+    "axios": "^1.13.5",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",

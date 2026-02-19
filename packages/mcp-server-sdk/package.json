@@ -68,7 +68,7 @@
   "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "axios": "^1.8.4",
+    "axios": "^1.13.5",
     "zod": "^4.2.1"
   },
   "devDependencies": {
