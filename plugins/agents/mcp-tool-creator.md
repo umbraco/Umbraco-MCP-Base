@@ -23,9 +23,10 @@ All tools follow this pattern:
 ```typescript
 import {
   withStandardDecorators,
-  executeGetApiCall,     // For GET operations
-  executeVoidApiCall,    // For DELETE/PUT operations
-  createToolResult,      // For custom responses (CREATE)
+  executeGetApiCall,      // For GET single item
+  executeGetItemsApiCall, // For GET collections/arrays (wraps response as { items })
+  executeVoidApiCall,     // For DELETE/PUT operations
+  createToolResult,       // For custom responses (CREATE)
   CAPTURE_RAW_HTTP_RESPONSE,
   ToolDefinition,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -55,11 +56,17 @@ export default withStandardDecorators(YourTool);
 
 ### Operation Type Patterns
 
-**GET Operations** (returns data):
+**GET single item** (returns object):
 - Use `executeGetApiCall`
 - Add `outputSchema`
 - Set `annotations: { readOnlyHint: true }`
 - Set `slices: ["read"]`
+
+**GET collections/arrays** (returns list):
+- Use `executeGetItemsApiCall` — automatically wraps the response as `{ items: data }`
+- Wrap `outputSchema` in `z.object({ items: generatedSchema })` to match
+- Set `annotations: { readOnlyHint: true }`
+- Set `slices: ["list"]` or `["search"]`
 
 **DELETE Operations** (void):
 - Use `executeVoidApiCall`
@@ -86,6 +93,24 @@ export default withStandardDecorators(YourTool);
 | POST      | ❌           | ❌              | ❌             |
 | PUT       | ❌           | ❌              | ✅             |
 
+### Output Schema Rules
+
+**The MCP server only accepts `z.object()` as output schemas.** If the Orval-generated schema is not already a `z.object()` (e.g. it's a `z.array()`), wrap it and use `executeGetItemsApiCall`:
+
+```typescript
+import { generatedArraySchema } from "../api/generated/yourApi.zod.js";
+
+// BAD — MCP server rejects non-object output schemas
+outputSchema: generatedArraySchema,
+handler: async (params) => executeGetApiCall((client) => client.listItems(params, CAPTURE_RAW_HTTP_RESPONSE)),
+
+// GOOD — wrap schema and use executeGetItemsApiCall
+const outputSchema = z.object({ items: generatedArraySchema });
+handler: async (params) => executeGetItemsApiCall((client) => client.listItems(params, CAPTURE_RAW_HTTP_RESPONSE)),
+```
+
+`executeGetItemsApiCall` automatically wraps the API response as `{ items: data }` to match the wrapped schema. Always check the generated Zod schema type before using it as `outputSchema`. If it's not a `z.object()`, wrap it and use `executeGetItemsApiCall`.
+
 ## Design Principles
 
 1. **Simplicity Over Completeness**: Create tools that are easy for LLMs to understand
@@ -93,6 +118,7 @@ export default withStandardDecorators(YourTool);
 3. **Clear Intent**: Tool names and descriptions should immediately convey purpose
 4. **Type Safety**: Always use Zod schemas for validation
 5. **Consistent Patterns**: Follow the established patterns in the codebase
+6. **Object Output Schemas**: Always use `z.object()` for output schemas — MCP does not accept arrays
 
 ## Quality Assurance
 

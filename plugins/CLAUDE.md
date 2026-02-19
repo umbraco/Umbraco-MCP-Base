@@ -20,15 +20,30 @@ plugins/
 ├── skills/
 │   ├── mcp-patterns/
 │   │   └── SKILL.md       # MCP development patterns reference
-│   └── mcp-testing/
-│       └── SKILL.md       # Testing patterns reference
+│   ├── mcp-testing/
+│   │   └── SKILL.md       # Testing patterns reference
+│   ├── build-tools/
+│   │   └── SKILL.md       # Tool collection generator
+│   ├── build-tools-tests/
+│   │   └── SKILL.md       # Integration test generator
+│   ├── build-evals/
+│   │   └── SKILL.md       # Eval test generator
+│   └── discuss-mcp/
+│       ├── SKILL.md       # MCP improvement advisor
+│       ├── trace-optimization.md
+│       ├── chained-tools.md
+│       ├── behavioral-analysis.md
+│       └── scripts/
+│           └── analyze-traces.ts
 ├── agents/
 │   ├── mcp-tool-creator.md
 │   ├── mcp-tool-description-writer.md
 │   ├── test-builder-helper-creator.md
 │   ├── integration-test-creator.md
 │   ├── integration-test-validator.md
-│   └── eval-test-creator.md
+│   ├── eval-test-creator.md
+│   └── mcp-tool-reviewer.md
+
 └── __evals__/
     ├── setup.ts           # Test helpers (runSkillTest, runAgentContentTest)
     └── *.eval.ts          # Eval tests for skills/agents
@@ -41,7 +56,11 @@ Knowledge skills loaded via slash commands:
 | Skill | Command | Purpose |
 |-------|---------|---------|
 | mcp-patterns | `/mcp-patterns` | MCP development patterns, helper usage, project structure |
-| mcp-testing | `/mcp-testing` | Unit test and eval test patterns |
+| mcp-testing | `/mcp-testing` | Eval test patterns (LLM-driven acceptance tests) |
+| build-tools | `/build-tools` | Generate tool collections from `.discover.json` |
+| build-tools-tests | `/build-tools-tests` | Generate integration tests for tool collections |
+| build-evals | `/build-evals` | Generate LLM eval tests for tool collections |
+| discuss-mcp | `/discuss-mcp` | Advisory skill for improving MCP tools (traces, chaining, coverage) |
 
 ## Agents
 
@@ -55,6 +74,7 @@ Automatically invoked agents for specific tasks:
 | integration-test-creator | Creates unit/integration tests |
 | integration-test-validator | Validates test quality |
 | eval-test-creator | Creates LLM-based acceptance tests |
+| mcp-tool-reviewer | Reviews tools for LLM-readiness (schema, descriptions, responses) |
 
 ## Eval Testing
 

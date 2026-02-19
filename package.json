@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "build": "npm run build -w packages/mcp-server-sdk",
+    "build:create": "npm run build -w packages/create-mcp-server",
+    "build:all": "npm run build && npm run build:create",
     "clean": "npm run clean -w packages/mcp-server-sdk",
     "compile": "npm run compile -w packages/mcp-server-sdk",
     "test": "npm run test -w packages/mcp-server-sdk"

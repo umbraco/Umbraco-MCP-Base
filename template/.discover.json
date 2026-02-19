@@ -1,0 +1,10 @@
+{
+  "apiName": "Example Umbraco Add-on API",
+  "swaggerUrl": "https://localhost:44391/umbraco/swagger/example-addon/swagger.json",
+  "baseUrl": "/api/v1",
+  "collections": [
+    "example",
+    "example-2",
+    "chained"
+  ]
+}

@@ -4,6 +4,7 @@ const config: JestConfigWithTsJest = {
   displayName: "template",
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
+  maxWorkers: 1,
   extensionsToTreatAsEsm: [".ts"],
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
@@ -17,8 +18,8 @@ const config: JestConfigWithTsJest = {
       },
     ],
   },
-  setupFilesAfterEnv: ["<rootDir>/src/mocks/jest-setup.ts"],
-  testMatch: ["**/__tests__/**/*.test.ts", "**/__evals__/**/*.eval.ts"],
+  testMatch: ["**/__tests__/**/*.test.ts"],
+  setupFiles: ["<rootDir>/jest.setup.ts"],
   testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts"],

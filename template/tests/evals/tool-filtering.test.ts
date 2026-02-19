@@ -12,7 +12,6 @@
  * tool filtering rather than the test harness.
  */
 
-import "../example/__evals__/setup.js"; // Must be first - configures eval framework
 import { describe, it, expect } from "@jest/globals";
 import {
   runAgentTest,

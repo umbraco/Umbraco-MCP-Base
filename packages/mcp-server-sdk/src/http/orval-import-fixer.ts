@@ -51,17 +51,38 @@ function fixSchemaDirectory(dir: string): void {
 
 /**
  * Fixes imports in an API file.
- * Updates schema imports to include index.js.
+ * Adds .js extensions to relative imports (required for ESM).
+ * Handles both single-file and multi-file Orval output modes.
  */
 function fixApiFile(file: string): void {
-  const content = fs.readFileSync(file, "utf8");
+  let content = fs.readFileSync(file, "utf8");
 
-  const fixedContent = content.replace(
-    /from\s+['"](\.\.\/schemas)['"]/g,
-    "from '$1/index.js'"
+  // Fix all relative imports that don't have a file extension
+  content = content.replace(
+    /from\s+['"](\.[^'"]+)['"]/g,
+    (match, importPath) => {
+      // Skip if already has a recognized file extension
+      if (/\.[jt]sx?$|\.json$/.test(importPath)) {
+        return match;
+      }
+
+      const resolved = path.resolve(path.dirname(file), importPath);
+
+      // If it's a directory, add /index.js
+      if (fs.existsSync(resolved) && fs.lstatSync(resolved).isDirectory()) {
+        return `from '${importPath}/index.js'`;
+      }
+
+      // If a .ts file exists, add .js (ESM convention)
+      if (fs.existsSync(resolved + ".ts") || fs.existsSync(resolved + ".tsx")) {
+        return `from '${importPath}.js'`;
+      }
+
+      return match;
+    }
   );
 
-  fs.writeFileSync(file, fixedContent, "utf8");
+  fs.writeFileSync(file, content, "utf8");
 }
 
 /**

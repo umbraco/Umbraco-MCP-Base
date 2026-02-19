@@ -12,7 +12,7 @@
   "plugins": [
     {
       "name": "umbraco-mcp-skills",
-      "source": "./plugins/umbraco-mcp-skills",
+      "source": "./plugins",
       "description": "Professional skills for building Umbraco MCP servers - tool creation, testing, API patterns, and eval testing",
       "version": "1.0.0",
       "category": "development",

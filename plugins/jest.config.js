@@ -18,7 +18,7 @@ export default {
   transformIgnorePatterns: [
     "node_modules/(?!(@anthropic-ai/claude-agent-sdk)/)",
   ],
-  testMatch: ["**/__evals__/**/*.eval.ts"],
+  testMatch: ["**/__evals__/**/*.eval.ts", "**/__tests__/**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
 };

@@ -1,0 +1,363 @@
+/**
+ * Init command black-box tests.
+ *
+ * Mocks all edges (fs, prompts, psw-cli) to test runInit orchestrator.
+ */
+
+import { jest } from "@jest/globals";
+import * as path from "node:path";
+import { createMockFs } from "../../__tests__/helpers/mock-fs.js";
+import { loadScaffoldedFixture } from "../../__tests__/helpers/template-fixture.js";
+
+const PROJECT_DIR = "/test-project";
+const PROJECT_NAME = "test-mcp-server";
+
+// ── Set up mocks before importing the module under test ─────────────────────
+
+const mockFs = createMockFs(loadScaffoldedFixture(PROJECT_DIR, PROJECT_NAME));
+jest.unstable_mockModule("node:fs", () => mockFs.module);
+
+// Mock psw-cli (used by setupInstance and index)
+const mockDetectPsw = jest.fn<() => { installed: boolean; version?: string }>();
+const mockInstallPsw = jest.fn();
+const mockBuildWithPsw = jest.fn<() => { success: boolean; output?: string }>();
+
+jest.unstable_mockModule("../psw-cli.js", () => ({
+  PSW_VERSION: "1.2.0-alpha01",
+  detectPsw: mockDetectPsw,
+  installPsw: mockInstallPsw,
+  buildWithPsw: mockBuildWithPsw,
+  PswError: class PswError extends Error {
+    constructor(
+      message: string,
+      public exitCode: number,
+    ) {
+      super(message);
+      this.name = "PswError";
+    }
+  },
+}));
+
+// Mock prompts — we control all user responses
+const mockPromptUmbracoSetup = jest.fn<() => Promise<string>>();
+const mockPromptFeatureChoices = jest.fn<() => Promise<Record<string, boolean>>>();
+const mockPromptPackageSelection = jest.fn<() => Promise<string>>();
+const mockGetInstanceLocation = jest.fn<() => { path: string; label: string }>();
+const mockPromptSwaggerUrl = jest.fn<() => Promise<string>>();
+const mockPromptConnectionString = jest.fn<() => Promise<string>>();
+const mockPromptInstallPsw = jest.fn<() => Promise<boolean>>();
+
+jest.unstable_mockModule("../prompts.js", () => ({
+  promptUmbracoSetup: mockPromptUmbracoSetup,
+  promptFeatureChoices: mockPromptFeatureChoices,
+  promptPackageSelection: mockPromptPackageSelection,
+  getInstanceLocation: mockGetInstanceLocation,
+  promptSwaggerUrl: mockPromptSwaggerUrl,
+  promptConnectionString: mockPromptConnectionString,
+  promptInstallPsw: mockPromptInstallPsw,
+}));
+
+// Mock discover/index.js exports used by init
+const mockReadLaunchSettingsUrl = jest.fn<() => string | undefined>();
+const mockUpdateEnvBaseUrl = jest.fn<() => boolean>();
+const mockUpdateEnvVar = jest.fn<() => boolean>();
+
+jest.unstable_mockModule("../../discover/index.js", () => ({
+  readLaunchSettingsUrl: mockReadLaunchSettingsUrl,
+  updateEnvBaseUrl: mockUpdateEnvBaseUrl,
+  updateEnvVar: mockUpdateEnvVar,
+}));
+
+const { runInit } = await import("../index.js");
+
+let consoleLogSpy: ReturnType<typeof jest.spyOn>;
+let processExitSpy: ReturnType<typeof jest.spyOn>;
+
+beforeEach(() => {
+  mockFs.reset();
+  jest.clearAllMocks();
+  consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+  processExitSpy = jest
+    .spyOn(process, "exit")
+    .mockImplementation((code?: number | string | null | undefined) => {
+      throw new Error(`process.exit(${code})`);
+    }) as unknown as ReturnType<typeof jest.spyOn>;
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+describe("runInit", () => {
+  describe("invalid project", () => {
+    it("should exit(1) for non-project directory", async () => {
+      await expect(runInit("/nonexistent")).rejects.toThrow("process.exit(1)");
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe("skip Umbraco + remove all features", () => {
+    it("should remove all features when user chooses remove for each", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("skip");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: true,
+        removeChaining: true,
+        removeExamples: true,
+        removeEvals: true,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      // Verify mocks directory was removed
+      const mockFiles = [...mockFs.files.keys()].filter((k) =>
+        k.includes("/src/mocks/")
+      );
+      expect(mockFiles).toHaveLength(0);
+
+      // Verify chaining files were removed
+      expect(
+        mockFs.files.has(path.resolve(PROJECT_DIR, "src/config/mcp-servers.ts"))
+      ).toBe(false);
+
+      // Verify example directories were removed
+      const exampleFiles = [...mockFs.files.keys()].filter(
+        (k) =>
+          k.includes("/tools/example/") || k.includes("/tools/example-2/")
+      );
+      expect(exampleFiles).toHaveLength(0);
+
+      // Verify evals were removed
+      const evalFiles = [...mockFs.files.keys()].filter((k) =>
+        k.includes("tests/evals")
+      );
+      expect(evalFiles).toHaveLength(0);
+
+      // Verify summary was printed
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Configuration complete");
+    });
+  });
+
+  describe("skip Umbraco + keep all features", () => {
+    it("should not remove any features when user keeps all", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("skip");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      // All files should still exist
+      expect(
+        mockFs.files.has(path.resolve(PROJECT_DIR, "src/mocks/server.ts"))
+      ).toBe(true);
+      expect(
+        mockFs.files.has(path.resolve(PROJECT_DIR, "src/config/mcp-servers.ts"))
+      ).toBe(true);
+      expect(
+        [...mockFs.files.keys()].some((k) => k.includes("/tools/example/"))
+      ).toBe(true);
+    });
+  });
+
+  describe("existing instance + swagger URL", () => {
+    it("should configure OpenAPI with provided URL", async () => {
+      const swaggerUrl =
+        "https://localhost:44391/umbraco/swagger/commerce/swagger.json";
+
+      mockPromptUmbracoSetup.mockResolvedValue("existing");
+      mockPromptSwaggerUrl.mockResolvedValue(swaggerUrl);
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      // Verify orval.config.ts was updated with the swagger URL
+      const orvalConfig = mockFs.files.get(
+        path.resolve(PROJECT_DIR, "orval.config.ts")
+      )!;
+      expect(orvalConfig).toContain(swaggerUrl);
+    });
+  });
+
+  describe("create instance (happy path)", () => {
+    it("should call buildWithPsw and update .env", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("create");
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockPromptPackageSelection.mockResolvedValue("Umbraco.Commerce");
+      mockGetInstanceLocation.mockReturnValue({
+        path: path.join(PROJECT_DIR, "demo-site"),
+        label: "demo-site",
+      });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      // buildWithPsw succeeds
+      mockBuildWithPsw.mockReturnValue({ success: true });
+
+      // readLaunchSettingsUrl returns a detected URL
+      mockReadLaunchSettingsUrl.mockReturnValue("https://localhost:44391");
+      mockUpdateEnvBaseUrl.mockReturnValue(true);
+      mockUpdateEnvVar.mockReturnValue(true);
+
+      await runInit(PROJECT_DIR);
+
+      // Verify buildWithPsw was called with correct options
+      expect(mockBuildWithPsw).toHaveBeenCalledWith(
+        expect.objectContaining({
+          packageName: "Umbraco.Commerce",
+          projectName: "demo-site",
+          solutionName: "demo-site",
+          databaseType: "SQLServer",
+        })
+      );
+
+      // Verify .env vars were set
+      expect(mockUpdateEnvBaseUrl).toHaveBeenCalledWith(
+        PROJECT_DIR,
+        "https://localhost:44391"
+      );
+      expect(mockUpdateEnvVar).toHaveBeenCalledWith(
+        PROJECT_DIR,
+        "UMBRACO_CLIENT_ID",
+        "umbraco-back-office-mcp"
+      );
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Umbraco instance created");
+    });
+  });
+
+  describe("create instance failure", () => {
+    it("should handle error gracefully and continue to features", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("create");
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockPromptPackageSelection.mockResolvedValue("Umbraco.Commerce");
+      mockGetInstanceLocation.mockReturnValue({
+        path: path.join(PROJECT_DIR, "demo-site"),
+        label: "demo-site",
+      });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      // Make buildWithPsw throw to simulate failure
+      mockBuildWithPsw.mockImplementation(() => {
+        throw new Error("PSW execution error — dotnet script failed");
+      });
+
+      await runInit(PROJECT_DIR);
+
+      // Should have printed the error but continued
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Instance setup failed");
+      expect(output).toContain("Configuration complete");
+    });
+  });
+
+  describe("PSW not installed — user installs", () => {
+    it("should install PSW then proceed with creation", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("create");
+      mockDetectPsw.mockReturnValue({ installed: false });
+      mockPromptInstallPsw.mockResolvedValue(true);
+      mockInstallPsw.mockReturnValue(undefined);
+      mockPromptPackageSelection.mockResolvedValue("Umbraco.Commerce");
+      mockGetInstanceLocation.mockReturnValue({
+        path: path.join(PROJECT_DIR, "demo-site"),
+        label: "demo-site",
+      });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+      mockBuildWithPsw.mockReturnValue({ success: true });
+      mockReadLaunchSettingsUrl.mockReturnValue("https://localhost:44391");
+      mockUpdateEnvBaseUrl.mockReturnValue(true);
+      mockUpdateEnvVar.mockReturnValue(true);
+
+      await runInit(PROJECT_DIR);
+
+      expect(mockPromptInstallPsw).toHaveBeenCalled();
+      expect(mockInstallPsw).toHaveBeenCalled();
+      expect(mockBuildWithPsw).toHaveBeenCalled();
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Umbraco instance created");
+    });
+  });
+
+  describe("PSW not installed — user declines", () => {
+    it("should downgrade to skip when user declines PSW install", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("create");
+      mockDetectPsw.mockReturnValue({ installed: false });
+      mockPromptInstallPsw.mockResolvedValue(false);
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      expect(mockInstallPsw).not.toHaveBeenCalled();
+      expect(mockBuildWithPsw).not.toHaveBeenCalled();
+      expect(mockPromptPackageSelection).not.toHaveBeenCalled();
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Skipping instance creation");
+      expect(output).toContain("Configuration complete");
+    });
+  });
+
+  describe("PSW build returns validation error", () => {
+    it("should show error with PSW context", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("create");
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockPromptPackageSelection.mockResolvedValue("Invalid.Package");
+      mockGetInstanceLocation.mockReturnValue({
+        path: path.join(PROJECT_DIR, "demo-site"),
+        label: "demo-site",
+      });
+      mockPromptConnectionString.mockResolvedValue("Server=.;Database=UmbracoDb;Integrated Security=true");
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      mockBuildWithPsw.mockImplementation(() => {
+        throw new Error(
+          "PSW validation error — check package names and database type"
+        );
+      });
+
+      await runInit(PROJECT_DIR);
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Instance setup failed");
+      expect(output).toContain("PSW validation error");
+      expect(output).toContain("Configuration complete");
+    });
+  });
+});

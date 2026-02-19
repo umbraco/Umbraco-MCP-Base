@@ -1,0 +1,19 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`scaffoldProject should snapshot transformed package.json 1`] = `
+"{
+  "name": "my-commerce-mcp",
+  "version": "1.0.0",
+  "bin": {
+    "my-commerce-mcp": "./dist/index.js"
+  },
+  "description": "MCP server for My-Commerce-MCP",
+  "dependencies": {
+    "@umbraco-cms/mcp-server-sdk": "^17.0.0"
+  },
+  "devDependencies": {
+    "msw": "^2.12.7"
+  }
+}
+"
+`;
