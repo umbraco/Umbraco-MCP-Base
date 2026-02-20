@@ -290,7 +290,7 @@ export async function runDiscover(dir?: string): Promise<void> {
   console.log(pc.dim("Next steps:"));
   console.log(pc.dim("  1. Open the project in Claude Code"));
   console.log(pc.dim("  2. Install the Umbraco MCP skills plugin in Claude Code:"));
-  console.log(pc.dim("       /plugin marketplace add umbraco/umbraco-mcp-server-sdk"));
+  console.log(pc.dim("       /plugin marketplace add umbraco/Umbraco-MCP-Base"));
   console.log(pc.dim("       /plugin install umbraco-mcp-skills@umbraco-mcp-server-sdk-plugins"));
   console.log(pc.dim("  3. Run /build-tools to generate tool collections from .discover.json"));
   console.log(pc.dim("  4. Run /build-tools-tests to generate integration tests for the collections"));

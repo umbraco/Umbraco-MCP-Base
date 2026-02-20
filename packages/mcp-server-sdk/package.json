@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-server-sdk",
-  "version": "17.0.0-beta.2",
+  "version": "17.0.0-beta.3",
   "type": "module",
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",

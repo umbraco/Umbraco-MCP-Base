@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-template",
-  "version": "1.0.0",
+  "version": "17.0.0-beta.3",
   "type": "module",
   "description": "MCP server for my Umbraco add-on",
   "main": "dist/index.js",

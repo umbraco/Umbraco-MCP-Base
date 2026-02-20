@@ -95,8 +95,8 @@ Tests verify skills and agents produce correct output:
 
 Users install via Claude Code:
 ```bash
-/plugin marketplace add umbraco/umbraco-mcp-server-sdk
-/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-server-sdk
+/plugin marketplace add umbraco/Umbraco-MCP-Base
+/plugin install umbraco-mcp-skills@umbraco/Umbraco-MCP-Base
 ```
 
 ## Writing Skills

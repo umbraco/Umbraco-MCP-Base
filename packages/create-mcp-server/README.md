@@ -107,7 +107,7 @@ npx @umbraco-cms/create-umbraco-mcp-server discover
 Next steps:
   1. Open the project in Claude Code
   2. Install the Umbraco MCP skills plugin in Claude Code:
-       /plugin marketplace add umbraco/umbraco-mcp-server-sdk
+       /plugin marketplace add umbraco/Umbraco-MCP-Base
        /plugin install umbraco-mcp-skills@umbraco-mcp-server-sdk-plugins
   3. Run /build-tools to generate tool collections from .discover.json
   4. Run /build-tools-tests to generate integration tests for the collections
@@ -120,7 +120,7 @@ Next steps:
 Build tool collections using Claude Code skills. Install the plugin first:
 
 ```
-/plugin marketplace add umbraco/umbraco-mcp-server-sdk
+/plugin marketplace add umbraco/Umbraco-MCP-Base
 /plugin install umbraco-mcp-skills@umbraco-mcp-server-sdk-plugins
 ```
 
