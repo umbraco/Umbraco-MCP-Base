@@ -6,22 +6,22 @@
   },
   "metadata": {
     "description": "Claude Code plugins for the Umbraco MCP Toolkit - professional skills for building MCP servers, testing, and API integration",
-    "version": "1.0.0",
-    "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk"
+    "version": "17.0.0-beta.3",
+    "homepage": "https://github.com/umbraco/Umbraco-MCP-Base"
   },
   "plugins": [
     {
       "name": "umbraco-mcp-skills",
-      "source": "./plugins/umbraco-mcp-skills",
+      "source": "./plugins",
       "description": "Professional skills for building Umbraco MCP servers - tool creation, testing, API patterns, and eval testing",
-      "version": "1.0.0",
+      "version": "17.0.0-beta.3",
       "category": "development",
       "author": {
         "name": "Phil W",
         "email": "pjw@umbraco.com",
         "url": "https://github.com/hifi-phil"
       },
-      "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk/tree/main/plugins/umbraco-mcp-skills",
+      "homepage": "https://github.com/umbraco/Umbraco-MCP-Base/tree/main/plugins/umbraco-mcp-skills",
       "keywords": [
         "mcp",
         "umbraco",

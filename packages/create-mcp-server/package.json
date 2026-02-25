@@ -1,0 +1,56 @@
+{
+  "name": "@umbraco-cms/create-umbraco-mcp-server",
+  "version": "17.0.0-beta.3",
+  "type": "module",
+  "description": "Create a new Umbraco MCP server project",
+  "bin": {
+    "create-umbraco-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsup && npm run copy-template",
+    "copy-template": "node scripts/copy-template.js",
+    "compile": "tsc --noEmit",
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/umbraco/Umbraco-MCP-Base.git"
+  },
+  "keywords": [
+    "Umbraco",
+    "MCP",
+    "Model Context Protocol",
+    "scaffolding",
+    "create"
+  ],
+  "author": "Umbraco HQ",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/umbraco/Umbraco-MCP-Base/issues"
+  },
+  "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
+  "dependencies": {
+    "picocolors": "^1.1.1",
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.14.1",
+    "@types/prompts": "^2.4.9",
+    "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
+    "rimraf": "^6.0.1",
+    "ts-jest": "^29.3.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}

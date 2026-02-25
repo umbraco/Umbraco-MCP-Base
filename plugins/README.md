@@ -6,12 +6,12 @@ Professional Claude Code skills for building Umbraco MCP servers using the `@umb
 
 Add the marketplace:
 ```bash
-/plugin marketplace add umbraco/umbraco-mcp-server-sdk
+/plugin marketplace add umbraco/Umbraco-MCP-Base
 ```
 
 Install the plugin:
 ```bash
-/plugin install umbraco-mcp-skills@umbraco/umbraco-mcp-server-sdk
+/plugin install umbraco-mcp-skills@umbraco/Umbraco-MCP-Base
 ```
 
 ## Available Skills

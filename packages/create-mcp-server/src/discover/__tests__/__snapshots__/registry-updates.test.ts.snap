@@ -1,0 +1,173 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`updateModeRegistry should snapshot mode-registry.ts after updates 1`] = `
+"/**
+ * Tool Mode Registry
+ *
+ * Defines tool modes that group tools by domain/functionality.
+ * Modes map to collections, allowing users to enable groups of related tools.
+ *
+ * This is the SINGLE SOURCE OF TRUTH for mode definitions in this project.
+ */
+
+import type { ToolModeDefinition } from "@umbraco-cms/mcp-server-sdk";
+
+/**
+ * Tool mode definitions for this project.
+ *
+ * Each mode groups related tool collections together.
+ * Users can enable modes in their config to include all tools in those collections.
+ *
+ * @example
+ * \`\`\`typescript
+ * // In server config
+ * {
+ *   toolModes: ['content', 'media']  // Enables all tools in content and media collections
+ * }
+ * \`\`\`
+ */
+export const toolModes: ToolModeDefinition[] = [
+  {
+    name: 'example',
+    displayName: 'Example Tools',
+    description: 'Example CRUD operations for demonstration',
+    collections: ['example']
+  },
+  {
+    name: 'example-2',
+    displayName: 'Example-2 Tools',
+    description: 'Second example collection for testing',
+    collections: ['example-2']
+  },
+  {
+    name: 'all-examples',
+    displayName: 'All Example Tools',
+    description: 'Both example collections combined',
+    collections: ['example', 'example-2']
+  },
+    {
+    name: 'product',
+    displayName: 'Product Tools',
+    description: 'Product operations',
+    collections: ['product']
+  },
+    {
+    name: 'order',
+    displayName: 'Order Tools',
+    description: 'Order operations',
+    collections: ['order']
+  },
+  // Add your modes here as you build out your MCP server
+  // {
+  //   name: 'content',
+  //   displayName: 'Content Management',
+  //   description: 'Document creation, editing, and versioning',
+  //   collections: ['document', 'document-version', 'document-blueprint']
+  // },
+  // {
+  //   name: 'media',
+  //   displayName: 'Media Management',
+  //   description: 'Media library and file operations',
+  //   collections: ['media', 'imaging', 'temporary-file']
+  // },
+];
+
+/**
+ * All mode definitions (alias for toolModes).
+ */
+export const allModes: ToolModeDefinition[] = [...toolModes];
+
+/**
+ * All valid mode names for configuration validation.
+ */
+export const allModeNames: readonly string[] = toolModes.map(m => m.name);
+
+/**
+ * Valid mode name type.
+ */
+export type ToolModeName = typeof allModeNames[number];
+"
+`;
+
+exports[`updateSliceRegistry should snapshot slice-registry.ts after updates 1`] = `
+"/**
+ * Tool Slice Registry
+ *
+ * Defines all valid slice names for categorizing tools by operation type.
+ * Extends the base slices from the toolkit with domain-specific slices.
+ *
+ * Slices are assigned explicitly on each tool via the \`slices\` property.
+ * This is the SINGLE SOURCE OF TRUTH for slice names in this project.
+ */
+
+import { baseSliceNames } from "@umbraco-cms/mcp-server-sdk";
+
+/**
+ * Tool slice names for this project.
+ * Extends base CRUD slices with domain-specific operations.
+ */
+export const toolSliceNames = [
+  // Base slices from toolkit (create, read, update, delete, list)
+  ...baseSliceNames,
+
+  // Navigation
+  'tree',
+  'folders',
+
+  // Query
+  'search',
+  'references',
+
+  // Workflow
+  'publish',
+  'recycle-bin',
+  'move',
+  'copy',
+  'sort',
+  'validate',
+  'rename',
+
+  // Information
+  'configuration',
+  'audit',
+  'urls',
+  'domains',
+  'permissions',
+  'user-status',
+  'current-user',
+
+  // Entity Management
+  'notifications',
+  'public-access',
+  'scaffolding',
+  'blueprints',
+
+  // System
+  'server-info',
+  'diagnostics',
+  'templates',
+
+  // Discovered
+  'custom-action',
+
+  // Discovered
+  'batch-import',
+] as const;
+
+/**
+ * Valid slice name type for compile-time safety.
+ */
+export type ToolSliceName = typeof toolSliceNames[number];
+
+/**
+ * All valid slice names including 'other' catch-all.
+ * Tools with empty slices array are categorized as 'other'.
+ */
+export const allSliceNames: readonly string[] = [...toolSliceNames, 'other'];
+
+/**
+ * Extended slice name type including 'other'.
+ */
+export type ExtendedSliceName = ToolSliceName | 'other';
+"
+`;

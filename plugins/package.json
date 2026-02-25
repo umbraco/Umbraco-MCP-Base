@@ -1,12 +1,14 @@
 {
   "name": "@umbraco-cms/mcp-skills",
-  "version": "1.0.0",
+  "version": "17.0.0-beta.3",
   "private": true,
   "type": "module",
   "description": "Skills and agents for building Umbraco MCP servers",
   "scripts": {
-    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testMatch='**/__evals__/**/*.eval.ts' --runInBand --testTimeout=120000 --forceExit",
-    "test:verbose": "E2E_VERBOSITY=verbose node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testMatch='**/__evals__/**/*.eval.ts' --runInBand --testTimeout=120000 --forceExit"
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --passWithNoTests",
+    "test:evals": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --testTimeout=120000 --forceExit",
+    "test:evals:verbose": "E2E_VERBOSITY=verbose node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --testTimeout=120000 --forceExit",
+    "test:all": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand --testTimeout=120000 --forceExit"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.76",

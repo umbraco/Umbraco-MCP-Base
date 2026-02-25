@@ -2,24 +2,16 @@
  * Eval Test Setup
  *
  * Configures the eval test framework for this MCP server.
- * This file is imported by all eval test files.
+ * This runs before any tests via setupFilesAfterEnv in jest.config.ts.
  */
 
 import path from "path";
-import { fileURLToPath } from "url";
 import { configureEvals, ClaudeModels } from "@umbraco-cms/mcp-server-sdk/evals";
-
-// Get the directory of this file (works regardless of cwd)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Resolve path to template root (this file is in src/tools/example/__evals__/)
-const templateRoot = path.resolve(__dirname, "../../../../");
 
 // Configure the eval framework for this MCP server
 configureEvals({
-  // Path to the built MCP server (relative to template root, not cwd)
-  mcpServerPath: path.resolve(templateRoot, "dist/index.js"),
+  // Path to the built MCP server
+  mcpServerPath: path.resolve(process.cwd(), "dist/index.js"),
 
   // MCP server name (used in tool name prefixes like mcp__my-umbraco-mcp__tool-name)
   mcpServerName: "my-umbraco-mcp",

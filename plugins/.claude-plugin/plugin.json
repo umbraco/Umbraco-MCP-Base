@@ -1,13 +1,13 @@
 {
   "name": "umbraco-mcp-skills",
-  "version": "1.0.0",
+  "version": "17.0.0-beta.3",
   "description": "Skills for building Umbraco MCP servers - tool creation, testing, API patterns, and eval testing",
   "author": {
     "name": "Phil W",
     "email": "pjw@umbraco.com",
     "url": "https://github.com/hifi-phil"
   },
-  "homepage": "https://github.com/umbraco/umbraco-mcp-server-sdk",
+  "homepage": "https://github.com/umbraco/Umbraco-MCP-Base",
   "license": "MIT",
   "keywords": [
     "mcp",
