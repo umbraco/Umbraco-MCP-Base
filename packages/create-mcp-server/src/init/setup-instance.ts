@@ -40,6 +40,11 @@ export async function setupInstance(
     if (hasRealContent) {
       throw new Error(`Instance directory already exists: ${instanceDir}`);
     }
+    // Remove .gitkeep so PSW sees an empty directory
+    const gitkeepPath = path.join(instanceDir, ".gitkeep");
+    if (fs.existsSync(gitkeepPath)) {
+      fs.unlinkSync(gitkeepPath);
+    }
   }
 
   const adminEmail = "admin@test.com";

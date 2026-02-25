@@ -23,7 +23,7 @@ const mockInstallPsw = jest.fn();
 const mockBuildWithPsw = jest.fn<() => { success: boolean; output?: string }>();
 
 jest.unstable_mockModule("../psw-cli.js", () => ({
-  PSW_VERSION: "1.2.0-alpha01",
+  PSW_VERSION: "1.2.0-alpha03",
   detectPsw: mockDetectPsw,
   installPsw: mockInstallPsw,
   buildWithPsw: mockBuildWithPsw,
@@ -190,7 +190,7 @@ describe("runInit", () => {
   describe("create instance (happy path)", () => {
     it("should call buildWithPsw and update .env", async () => {
       mockPromptUmbracoSetup.mockResolvedValue("create");
-      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha03" });
       mockPromptPackageSelection.mockResolvedValue("Umbraco.Commerce");
       mockGetInstanceLocation.mockReturnValue({
         path: path.join(PROJECT_DIR, "demo-site"),
@@ -243,7 +243,7 @@ describe("runInit", () => {
   describe("create instance failure", () => {
     it("should handle error gracefully and continue to features", async () => {
       mockPromptUmbracoSetup.mockResolvedValue("create");
-      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha03" });
       mockPromptPackageSelection.mockResolvedValue("Umbraco.Commerce");
       mockGetInstanceLocation.mockReturnValue({
         path: path.join(PROJECT_DIR, "demo-site"),
@@ -332,7 +332,7 @@ describe("runInit", () => {
   describe("PSW build returns validation error", () => {
     it("should show error with PSW context", async () => {
       mockPromptUmbracoSetup.mockResolvedValue("create");
-      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha01" });
+      mockDetectPsw.mockReturnValue({ installed: true, version: "1.2.0-alpha03" });
       mockPromptPackageSelection.mockResolvedValue("Invalid.Package");
       mockGetInstanceLocation.mockReturnValue({
         path: path.join(PROJECT_DIR, "demo-site"),
