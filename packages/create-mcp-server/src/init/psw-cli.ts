@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import pc from "picocolors";
 
-export const PSW_VERSION = "1.2.0-alpha01";
+export const PSW_VERSION = "1.2.0-alpha03";
 
 export interface PswDetectResult {
   installed: boolean;
@@ -84,7 +84,8 @@ export function detectPsw(): PswDetectResult {
 }
 
 /**
- * Install PSW CLI as a global dotnet tool.
+ * Install or update PSW CLI as a global dotnet tool.
+ * Uses `dotnet tool update` which handles both fresh installs and upgrades.
  */
 export function installPsw(): void {
   console.log(pc.dim(`  Installing PSW CLI v${PSW_VERSION}...`));
@@ -93,7 +94,7 @@ export function installPsw(): void {
       "dotnet",
       [
         "tool",
-        "install",
+        "update",
         "--global",
         "PackageScriptWriter.Cli",
         "--version",
@@ -110,9 +111,9 @@ export function installPsw(): void {
 }
 
 /**
- * Build an Umbraco instance using PSW CLI v1.2.0-alpha01.
+ * Build an Umbraco instance using PSW CLI.
  *
- * Uses `--auto-run --no-run --no-interaction` to have PSW generate and
+ * Uses `--auto-run --build-only --no-interaction` to have PSW generate and
  * execute the full installation script (template install, solution, project,
  * packages) while skipping `dotnet run`.
  *
@@ -125,17 +126,17 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
   const cwd = opts.runDir;
 
   const args: string[] = [
-    "-d",
+    "-d", // IMPORTANT: --default is required to generate the full script (solution, project, packages). Without it PSW only generates the "Add Packages" step.
     "-p", opts.packageName,
     "-n", opts.projectName,
     "-s", opts.solutionName,
     "-k", "clean",
-    "-u",
     "--database-type", opts.databaseType,
     "--admin-email", opts.adminEmail ?? "admin@test.com",
     "--admin-password", opts.adminPassword ?? "SecurePass1234",
     "--auto-run",
-    "--no-run",
+    "--build-only",
+    "--run-dir", cwd,
     "--no-interaction",
     ...(opts.connectionString
       ? ["--connection-string", opts.connectionString]
