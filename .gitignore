@@ -4,7 +4,11 @@ build/*
 !build/azure-pipelines.yml
 coverage/
 .env
+.dev.vars
 *.log
 junit.xml
 .DS_Store
 settings.local.json
+.claude/
+.worktrees/
+.wrangler/

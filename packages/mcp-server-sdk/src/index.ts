@@ -36,6 +36,7 @@ export {
   UmbracoApiError,
   configureApiClient,
   getApiClient,
+  type HttpResponse,
   type ApiCallFn,
   type ApiCallOptions,
   type VoidApiCallOptions,

@@ -136,3 +136,15 @@ Uses Orval to generate typed client from OpenAPI spec:
 3. Client and Zod schemas generated to `src/umbraco-api/api/generated/`
 
 Always pass `CAPTURE_RAW_HTTP_RESPONSE` to API methods when using toolkit helpers.
+
+## Hosted Worker (`src/worker.ts`)
+
+The template includes a Cloudflare Worker entry point for hosted deployment. Key configuration:
+
+- `McpAgent.serve("/mcp", { binding: "MCP_AGENT" })` — use `.serve()` for Streamable HTTP (NOT `.mount()` which is SSE)
+- `new_sqlite_classes` in `wrangler.toml` migrations (agents library requires SQLite-backed DOs)
+- `.dev.vars` — local secrets including `UMBRACO_SERVER_URL` for self-signed cert workaround
+- Umbraco needs the Worker registered as an authorization_code OpenIdDict client via a C# Composer (backoffice UI only supports client_credentials)
+
+Run locally: `npx wrangler dev --port 8787`
+Test with MCP Inspector in Direct mode: `http://localhost:8787/mcp`
