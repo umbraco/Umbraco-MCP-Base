@@ -36,6 +36,7 @@ export {
   UmbracoApiError,
   configureApiClient,
   getApiClient,
+  type HttpResponse,
   type ApiCallFn,
   type ApiCallOptions,
   type VoidApiCallOptions,
@@ -201,6 +202,8 @@ export {
   isUmbracoAxiosInitialized,
   clearUmbracoAxiosToken,
   UmbracoManagementClient,
+  // Custom transport for non-Axios environments (e.g., Workers)
+  setCustomTransport,
   // Factory for advanced use cases
   createUmbracoAxiosClient,
   // Orval helpers
@@ -208,6 +211,7 @@ export {
   // Types
   type UmbracoAxiosAuthConfig,
   type UmbracoManagementClientOptions,
+  type CustomTransport,
   type CreateUmbracoAxiosClientOptions,
   type UmbracoAxiosClientResult,
 } from "./http/index.js";

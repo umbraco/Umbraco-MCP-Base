@@ -39,6 +39,20 @@ import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
 
 /**
+ * Transport-agnostic HTTP response interface.
+ * Compatible with AxiosResponse, native fetch Response wrappers,
+ * and any other HTTP client that provides status, statusText, and data.
+ *
+ * Use this type when building transport-independent code (e.g., hosted MCP
+ * servers using fetch instead of Axios).
+ */
+export interface HttpResponse<T = unknown> {
+  status: number;
+  statusText: string;
+  data: T;
+}
+
+/**
  * Custom error class for API errors.
  * Contains ProblemDetails for structured error information.
  * The withErrorHandling decorator catches this and converts to tool result.
