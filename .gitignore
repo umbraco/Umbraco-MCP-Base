@@ -9,6 +9,6 @@ coverage/
 junit.xml
 .DS_Store
 settings.local.json
-.claude/
+.claude/projects/
 .worktrees/
 .wrangler/
