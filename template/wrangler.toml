@@ -5,7 +5,6 @@
 # 2. Set secrets:
 #    npx wrangler secret put UMBRACO_BASE_URL
 #    npx wrangler secret put UMBRACO_OAUTH_CLIENT_ID
-#    npx wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 #    npx wrangler secret put COOKIE_ENCRYPTION_KEY
 # 3. Deploy: npx wrangler deploy
 #

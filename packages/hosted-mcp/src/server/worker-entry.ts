@@ -42,6 +42,8 @@ export interface HostedMcpServerOptions {
   allModeNames: readonly string[];
   /** All valid slice names */
   allSliceNames: readonly string[];
+  /** Optional factory to create the API client (see CreateServerOptions.clientFactory) */
+  clientFactory?: () => unknown;
   /** Umbraco OAuth handler options */
   authOptions?: UmbracoAuthHandlerOptions;
 }
@@ -60,6 +62,7 @@ export function getServerOptions(
     modeRegistry: options.modeRegistry,
     allModeNames: options.allModeNames,
     allSliceNames: options.allSliceNames,
+    clientFactory: options.clientFactory,
   };
 }
 

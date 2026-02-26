@@ -187,6 +187,47 @@ export function clearUmbracoAxiosToken(): void {
 // Orval Mutator
 // ============================================================================
 
+// ============================================================================
+// Custom Transport (for non-Axios environments like Cloudflare Workers)
+// ============================================================================
+
+/**
+ * Custom transport function type.
+ * Must match the Orval mutator signature: (config, options) => Promise<T>
+ */
+export type CustomTransport = <T>(
+  config: { url: string; method: string; data?: unknown; params?: Record<string, unknown>; headers?: Record<string, string> },
+  options?: UmbracoManagementClientOptions
+) => Promise<T>;
+
+let customTransport: CustomTransport | null = null;
+
+/**
+ * Sets a custom transport for UmbracoManagementClient.
+ *
+ * When set, all Orval-generated API calls will use this transport instead of Axios.
+ * This enables the same generated API client to work in non-Node environments
+ * like Cloudflare Workers where Axios is not available.
+ *
+ * @param transport - Custom transport function, or null to revert to Axios
+ *
+ * @example
+ * ```typescript
+ * import { setCustomTransport } from "@umbraco-cms/mcp-server-sdk";
+ * import { createFetchClientFromKV } from "@umbraco-cms/mcp-hosted";
+ *
+ * const fetchClient = await createFetchClientFromKV(env, tokenKey);
+ * setCustomTransport(fetchClient);
+ * ```
+ */
+export function setCustomTransport(transport: CustomTransport | null): void {
+  customTransport = transport;
+}
+
+// ============================================================================
+// Orval Mutator
+// ============================================================================
+
 /**
  * Orval mutator for Umbraco Management API.
  *
@@ -201,6 +242,9 @@ export function clearUmbracoAxiosToken(): void {
  * }
  * ```
  *
+ * If a custom transport has been set via `setCustomTransport()`, it will be
+ * used instead of the default Axios-based transport.
+ *
  * @param config - Axios request config from Orval
  * @param options - Additional options including returnFullResponse
  * @returns Promise resolving to response data (or full response if requested)
@@ -209,6 +253,11 @@ export const UmbracoManagementClient = <T>(
   config: AxiosRequestConfig,
   options?: UmbracoManagementClientOptions
 ): Promise<T> => {
+  // Use custom transport if configured (e.g., fetch-based for Workers)
+  if (customTransport) {
+    return customTransport<T>(config as any, options);
+  }
+
   const source = Axios.CancelToken.source();
   const returnFullResponse = options?.returnFullResponse;
 

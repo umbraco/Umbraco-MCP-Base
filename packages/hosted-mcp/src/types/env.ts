@@ -54,7 +54,6 @@ export interface OAuthProviderHelpers {
  *
  * Required secrets (set via `wrangler secret put`):
  * - UMBRACO_OAUTH_CLIENT_ID
- * - UMBRACO_OAUTH_CLIENT_SECRET
  * - COOKIE_ENCRYPTION_KEY (generate with: openssl rand -hex 32)
  *
  * Required bindings (configured in wrangler.toml):
@@ -72,12 +71,11 @@ export interface HostedMcpEnv {
    *  Use when workerd can't reach UMBRACO_BASE_URL (e.g. self-signed cert in local dev). */
   UMBRACO_SERVER_URL?: string;
 
-  // Umbraco OAuth client credentials
-  // The Worker is registered as an OAuth client in Umbraco's OpenIdDict
+  // Umbraco OAuth client (registered as a public client in Umbraco's OpenIdDict)
   /** OAuth client ID registered in Umbraco */
   UMBRACO_OAUTH_CLIENT_ID: string;
-  /** OAuth client secret registered in Umbraco */
-  UMBRACO_OAUTH_CLIENT_SECRET: string;
+  /** OAuth client secret (optional, only needed for confidential clients) */
+  UMBRACO_OAUTH_CLIENT_SECRET?: string;
 
   // Cookie/session encryption
   /** Encryption key for session cookies (hex string, 32 bytes) */

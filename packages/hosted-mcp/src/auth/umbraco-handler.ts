@@ -82,7 +82,7 @@ export interface UmbracoUserInfo {
  * Props returned to the OAuthProvider after successful authorization.
  * These become available as `props` on authenticated MCP requests.
  */
-export interface AuthProps {
+export interface AuthProps extends Record<string, unknown> {
   /** The stored Umbraco access token (encrypted in KV, key reference) */
   umbracoTokenKey: string;
   /** Umbraco user subject identifier */
@@ -225,8 +225,11 @@ export async function refreshUmbracoToken(
     grant_type: "refresh_token",
     refresh_token: refreshToken,
     client_id: env.UMBRACO_OAUTH_CLIENT_ID,
-    client_secret: env.UMBRACO_OAUTH_CLIENT_SECRET,
   });
+
+  if (env.UMBRACO_OAUTH_CLIENT_SECRET) {
+    params.set("client_secret", env.UMBRACO_OAUTH_CLIENT_SECRET);
+  }
 
   const resp = await fetch(endpoints.token_endpoint, {
     method: "POST",
@@ -393,9 +396,13 @@ export function createCallbackHandler(env: HostedMcpEnv) {
       code,
       redirect_uri: callbackUrl,
       client_id: env.UMBRACO_OAUTH_CLIENT_ID,
-      client_secret: env.UMBRACO_OAUTH_CLIENT_SECRET,
       code_verifier: codeVerifier,
     });
+
+    // Only include client_secret for confidential clients
+    if (env.UMBRACO_OAUTH_CLIENT_SECRET) {
+      tokenParams.set("client_secret", env.UMBRACO_OAUTH_CLIENT_SECRET);
+    }
 
     const tokenResp = await fetch(endpoints.token_endpoint, {
       method: "POST",

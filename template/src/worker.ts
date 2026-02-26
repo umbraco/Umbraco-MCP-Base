@@ -47,6 +47,11 @@ const options = {
   modeRegistry: allModes,
   allModeNames,
   allSliceNames,
+  // If your tools use the Orval-generated API client (with named methods like
+  // client.getTreeDataTypeRoot()), provide a clientFactory so tool handlers
+  // receive the full client instead of the raw fetch function:
+  //
+  // clientFactory: () => UmbracoManagementClient.getClient(),
 };
 
 const serverOptions = getServerOptions(options);
@@ -61,13 +66,13 @@ const serverOptions = getServerOptions(options);
  * Wrangler resolves `McpAgent` from the `agents/mcp` virtual module.
  */
 export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> {
-  server: McpServer | undefined;
+  server!: McpServer;
 
   async init() {
     this.server = await createPerRequestServer(
       serverOptions,
       this.env,
-      this.props
+      this.props!
     );
   }
 }
@@ -89,7 +94,7 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
 export default new OAuthProvider({
   apiRoute: "/mcp",
   apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
-  defaultHandler: createDefaultHandler(options),
+  defaultHandler: createDefaultHandler(options) as any,
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",

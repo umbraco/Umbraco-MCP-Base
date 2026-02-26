@@ -23,7 +23,7 @@ export interface FetchClientOptions {
   /** Return the full HttpResponse instead of just data */
   returnFullResponse?: boolean;
   /** Custom status validation (defaults to throwing on non-2xx) */
-  validateStatus?: (status: number) => boolean;
+  validateStatus?: ((status: number) => boolean) | null;
 }
 
 /**
@@ -97,6 +97,11 @@ export interface UmbracoFetchClientConfig {
  * configureApiClient(() => client);
  * ```
  */
+/**
+ * The fetch client function type returned by createUmbracoFetchClient.
+ */
+export type UmbracoFetchClient = ReturnType<typeof createUmbracoFetchClient>;
+
 export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
   let currentToken = config.accessToken;
 
@@ -200,8 +205,12 @@ export async function createFetchClientFromKV(
   const tokens = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
   if (!tokens) return null;
 
+  // Use UMBRACO_SERVER_URL for server-side calls if available
+  // (supports HTTP proxy for self-signed certs in local dev)
+  const serverBaseUrl = env.UMBRACO_SERVER_URL ?? env.UMBRACO_BASE_URL;
+
   return createUmbracoFetchClient({
-    baseUrl: env.UMBRACO_BASE_URL,
+    baseUrl: serverBaseUrl,
     accessToken: tokens.access_token,
     refreshContext: tokens.refresh_token
       ? {

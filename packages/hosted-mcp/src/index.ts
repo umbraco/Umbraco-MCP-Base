@@ -70,6 +70,7 @@ export {
   createUmbracoFetchClient,
   createFetchClientFromKV,
   CAPTURE_RAW_HTTP_RESPONSE,
+  type UmbracoFetchClient,
   type UmbracoFetchClientConfig,
   type FetchClientOptions,
 } from "./http/umbraco-fetch-client.js";

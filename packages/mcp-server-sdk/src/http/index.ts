@@ -11,9 +11,12 @@ export {
   isUmbracoAxiosInitialized,
   clearUmbracoAxiosToken,
   UmbracoManagementClient,
+  // Custom transport for non-Axios environments (e.g., Workers)
+  setCustomTransport,
   // Types
   type UmbracoAxiosAuthConfig,
   type UmbracoManagementClientOptions,
+  type CustomTransport,
 } from "./umbraco-axios-client.js";
 
 // Factory for advanced use cases
