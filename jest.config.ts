@@ -4,7 +4,9 @@
  */
 const config: import("@jest/types").Config.InitialOptions = {
   projects: [
-    "<rootDir>/packages/toolkit",
+    "<rootDir>/packages/mcp-server-sdk",
+    "<rootDir>/packages/hosted-mcp",
+    "<rootDir>/packages/create-mcp-server",
     "<rootDir>/template",
     "<rootDir>/plugins",
   ],

@@ -250,14 +250,14 @@ describe("createUmbracoFetchClient", () => {
     it("retries with new token on 401 when refreshContext provided", async () => {
       // First call returns 401, refresh succeeds, retry returns 200
       const mockKV = {
-        get: jest.fn().mockResolvedValue(
+        get: jest.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(
           JSON.stringify({
             access_token: "refreshed-token",
             refresh_token: "new-refresh",
           })
         ),
-        put: jest.fn().mockResolvedValue(undefined),
-        delete: jest.fn().mockResolvedValue(undefined),
+        put: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+        delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
       };
 
       // refreshUmbracoToken uses getBackofficeEndpoints() which constructs
@@ -290,6 +290,7 @@ describe("createUmbracoFetchClient", () => {
             COOKIE_ENCRYPTION_KEY: "key",
             OAUTH_KV: mockKV as any,
             MCP_AGENT: {} as any,
+            OAUTH_PROVIDER: {} as any,
           },
           tokenKey: "test-key",
           refreshToken: "old-refresh-token",

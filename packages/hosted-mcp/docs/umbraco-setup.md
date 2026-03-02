@@ -96,6 +96,22 @@ The backoffice Settings > Users page creates **API users** that use the **client
 
 The hosted MCP server requires the **authorization code** grant type because end users authenticate interactively through Umbraco's backoffice login. This grant type requires a redirect URI, which is not configurable through the backoffice UI.
 
+## Multi-Site Setup
+
+When using multi-site deployments, each Umbraco instance needs its own OAuth client registered. The callback URLs include the site ID:
+
+```csharp
+RedirectUris =
+{
+    // Multi-site callback URL (site ID = "prod")
+    new Uri("https://my-umbraco-mcp.workers.dev/callback/prod"),
+    // Local development
+    new Uri("http://localhost:8787/callback/prod"),
+},
+```
+
+Each site can use different OAuth client IDs and secrets. Register a separate Composer (or parameterize a single one) for each Umbraco instance.
+
 ## Set Worker Secrets
 
 The Worker's credentials must match the Composer registration above:
@@ -124,6 +140,7 @@ The redirect URI registered in the Composer must exactly match the Worker's call
 | Environment | Redirect URI |
 |-------------|-------------|
 | Production | `https://my-umbraco-mcp.workers.dev/callback` |
+| Production (multi-site) | `https://my-umbraco-mcp.workers.dev/callback/:siteId` |
 | Custom domain | `https://mcp.example.com/callback` |
 | Local dev | `http://localhost:8787/callback` |
 
@@ -140,7 +157,7 @@ You can register multiple redirect URIs in the Composer for different environmen
 ## Troubleshooting
 
 **"The specified 'redirect_uri' is not valid for this client application" (OpenIdDict ID2043)**
-The callback URL sent by the Worker doesn't match any URI in the Composer's `RedirectUris`. Ensure `http://localhost:8787/callback` is listed for local dev.
+The callback URL sent by the Worker doesn't match any URI in the Composer's `RedirectUris`. Ensure `http://localhost:8787/callback` is listed for local dev. For multi-site, ensure `/callback/:siteId` is registered.
 
 **"Token exchange failed" / TLS errors in local dev**
 The Worker (workerd) cannot connect to Umbraco over HTTPS with a self-signed certificate. Use the `UMBRACO_SERVER_URL` env var to point server-side calls at an HTTP proxy:

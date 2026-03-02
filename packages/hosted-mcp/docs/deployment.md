@@ -122,6 +122,18 @@ wrangler deploy --env staging
 wrangler deploy --env production
 ```
 
+## Consent Screen Customization
+
+The consent screen can be customized with tool selection, branding, custom CSS, or a fully custom renderer.
+
+See [Customization Guide](./customization.md) for all options and examples.
+
+## Multi-Site Deployment
+
+A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/mcp`) — site selection happens during authorization via the consent screen.
+
+See [Multi-Site Deployments](./multi-site.md) for full setup instructions, route structure, and security details.
+
 ## Custom Domain
 
 ### 1. Add a custom domain in Cloudflare dashboard
@@ -136,7 +148,7 @@ mcp.example.com
 
 ### 3. Update Umbraco redirect URI
 
-Register `https://mcp.example.com/callback` as an additional redirect URI.
+Register `https://mcp.example.com/callback` as an additional redirect URI. For multi-site, register `https://mcp.example.com/callback/:siteId` for each site.
 
 ## Monitoring
 
@@ -157,5 +169,4 @@ wrangler kv key list --namespace-id YOUR_KV_NAMESPACE_ID
 ## Known Limitations
 
 - **MCP chaining not supported**: `McpClientManager` uses stdio child processes which are unavailable in Workers runtime.
-- **Per-instance deployment**: Each Worker connects to a single Umbraco instance. Multi-tenant is a future extension.
 - **Cold starts**: First request to a Durable Object may have slightly higher latency.

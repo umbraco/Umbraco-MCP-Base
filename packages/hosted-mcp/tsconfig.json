@@ -14,7 +14,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types", "@types/jest"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

@@ -13,7 +13,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 import {
   getStoredUmbracoToken,
   refreshUmbracoToken,
-} from "../auth/umbraco-handler.js";
+} from "../auth/token-storage.js";
 
 /**
  * Options for the fetch-based Umbraco management client.

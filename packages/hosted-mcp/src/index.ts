@@ -18,6 +18,7 @@
  * - Per-request McpServer factory (tool registration, filtering)
  * - Worker config loader (env bindings to SDK config)
  * - Default route handler (callback, landing page)
+ * - Multi-site support
  * - Type definitions
  *
  * @packageDocumentation
@@ -30,6 +31,7 @@
 export {
   createDefaultHandler,
   getServerOptions,
+  buildConsentToolConfig,
   type HostedMcpServerOptions,
   type AuthProps,
 } from "./server/worker-entry.js";
@@ -40,7 +42,10 @@ export {
 
 export {
   createPerRequestServer,
+  mergeConsentChoices,
+  resolveRequestSite,
   type CreateServerOptions,
+  type SiteResolver,
 } from "./server/create-server.js";
 
 // ============================================================================
@@ -50,16 +55,25 @@ export {
 export {
   createAuthorizeHandler,
   createCallbackHandler,
+} from "./auth/umbraco-handler.js";
+
+export {
   getStoredUmbracoToken,
   refreshUmbracoToken,
+} from "./auth/token-storage.js";
+
+export {
   type UmbracoUserInfo,
   type UmbracoAuthHandlerOptions,
-} from "./auth/umbraco-handler.js";
+  type ConsentChoices,
+} from "./types/auth.js";
 
 export {
   renderConsentScreen,
   consentResponse,
   type ConsentScreenOptions,
+  type ConsentToolConfig,
+  type ConsentModeOption,
 } from "./auth/consent.js";
 
 // ============================================================================
@@ -81,6 +95,7 @@ export {
 
 export {
   loadWorkerConfig,
+  loadSiteConfig,
 } from "./config/worker-config.js";
 
 // ============================================================================
@@ -92,3 +107,8 @@ export {
   type OAuthAuthRequest,
   type OAuthProviderHelpers,
 } from "./types/env.js";
+
+export {
+  type SiteConfig,
+  type MultiSiteConfig,
+} from "./types/multi-site.js";
