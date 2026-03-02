@@ -142,6 +142,19 @@ Your MCP server is now accessible at `https://my-umbraco-mcp.<your-subdomain>.wo
 
 Having issues? See [Troubleshooting](./docs/troubleshooting.md).
 
+## Routes
+
+The Worker serves several routes:
+
+| Path | Purpose |
+|------|---------|
+| `/mcp` | MCP endpoint (Streamable HTTP transport) |
+| `/authorize` | OAuth consent screen + redirect to Umbraco |
+| `/callback` | Token exchange after Umbraco login |
+| `/` | Landing page (server name, version, Umbraco instance) |
+
+The landing page at `/` shows basic server info so operators can verify the deployment is live. For multi-site deployments it lists all configured sites. Custom landing page rendering is a [planned feature](./docs/future/custom-landing-page.md).
+
 ## Features
 
 ### Consent Screen with Tool Selection
