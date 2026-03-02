@@ -20,6 +20,8 @@ export interface CollectionConfiguration {
   enabledTools: string[];
   /** Individual tool names to exclude (always excluded) */
   disabledTools: string[];
+  /** When true, only include tools with readOnlyHint annotation */
+  readOnly: boolean;
 }
 
 /**
@@ -32,4 +34,5 @@ export const DEFAULT_COLLECTION_CONFIG: CollectionConfiguration = {
   disabledSlices: [],
   enabledTools: [],
   disabledTools: [],
+  readOnly: false,
 };

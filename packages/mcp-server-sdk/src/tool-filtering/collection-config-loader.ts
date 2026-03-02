@@ -28,6 +28,8 @@ export interface ServerConfigForCollections {
   includeTools?: string[];
   /** Individual tools to exclude */
   excludeTools?: string[];
+  /** When true, only include tools with readOnlyHint annotation */
+  readOnly?: boolean;
 }
 
 /**
@@ -112,6 +114,7 @@ export function createCollectionConfigLoader(options: CollectionConfigLoaderOpti
         disabledSlices,
         enabledTools: config.includeTools ?? DEFAULT_COLLECTION_CONFIG.enabledTools,
         disabledTools: config.excludeTools ?? DEFAULT_COLLECTION_CONFIG.disabledTools,
+        readOnly: config.readOnly ?? false,
       };
     }
   };

@@ -7,6 +7,7 @@
 
 import type { ServerConfigForCollections } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
+import type { SiteConfig } from "../types/multi-site.js";
 
 /**
  * Parses a comma-separated env var into a string array.
@@ -58,13 +59,47 @@ export function loadWorkerConfig(env: HostedMcpEnv): ServerConfigForCollections 
     config.excludeSlices = excludeSlices;
   }
 
-  // Readonly mode shorthand: exclude all write slices
+  // Readonly mode: annotation-based filtering via readOnly flag
   if (env.UMBRACO_READONLY === "true") {
-    const writeSlices = ["create", "update", "delete"];
-    config.excludeSlices = [
-      ...(config.excludeSlices ?? []),
-      ...writeSlices.filter((s) => !(config.excludeSlices ?? []).includes(s)),
-    ];
+    config.readOnly = true;
+  }
+
+  return config;
+}
+
+/**
+ * Merges site-specific filter overrides into a base config.
+ *
+ * Site-level overrides (from SiteConfig) are applied on top of the base
+ * config from env vars. Site values replace base values where specified.
+ *
+ * @param site - Site-specific configuration
+ * @param baseConfig - Base config from loadWorkerConfig(env)
+ * @returns Merged configuration
+ */
+export function loadSiteConfig(
+  site: SiteConfig,
+  baseConfig: ServerConfigForCollections
+): ServerConfigForCollections {
+  const config = { ...baseConfig };
+
+  const siteModes = parseCsv(site.toolModes);
+  if (siteModes.length > 0) {
+    config.toolModes = siteModes;
+  }
+
+  const siteIncludeSlices = parseCsv(site.includeSlices);
+  if (siteIncludeSlices.length > 0) {
+    config.includeSlices = siteIncludeSlices;
+  }
+
+  const siteExcludeSlices = parseCsv(site.excludeSlices);
+  if (siteExcludeSlices.length > 0) {
+    config.excludeSlices = siteExcludeSlices;
+  }
+
+  if (site.readOnly === "true") {
+    config.readOnly = true;
   }
 
   return config;

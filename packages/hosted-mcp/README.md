@@ -12,12 +12,25 @@ Hosted MCP enables AI assistants to access your Umbraco instance remotely via th
 
 Both modes use the **same tool collections** - no code changes required.
 
+## Key Concepts
+
+**Streamable HTTP** — The MCP transport protocol used for hosted servers. Unlike stdio (stdin/stdout for local tools), Streamable HTTP sends MCP messages over standard HTTP requests, enabling remote access.
+
+**Wrangler Virtual Modules** — `agents/mcp` and `@cloudflare/workers-oauth-provider` are provided by Wrangler at build time, not installed via npm. Your TypeScript editor won't resolve them — this is expected. This package re-exports the types you need (like `AuthProps` and `HostedMcpEnv`).
+
+**Three-Tier Configuration** — Tool availability is controlled by three layers, each narrowing the one above:
+- **Admin** (env vars) — Maximum boundary set by DevOps
+- **Operator** (worker.ts code) — What's available, set by the developer
+- **User** (consent screen) — What they get, chosen at authorization time
+
+**Per-Request Server** — Each MCP request creates a fresh `McpServer` instance. Required by the MCP SDK to prevent data leakage between clients.
+
 ## Prerequisites
 
 - [Cloudflare account](https://dash.cloudflare.com/sign-up)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`npm install -g wrangler`)
 - An Umbraco instance with Management API enabled
-- The Umbraco instance must have the hosted MCP server registered as an OAuth client (see [Umbraco Setup](./umbraco-setup.md))
+- The Umbraco instance must have the hosted MCP server registered as an OAuth client (see [Umbraco Setup](./docs/umbraco-setup.md))
 
 ## Quick Start
 
@@ -103,9 +116,12 @@ new_sqlite_classes = ["UmbracoMcpAgent"]
 ### 4. Set secrets
 
 ```bash
+# Single-site only (multi-site defines these per site in code)
 wrangler secret put UMBRACO_BASE_URL
 wrangler secret put UMBRACO_OAUTH_CLIENT_ID
 wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
+
+# Always required
 wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
 ```
 
@@ -124,10 +140,52 @@ wrangler deploy
 
 Your MCP server is now accessible at `https://my-umbraco-mcp.<your-subdomain>.workers.dev/mcp`.
 
+Having issues? See [Troubleshooting](./docs/troubleshooting.md).
+
+## Features
+
+### Consent Screen with Tool Selection
+
+Enable tool selection on the consent screen so users can choose which tool modes they want:
+
+```typescript
+const options = {
+  name: "my-umbraco-mcp",
+  version: "1.0.0",
+  collections: [myCollection],
+  modeRegistry: allModes,
+  allModeNames,
+  allSliceNames,
+  enableConsentToolSelection: true, // Shows mode checkboxes + read-only toggle
+};
+```
+
+See [Architecture - Three-Tier Configuration](./docs/architecture.md#three-tier-configuration) for how admin, operator, and user configurations interact.
+
+### Multi-Site Support
+
+A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/mcp`) — site selection happens during authorization via the consent screen's site picker.
+
+See [Multi-Site Deployments](./docs/multi-site.md) for setup instructions, route structure, and security details.
+
 ## Documentation
 
-- [Architecture](./architecture.md) - How the auth flow and server architecture works
-- [Security](./security.md) - Security model and MCP spec compliance
-- [Umbraco Setup](./umbraco-setup.md) - How to configure your Umbraco instance
-- [Deployment](./deployment.md) - Detailed deployment guide
-- [API Reference](./api-reference.md) - Package exports and configuration options
+**Getting Started** (read in order):
+1. [Umbraco Setup](./docs/umbraco-setup.md) — Register the Worker as an OAuth client (one-time)
+2. [Deployment](./docs/deployment.md) — Deploy, set secrets, verify the connection
+
+**Guides**:
+3. [Customization](./docs/customization.md) — Consent screen tool selection, branding, and custom rendering
+4. [Multi-Site Deployments](./docs/multi-site.md) — Serve multiple Umbraco instances from one Worker
+
+**Understanding the System**:
+5. [Token Isolation](./docs/token-isolation.md) — How Umbraco tokens stay hidden from MCP clients (start here)
+6. [Architecture](./docs/architecture.md) — Auth flow, three-tier config, component diagram
+7. [Auth Internals](./docs/auth-internals.md) — KV state schema, token lifecycle, consent extraction
+8. [Security](./docs/security.md) — Token isolation, PKCE, MCP spec compliance
+
+**Reference**:
+9. [API Reference](./docs/api-reference.md) — All exports, types, and interfaces
+10. [Troubleshooting](./docs/troubleshooting.md) — Common errors and fixes
+
+**Roadmap**: See [docs/future/](./docs/future/) for planned features.

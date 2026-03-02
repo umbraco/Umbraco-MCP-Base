@@ -9,6 +9,7 @@ function createMockEnv(overrides: Partial<HostedMcpEnv> = {}): HostedMcpEnv {
     COOKIE_ENCRYPTION_KEY: "abc123",
     OAUTH_KV: {} as KVNamespace,
     MCP_AGENT: {} as DurableObjectNamespace,
+    OAUTH_PROVIDER: {} as any,
     ...overrides,
   };
 }
@@ -69,45 +70,37 @@ describe("loadWorkerConfig", () => {
   });
 
   describe("UMBRACO_READONLY", () => {
-    it('adds create, update, delete to excludeSlices when "true"', () => {
+    it('sets readOnly to true when "true"', () => {
       const config = loadWorkerConfig(
         createMockEnv({ UMBRACO_READONLY: "true" })
       );
-      expect(config.excludeSlices).toEqual(
-        expect.arrayContaining(["create", "update", "delete"])
-      );
+      expect(config.readOnly).toBe(true);
     });
 
-    it("does not add write slices when UMBRACO_READONLY is not true", () => {
+    it("does not set readOnly when UMBRACO_READONLY is not true", () => {
       const config = loadWorkerConfig(
         createMockEnv({ UMBRACO_READONLY: "false" })
       );
-      expect(config.excludeSlices).toBeUndefined();
+      expect(config.readOnly).toBeUndefined();
     });
 
-    it("merges with existing excludeSlices", () => {
+    it("does not add write slices to excludeSlices (uses annotation-based filtering)", () => {
+      const config = loadWorkerConfig(
+        createMockEnv({ UMBRACO_READONLY: "true" })
+      );
+      expect(config.excludeSlices).toBeUndefined();
+      expect(config.readOnly).toBe(true);
+    });
+
+    it("preserves existing excludeSlices when readOnly is set", () => {
       const config = loadWorkerConfig(
         createMockEnv({
           UMBRACO_EXCLUDE_SLICES: "search",
           UMBRACO_READONLY: "true",
         })
       );
-      expect(config.excludeSlices).toEqual(
-        expect.arrayContaining(["search", "create", "update", "delete"])
-      );
-    });
-
-    it("does not duplicate slices already in excludeSlices", () => {
-      const config = loadWorkerConfig(
-        createMockEnv({
-          UMBRACO_EXCLUDE_SLICES: "delete",
-          UMBRACO_READONLY: "true",
-        })
-      );
-      const deleteCount = config.excludeSlices!.filter(
-        (s) => s === "delete"
-      ).length;
-      expect(deleteCount).toBe(1);
+      expect(config.excludeSlices).toEqual(["search"]);
+      expect(config.readOnly).toBe(true);
     });
   });
 

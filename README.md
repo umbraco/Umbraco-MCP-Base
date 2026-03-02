@@ -31,6 +31,15 @@ CLI tool for scaffolding, configuring, and discovering APIs for new MCP server p
 npx @umbraco-cms/create-umbraco-mcp-server my-mcp-server
 ```
 
+### [@umbraco-cms/mcp-hosted](./packages/hosted-mcp)
+
+Building blocks for deploying Umbraco MCP servers to Cloudflare Workers with OAuth authentication and Streamable HTTP transport. Provides consent-screen tool selection, three-tier configuration, and multi-site deployments.
+
+**Install from npm:**
+```bash
+npm install @umbraco-cms/mcp-hosted
+```
+
 ### [Claude Code Plugin](./plugins)
 
 Skills and agents for building Umbraco MCP servers in Claude Code. Covers Phases 4-5 of the [development workflow](./packages/create-mcp-server/README.md) — tool implementation, testing, and LLM evaluation.
@@ -93,6 +102,14 @@ Umbraco-MCP-Base/
 │   │   │   ├── evals/         # LLM-based acceptance testing
 │   │   │   └── types/         # Tool and collection types
 │   │   └── package.json
+│   │
+│   ├── hosted-mcp/            # @umbraco-cms/mcp-hosted (npm package)
+│   │   ├── src/
+│   │   │   ├── auth/          # OAuth flow, consent screen
+│   │   │   ├── server/        # Per-request server, worker entry helpers
+│   │   │   ├── config/        # Worker env config loader
+│   │   │   └── http/          # Fetch-based API client for Workers
+│   │   └── docs/              # Setup, deployment, architecture docs
 │   │
 │   └── create-mcp-server/     # @umbraco-cms/create-umbraco-mcp-server CLI (npm package)
 │       └── src/
