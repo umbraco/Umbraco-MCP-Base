@@ -12,3 +12,4 @@ settings.local.json
 .claude/projects/
 .worktrees/
 .wrangler/
+test-results/
