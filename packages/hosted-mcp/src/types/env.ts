@@ -106,4 +106,8 @@ export interface HostedMcpEnv {
   // Multi-site (optional, alternative to per-env vars)
   /** JSON-encoded array of SiteConfig objects for multi-site deployments */
   UMBRACO_SITES?: string;
+
+  // Diagnostic (optional)
+  /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
+  ENABLE_INFO_ENDPOINT?: string;
 }

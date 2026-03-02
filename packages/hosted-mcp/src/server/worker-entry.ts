@@ -27,6 +27,7 @@ import {
 } from "../auth/umbraco-handler.js";
 import type { ConsentToolConfig } from "../auth/consent.js";
 import { type CreateServerOptions, type SiteResolver } from "./create-server.js";
+import { loadWorkerConfig } from "../config/worker-config.js";
 
 /**
  * Options for creating a hosted MCP server Worker.
@@ -190,6 +191,11 @@ async function handleSingleSiteRequest(
     return renderLandingPageResponse(options.name, options.version, env.UMBRACO_BASE_URL);
   }
 
+  // Diagnostic endpoint (dev-only)
+  if (path === "/info" && env.ENABLE_INFO_ENDPOINT === "true") {
+    return renderInfoResponse(options, env);
+  }
+
   return new Response("Not Found", { status: 404 });
 }
 
@@ -234,6 +240,11 @@ async function handleMultiSiteRequest(
   // Landing page with site listing
   if (path === "/" || path === "") {
     return renderMultiSiteLandingResponse(options.name, options.version, multiSite);
+  }
+
+  // Diagnostic endpoint (dev-only)
+  if (path === "/info" && env.ENABLE_INFO_ENDPOINT === "true") {
+    return renderMultiSiteInfoResponse(options, env, multiSite);
   }
 
   return new Response("Not Found", { status: 404 });
@@ -442,6 +453,58 @@ function renderMultiSiteLandingPage(
   </div>
 </body>
 </html>`;
+}
+
+// ============================================================================
+// Info Endpoint
+// ============================================================================
+
+function renderInfoResponse(
+  options: HostedMcpServerOptions,
+  env: HostedMcpEnv,
+): Response {
+  const workerConfig = loadWorkerConfig(env);
+  return Response.json({
+    name: options.name,
+    version: options.version,
+    transport: "streamable-http",
+    mcpEndpoint: "/mcp",
+    collections: options.collections.map((c) => ({
+      name: c.metadata.name,
+      displayName: c.metadata.displayName,
+      toolCount: c.tools(undefined).length,
+    })),
+    modes: [...options.allModeNames],
+    slices: [...options.allSliceNames].filter((s) => s !== "other"),
+    config: workerConfig,
+  });
+}
+
+function renderMultiSiteInfoResponse(
+  options: HostedMcpServerOptions,
+  env: HostedMcpEnv,
+  multiSite: MultiSiteConfig,
+): Response {
+  const workerConfig = loadWorkerConfig(env);
+  return Response.json({
+    name: options.name,
+    version: options.version,
+    transport: "streamable-http",
+    mcpEndpoint: "/mcp",
+    collections: options.collections.map((c) => ({
+      name: c.metadata.name,
+      displayName: c.metadata.displayName,
+      toolCount: c.tools(undefined).length,
+    })),
+    modes: [...options.allModeNames],
+    slices: [...options.allSliceNames].filter((s) => s !== "other"),
+    config: workerConfig,
+    sites: multiSite.sites.map((s) => ({
+      id: s.id,
+      displayName: s.displayName,
+      baseUrl: s.baseUrl,
+    })),
+  });
 }
 
 function escapeHtml(str: string): string {

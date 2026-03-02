@@ -32,6 +32,10 @@ import {
 // Import tool collections (same as stdio mode)
 import exampleCollection from "./umbraco-api/tools/example/index.js";
 import example2Collection from "./umbraco-api/tools/example-2/index.js";
+import umbracoServerCollection from "./umbraco-api/tools/umbraco-server/index.js";
+
+// Import the Orval-generated API client (same factory as stdio mode)
+import { getExampleUmbracoAddOnAPI } from "./umbraco-api/api/generated/exampleApi.js";
 
 // Import registries for tool filtering (same as stdio mode)
 import { allModes, allModeNames, allSliceNames } from "./config/index.js";
@@ -43,15 +47,13 @@ import { allModes, allModeNames, allSliceNames } from "./config/index.js";
 const options = {
   name: "my-umbraco-mcp",
   version: "1.0.0",
-  collections: [exampleCollection, example2Collection],
+  collections: [exampleCollection, example2Collection, umbracoServerCollection],
   modeRegistry: allModes,
   allModeNames,
   allSliceNames,
-  // If your tools use the Orval-generated API client (with named methods like
-  // client.getTreeDataTypeRoot()), provide a clientFactory so tool handlers
-  // receive the full client instead of the raw fetch function:
-  //
-  // clientFactory: () => UmbracoManagementClient.getClient(),
+  // Connect the Orval-generated API client so tool handlers can call
+  // Umbraco's Management API using the authenticated user's token.
+  clientFactory: () => getExampleUmbracoAddOnAPI(),
 };
 
 const serverOptions = getServerOptions(options);

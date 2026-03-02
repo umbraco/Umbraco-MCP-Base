@@ -152,8 +152,11 @@ The Worker serves several routes:
 | `/authorize` | OAuth consent screen + redirect to Umbraco |
 | `/callback` | Token exchange after Umbraco login |
 | `/` | Landing page (server name, version, Umbraco instance) |
+| `/info` | Diagnostic JSON endpoint (dev-only, requires `ENABLE_INFO_ENDPOINT=true`) |
 
 The landing page at `/` shows basic server info so operators can verify the deployment is live. For multi-site deployments it lists all configured sites. Custom landing page rendering is a [planned feature](./docs/future/custom-landing-page.md).
+
+The `/info` endpoint returns JSON with available collections, modes, slices, and active config. It is gated behind the `ENABLE_INFO_ENDPOINT` environment variable and returns 404 when not enabled. Add `ENABLE_INFO_ENDPOINT=true` to `.dev.vars` for local development.
 
 ## Features
 
