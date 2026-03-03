@@ -15,7 +15,9 @@
     "build:all": "npm run build && npm run build:hosted && npm run build:create",
     "clean": "npm run clean -w packages/mcp-server-sdk",
     "compile": "npm run compile -w packages/mcp-server-sdk",
-    "test": "npm run test -w packages/mcp-server-sdk"
+    "test": "npm run test -w packages/mcp-server-sdk",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
+    "test:e2e": "npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts"
   },
   "engines": {
     "node": ">=22.0.0"

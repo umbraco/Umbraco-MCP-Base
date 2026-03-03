@@ -25,8 +25,8 @@ export async function startWorker(): Promise<Unstable_DevWorker> {
     return worker;
   }
 
-  worker = await unstable_dev("src/worker.ts", {
-    config: "wrangler.integration.toml",
+  worker = await unstable_dev("template/src/worker.ts", {
+    config: "tests/hosted-mcp-e2e/wrangler.integration.toml",
     experimental: { disableExperimentalWarning: true },
     vars: {
       UMBRACO_BASE_URL: "https://localhost:5201",

@@ -10,8 +10,8 @@ let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
 export async function startWorker(): Promise<string> {
-  worker = await unstable_dev("src/worker.ts", {
-    config: "wrangler.integration.toml",
+  worker = await unstable_dev("template/src/worker.ts", {
+    config: "tests/hosted-mcp-e2e/wrangler.integration.toml",
     port: 8787,
     experimental: { disableExperimentalWarning: true },
     vars: {

@@ -4,20 +4,20 @@ const config: Config = {
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
-  rootDir: "../..",
+  rootDir: ".",
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
-    "^@/(.*)$": "<rootDir>/src/$1",
   },
   transform: {
     "^.+\\.tsx?$": [
       "ts-jest",
       {
         useESM: true,
+        tsconfig: "<rootDir>/../tsconfig.json",
       },
     ],
   },
-  testMatch: ["<rootDir>/tests/integration/**/*.test.ts"],
+  testMatch: ["**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   maxWorkers: 1,

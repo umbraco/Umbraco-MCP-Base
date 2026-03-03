@@ -18,8 +18,6 @@
     "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
     "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
     "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:integration": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/integration/jest.config.ts --runInBand --forceExit",
-    "test:e2e": "npx playwright test --config tests/e2e/playwright.config.ts",
     "dev:worker": "npx wrangler dev",
     "deploy:worker": "npx wrangler deploy"
   },

@@ -3,7 +3,7 @@
 # Secrets loaded from .dev.vars.integration.
 
 name = "my-umbraco-mcp-test"
-main = "src/worker.ts"
+main = "../../template/src/worker.ts"
 compatibility_date = "2025-02-24"
 compatibility_flags = ["nodejs_compat"]
 
