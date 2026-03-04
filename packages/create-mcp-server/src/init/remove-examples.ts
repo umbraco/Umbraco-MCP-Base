@@ -80,11 +80,6 @@ export function removeExamples(projectDir: string): number {
       /\s*\{\s*name:\s*['"]example-2['"][\s\S]*?collections:\s*\[['"]example-2['"]\]\s*\},?/g,
       ""
     );
-    content = content.replace(
-      /\s*\{\s*name:\s*['"]all-examples['"][\s\S]*?collections:\s*\[['"]example['"],\s*['"]example-2['"]\]\s*\},?/g,
-      ""
-    );
-
     // Clean up trailing commas and empty arrays
     content = content.replace(/,(\s*\])/g, "$1");
     content = content.replace(/\[\s*,/g, "[");

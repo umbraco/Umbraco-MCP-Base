@@ -130,18 +130,25 @@ export function buildConsentToolConfig(
  * @returns ExportedHandler object for non-MCP routes
  */
 export function createDefaultHandler(options: HostedMcpServerOptions) {
-  // Build consent tool config if enableConsentToolSelection is set
-  const consentToolConfig = buildConsentToolConfig(options);
-
-  // Merge auto-generated tool config and multi-site config into auth options
-  const effectiveAuthOptions: UmbracoAuthHandlerOptions = {
-    ...options.authOptions,
-    ...(consentToolConfig ? { consentToolConfig } : {}),
-    ...(options.multiSite ? { sites: options.multiSite.sites } : {}),
-  };
-
   return {
     async fetch(request: Request, env: HostedMcpEnv): Promise<Response> {
+      // Resolve enableConsentToolSelection: explicit option wins, then env var fallback
+      const enableConsent = options.enableConsentToolSelection
+        ?? env.ENABLE_CONSENT_TOOL_SELECTION === "true";
+      const optionsWithConsent = enableConsent
+        ? { ...options, enableConsentToolSelection: true }
+        : options;
+
+      // Build consent tool config (only if enableConsentToolSelection resolved to true)
+      const consentToolConfig = buildConsentToolConfig(optionsWithConsent);
+
+      // Merge auto-generated tool config and multi-site config into auth options
+      const effectiveAuthOptions: UmbracoAuthHandlerOptions = {
+        ...options.authOptions,
+        ...(consentToolConfig ? { consentToolConfig } : {}),
+        ...(options.multiSite ? { sites: options.multiSite.sites } : {}),
+      };
+
       return handleDefaultRequest(request, env, options, effectiveAuthOptions);
     },
   };

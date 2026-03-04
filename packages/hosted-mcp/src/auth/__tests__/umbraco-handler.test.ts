@@ -328,6 +328,23 @@ describe("createAuthorizeHandler", () => {
     });
   });
 
+  describe("POST — always forces Umbraco login", () => {
+    it("always sets prompt=login on approve redirect", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody(),
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("prompt")).toBe("login");
+    });
+  });
+
   describe("POST — approve with consent choices", () => {
     it("stores selectedModes from form", async () => {
       const env = createMockEnv();

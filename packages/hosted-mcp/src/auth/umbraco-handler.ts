@@ -202,6 +202,11 @@ export function createAuthorizeHandler(
       authUrl.searchParams.set("code_challenge", codeChallenge);
       authUrl.searchParams.set("code_challenge_method", "S256");
 
+      // Always force the Umbraco login form. Without this, Umbraco's
+      // session cookie silently re-authenticates the same user — there
+      // would be no way to switch accounts between MCP sessions.
+      authUrl.searchParams.set("prompt", "login");
+
       return Response.redirect(authUrl.toString(), 302);
     }
 

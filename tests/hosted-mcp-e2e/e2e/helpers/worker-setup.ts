@@ -9,18 +9,21 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
-export async function startWorker(): Promise<string> {
+const BASE_VARS = {
+  UMBRACO_BASE_URL: "https://localhost:5201",
+  UMBRACO_SERVER_URL: "http://localhost:5200",
+  UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+  COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  ENABLE_INFO_ENDPOINT: "true",
+};
+
+export async function startWorker(varsOverride?: Record<string, string>): Promise<string> {
   worker = await unstable_dev("template/src/worker.ts", {
     config: "tests/hosted-mcp-e2e/wrangler.integration.toml",
     port: 8787,
     experimental: { disableExperimentalWarning: true },
-    vars: {
-      UMBRACO_BASE_URL: "https://localhost:5201",
-      UMBRACO_SERVER_URL: "http://localhost:5200",
-      UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
-      COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      ENABLE_INFO_ENDPOINT: "true",
-    },
+    vars: { ...BASE_VARS, ...varsOverride },
+    logLevel: "error",
   });
 
   // unstable_dev provides address and port

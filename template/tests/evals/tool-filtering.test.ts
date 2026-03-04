@@ -298,33 +298,6 @@ describe("Tool Filtering", () => {
       timeout
     );
 
-    it(
-      "should expose both collections when UMBRACO_TOOL_MODES=all-examples",
-      async () => {
-        const result = await runAgentTest(
-          "List all available tools you can use.",
-          [],
-          {
-            serverEnv: {
-              ...BASE_ENV,
-              UMBRACO_TOOL_MODES: "all-examples",
-            },
-            useServerFiltering: true,
-            maxTurns: 1,
-            verbosity: "quiet",
-          }
-        );
-
-        const shortNames = result.availableTools.map(getShortToolName);
-
-        // All-examples mode maps to both collections
-        expect(shortNames).toContain("get-example");
-        expect(shortNames).toContain("list-examples");
-        expect(shortNames).toContain("get-widget");
-        expect(shortNames).toContain("list-widgets");
-      },
-      timeout
-    );
   });
 
   describe("Individual Tool Filtering", () => {

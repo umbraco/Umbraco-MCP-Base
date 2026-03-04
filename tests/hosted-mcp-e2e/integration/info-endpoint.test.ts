@@ -59,7 +59,7 @@ describe("/info endpoint", () => {
     const response = await workerFetch("/info");
     const info = await response.json();
     expect(info.modes).toEqual(
-      expect.arrayContaining(["example", "example-2", "all-examples"])
+      expect.arrayContaining(["example", "example-2", "umbraco-server"])
     );
   });
 

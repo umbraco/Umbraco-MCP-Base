@@ -1,6 +1,7 @@
 import type { Config } from "jest";
 
 const config: Config = {
+  displayName: "hosted-mcp-integration",
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],

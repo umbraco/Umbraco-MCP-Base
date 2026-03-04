@@ -48,6 +48,24 @@ describe("Consent screen", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
   });
 
+  it("consent page shows only approve and deny buttons", async () => {
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: "http://localhost:9999/callback",
+      response_type: "code",
+      state: "test-state-buttons",
+      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      code_challenge_method: "S256",
+    });
+
+    const response = await workerFetch(`/authorize?${params}`);
+    const body = await response.text();
+    expect(body).toContain('value="approve"');
+    expect(body).toContain('value="deny"');
+    // No reauth button — prompt=login is always set on redirect
+    expect(body).not.toContain('value="reauth"');
+  });
+
   it("consent page shows the Umbraco base URL", async () => {
     const params = new URLSearchParams({
       client_id: clientId,

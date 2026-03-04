@@ -9,7 +9,12 @@
  * beforeAll — it will reuse the existing instance if already running.
  */
 
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { unstable_dev, type Unstable_DevWorker } from "wrangler";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const MONOREPO_ROOT = resolve(__dirname, "../../../..");
 
 let worker: Unstable_DevWorker | undefined;
 let refCount = 0;
@@ -25,8 +30,8 @@ export async function startWorker(): Promise<Unstable_DevWorker> {
     return worker;
   }
 
-  worker = await unstable_dev("template/src/worker.ts", {
-    config: "tests/hosted-mcp-e2e/wrangler.integration.toml",
+  worker = await unstable_dev(resolve(MONOREPO_ROOT, "template/src/worker.ts"), {
+    config: resolve(MONOREPO_ROOT, "tests/hosted-mcp-e2e/wrangler.integration.toml"),
     experimental: { disableExperimentalWarning: true },
     vars: {
       UMBRACO_BASE_URL: "https://localhost:5201",
@@ -35,6 +40,7 @@ export async function startWorker(): Promise<Unstable_DevWorker> {
       COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       ENABLE_INFO_ENDPOINT: "true",
     },
+    logLevel: "error",
   });
 
   refCount = 1;
@@ -60,7 +66,7 @@ export async function stopWorker(): Promise<void> {
  */
 export async function workerFetch(
   pathOrUrl: string,
-  init?: RequestInit,
+  init?: Parameters<Unstable_DevWorker["fetch"]>[1],
 ): Promise<Response> {
   if (!worker) {
     throw new Error("Worker not started. Call startWorker() first.");

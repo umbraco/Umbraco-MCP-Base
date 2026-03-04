@@ -30,6 +30,7 @@ export async function startInspector(): Promise<string> {
           ...process.env,
           CLIENT_PORT: String(INSPECTOR_PORT),
           SERVER_PORT: String(INSPECTOR_PROXY_PORT),
+          MCP_AUTO_OPEN_ENABLED: "false",
         },
       },
     );

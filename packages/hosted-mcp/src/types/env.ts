@@ -107,6 +107,10 @@ export interface HostedMcpEnv {
   /** JSON-encoded array of SiteConfig objects for multi-site deployments */
   UMBRACO_SITES?: string;
 
+  // Consent tool selection (optional)
+  /** Set to "true" to enable tool selection on the consent screen */
+  ENABLE_CONSENT_TOOL_SELECTION?: string;
+
   // Diagnostic (optional)
   /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
   ENABLE_INFO_ENDPOINT?: string;

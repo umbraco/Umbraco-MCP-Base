@@ -33,6 +33,12 @@ Tool selection is the **user tier** — it can only narrow what the admin tier a
 
 See [Architecture - How tiers combine](./architecture.md#how-tiers-combine) for the full cascade.
 
+## User Switching
+
+The Worker always appends `prompt=login` to the Umbraco authorization URL. This forces the Umbraco login form to appear on every authorization, regardless of any existing session cookie. Without this, Umbraco's session cookie would silently re-authenticate the same user, leaving no way to switch accounts between MCP sessions.
+
+This is automatic — no configuration required.
+
 ## Custom Server Name
 
 Display a custom name in the consent screen header:
