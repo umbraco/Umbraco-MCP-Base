@@ -4,7 +4,7 @@ A single Cloudflare Worker can serve multiple Umbraco instances. This is useful 
 
 ## How It Works
 
-All sites share a single MCP endpoint (`/mcp`). Site selection happens during authorization — the consent screen shows a **site picker** where the user chooses which Umbraco instance to connect to.
+All sites share a single MCP endpoint (`/`). Site selection happens during authorization — the consent screen shows a **site picker** where the user chooses which Umbraco instance to connect to.
 
 The multi-site flow adds two extra steps to the standard OAuth flow (see [Architecture - Auth Flow](./architecture.md#auth-flow) for the full sequence):
 1. The consent screen includes a **site picker** (radio buttons) — the user selects which Umbraco instance to authorize against
@@ -121,10 +121,9 @@ export default new OAuthProvider({
 
 | Route | Description |
 |-------|-------------|
-| `/mcp` | MCP endpoint (shared by all sites) |
+| `/` | MCP endpoint (shared by all sites) — browser visits show site listing |
 | `/authorize` | Consent screen with site picker |
 | `/callback/:siteId` | OAuth callback (siteId matches Umbraco's registered redirect_uri) |
-| `/` | Landing page showing all available sites |
 
 ## How Site Credentials Flow
 

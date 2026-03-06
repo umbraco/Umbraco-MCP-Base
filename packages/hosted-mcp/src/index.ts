@@ -30,6 +30,7 @@
 
 export {
   createDefaultHandler,
+  createWorkerExport,
   getServerOptions,
   buildConsentToolConfig,
   type HostedMcpServerOptions,
@@ -55,6 +56,7 @@ export {
 export {
   createAuthorizeHandler,
   createCallbackHandler,
+  createLogoutCallbackHandler,
 } from "./auth/umbraco-handler.js";
 
 export {

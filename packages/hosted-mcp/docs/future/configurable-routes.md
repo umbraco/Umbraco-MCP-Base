@@ -2,7 +2,7 @@
 
 ## Problem
 
-The current route paths (`/authorize`, `/callback`, `/mcp`) are hardcoded. Some deployments may need different paths — for example, when running behind a reverse proxy that maps routes differently, or to avoid conflicts with existing application routes.
+The current route paths (`/authorize`, `/callback`, `/`) are hardcoded. Some deployments may need different paths — for example, when running behind a reverse proxy that maps routes differently, or to avoid conflicts with existing application routes.
 
 ## Proposed API
 

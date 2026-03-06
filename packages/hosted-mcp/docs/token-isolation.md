@@ -46,7 +46,7 @@ sequenceDiagram
 
     Note over Client,Umbraco: Phase 1 — MCP Client discovers the Worker's OAuth server
 
-    Client->>Worker: GET /mcp (no token)
+    Client->>Worker: GET / (no token)
     Worker-->>Client: 401 + OAuth discovery URL
 
     Client->>Worker: GET /.well-known/oauth-authorization-server
@@ -88,7 +88,7 @@ sequenceDiagram
 
     Note over Client,Umbraco: Phase 5 — Authenticated tool calls
 
-    Client->>Worker: POST /mcp + Bearer {Worker token}
+    Client->>Worker: POST / + Bearer {Worker token}
     Worker->>KV: GET umbraco_token:{key from props}
     KV-->>Worker: { access_token, refresh_token }
     Worker->>Umbraco: GET /api/v1/... + Bearer {Umbraco token}
@@ -141,7 +141,7 @@ sequenceDiagram
     participant KV as Workers KV
     participant Umbraco as Umbraco API
 
-    Client->>Provider: POST /mcp + Bearer {Worker token}
+    Client->>Provider: POST / + Bearer {Worker token}
     Provider->>Provider: Validate Worker token, extract props
     Provider->>Agent: init(props: { umbracoTokenKey: "a3f7..." })
 

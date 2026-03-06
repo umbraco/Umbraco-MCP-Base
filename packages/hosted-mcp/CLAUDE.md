@@ -9,11 +9,25 @@ Building blocks for deploying Umbraco MCP servers to Cloudflare Workers with OAu
 ## Commands
 
 ```bash
-npm run build          # Build with tsup
-npm run compile        # Type-check only
+npm run build              # Build with tsup
+npm run compile            # Type-check only
+npm run test               # Run unit tests (alias for test:unit)
+npm run test:unit          # Unit tests (jest, in-package)
+npm run test:integration   # Integration tests (wrangler unstable_dev, requires build)
+npm run test:e2e           # E2E tests (Playwright, requires running Umbraco + Worker)
 ```
 
 Build from monorepo root: `npm run build -w packages/hosted-mcp`
+
+## Quality Gates
+
+After every change:
+1. TypeScript must compile cleanly: `npm run compile`
+2. Unit tests must pass: `npm run test:unit`
+3. Integration tests must pass: `npm run test:integration`
+4. Never delete or skip a test to make it pass — fix the code or fix the test
+
+E2E tests (`npm run test:e2e`) are run manually — they require a running Umbraco instance and Worker.
 
 ## Architecture
 
@@ -21,7 +35,8 @@ This package provides **library code** that consumers use in their `worker.ts`. 
 
 ### What this package provides:
 - `createPerRequestServer()` - Per-request McpServer factory (with consent choice merging)
-- `createDefaultHandler()` - Route handler for /authorize, /callback, landing page, and multi-site routes
+- `createWorkerExport()` - URL rewrite wrapper — serves landing page for browser GET `/`, rewrites MCP requests from `/` to `/mcp` for OAuthProvider
+- `createDefaultHandler()` - Route handler for /authorize, /callback, and multi-site routes
 - `getServerOptions()` - Config extraction helper
 - `buildConsentToolConfig()` - Auto-generate consent tool config from mode registry
 - `mergeConsentChoices()` - Narrow admin config with user consent choices
@@ -34,6 +49,7 @@ This package provides **library code** that consumers use in their `worker.ts`. 
 ### What the consumer provides (in worker.ts):
 - `McpAgent` from `agents/mcp` (Wrangler virtual module)
 - `OAuthProvider` from `@cloudflare/workers-oauth-provider` (Wrangler virtual module)
+- Wrapping the OAuthProvider with `createWorkerExport()` to handle URL rewriting and the landing page
 - Wiring these together with our building blocks
 - Use `McpAgent.serve()` (Streamable HTTP), NOT `.mount()` (SSE legacy alias)
 - Pass `{ binding: "MCP_AGENT" }` if the DO binding name differs from the default `MCP_OBJECT`

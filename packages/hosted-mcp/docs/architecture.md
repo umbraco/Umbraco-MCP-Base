@@ -11,7 +11,7 @@ This "Third-Party Authorization Flow" is mandated by the MCP Authorization spec 
 ```
 MCP Client                    Worker                         Umbraco
     │                           │                               │
-    │── 1. Connect /mcp ───────>│                               │
+    │── 1. Connect / ──────────>│                               │
     │<── 2. 401 + discovery ────│                               │
     │                           │                               │
     │── 3. GET /.well-known ───>│                               │
@@ -43,7 +43,7 @@ MCP Client                    Worker                         Umbraco
     │── 14. POST /token ───────>│                               │
     │<── Worker access token ───│                               │
     │                           │                               │
-    │── 15. /mcp + Bearer ─────>│                               │
+    │── 15. / + Bearer ────────>│                               │
     │                           │── 16. Look up Umbraco token   │
     │                           │── 17. Merge env config with   │
     │                           │       consent choices         │
@@ -167,7 +167,7 @@ The merge rule is **intersection**: if admin allows `[content, media]` and the u
 
 ## Multi-Site Architecture
 
-A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/mcp`) — site selection happens during authorization via the consent form. See [Multi-Site Deployments](./multi-site.md) for setup instructions.
+A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/`) — site selection happens during authorization via the consent form. See [Multi-Site Deployments](./multi-site.md) for setup instructions.
 
 ### Why a single endpoint?
 
@@ -178,10 +178,9 @@ Instead, when multiple sites are configured, the consent screen shows a **site p
 ### Route structure
 
 ```
-/mcp                 — MCP endpoint (shared by all sites)
+/                    — MCP endpoint (shared by all sites) — browser visits show site listing
 /authorize           — Consent screen with site picker
 /callback/:siteId    — OAuth callback (siteId matches Umbraco's redirect_uri)
-/                    — Landing page showing all available sites
 ```
 
 ### How site credentials flow

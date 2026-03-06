@@ -35,9 +35,36 @@ See [Architecture - How tiers combine](./architecture.md#how-tiers-combine) for 
 
 ## User Switching
 
-The Worker always appends `prompt=login` to the Umbraco authorization URL. This forces the Umbraco login form to appear on every authorization, regardless of any existing session cookie. Without this, Umbraco's session cookie would silently re-authenticate the same user, leaving no way to switch accounts between MCP sessions.
+When a user completes the OAuth flow, Umbraco sets a browser session cookie. On subsequent authorizations in the same browser, Umbraco skips the login form and silently re-authenticates via this cookie — there's no way to switch accounts.
 
-This is automatic — no configuration required.
+Enable the "Log in as different user" button on the consent screen:
+
+```typescript
+const options = {
+  // ...
+  authOptions: {
+    showReauthButton: true,
+  },
+};
+```
+
+When enabled, the consent screen shows a third button ("Log in as different user") between Approve and Deny — but only after the client has completed at least one authorization. On the first authorization, only Approve and Deny are shown.
+
+### How it works
+
+Clicking "Log in as different user" triggers OpenID Connect RP-Initiated Logout:
+
+1. Worker redirects to Umbraco's signout endpoint (`/umbraco/management/api/v1/security/back-office/signout`) with a `post_logout_redirect_uri` pointing to the Worker's `/logout-callback` route
+2. Umbraco clears the session cookie and redirects back to `/logout-callback`
+3. Worker redirects to Umbraco's authorize endpoint — since the cookie is cleared, the login form appears
+
+### Umbraco setup required
+
+The Umbraco OAuth client registration must include:
+- `PostLogoutRedirectUris` with the Worker's `/logout-callback` URL
+- `OpenIddictConstants.Permissions.Endpoints.EndSession` permission
+
+See [Umbraco Setup - Post-Logout Redirect URIs](./umbraco-setup.md#post-logout-redirect-uris) for the full registration example.
 
 ## Custom Server Name
 
@@ -64,6 +91,7 @@ Inject custom CSS to style the consent screen. The built-in consent screen uses 
 | `.scopes`, `.scopes li` | Scope list |
 | `.actions` | Button container |
 | `.btn-approve` | Approve button (default background: `#1b264f`) |
+| `.btn-reauth` | "Log in as different user" button (only rendered when `showReauthButton` is true) |
 | `.btn-deny` | Deny button |
 | `.tool-selection`, `.tool-selection h2` | Tool selection container and heading |
 | `.mode-item`, `.mode-item label` | Individual mode checkbox rows |
@@ -120,7 +148,7 @@ Your custom renderer **must** include these form fields:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `state` | `hidden` | Yes | CSRF protection — use `opts.state` |
-| `action` | `submit` button value | Yes | `"approve"` or `"deny"` |
+| `action` | `submit` button value | Yes | `"approve"`, `"reauth"`, or `"deny"` |
 | `selectedModes[]` | `checkbox` | No | Mode names the user selected (enables user-tier filtering) |
 | `readOnly` | `checkbox` value `"true"` | No | Whether read-only mode is enabled |
 | `siteId` | `radio` or `hidden` | No | Site selection for multi-site deployments |

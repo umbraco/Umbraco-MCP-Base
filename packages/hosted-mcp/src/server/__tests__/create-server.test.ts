@@ -410,7 +410,7 @@ describe("buildConsentToolConfig", () => {
     expect(config!.modes![0].name).toBe("content");
     expect(config!.modes![0].displayName).toBe("Content");
     expect(config!.modes![0].description).toBe("Content management");
-    expect(config!.modes![0].defaultSelected).toBe(true);
+    expect(config!.modes![0].defaultSelected).toBe(false);
     expect(config!.modes![0].collections).toHaveLength(2);
     expect(config!.modes![0].collections[0].name).toBe("document");
     expect(config!.modes![0].collections[1].name).toBe("media");

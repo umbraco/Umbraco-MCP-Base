@@ -23,6 +23,7 @@ import OAuthProvider from "@cloudflare/workers-oauth-provider";
 // Hosted MCP building blocks
 import {
   createDefaultHandler,
+  createWorkerExport,
   createPerRequestServer,
   getServerOptions,
   type HostedMcpEnv,
@@ -54,6 +55,8 @@ const options = {
   // Connect the Orval-generated API client so tool handlers can call
   // Umbraco's Management API using the authenticated user's token.
   clientFactory: () => getExampleUmbracoAddOnAPI(),
+  // Show "Log in as different user" button on the consent screen after first auth
+  authOptions: { showReauthButton: true },
 };
 
 const serverOptions = getServerOptions(options);
@@ -91,9 +94,13 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
  * - /authorize (authorization endpoint)
  * - /token (token endpoint)
  * - /register (dynamic client registration - RFC 7591)
- * - /mcp (MCP protocol via Streamable HTTP, authenticated)
+ * - /mcp (MCP protocol via Streamable HTTP, authenticated — internally)
+ *
+ * createWorkerExport() wraps the provider so that the MCP endpoint is
+ * externally accessible at `/` (browser visits get the landing page,
+ * MCP requests are rewritten from `/` to `/mcp` for OAuthProvider).
  */
-export default new OAuthProvider({
+const provider = new OAuthProvider({
   apiRoute: "/mcp",
   apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
   defaultHandler: createDefaultHandler(options) as any,
@@ -101,3 +108,5 @@ export default new OAuthProvider({
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
 });
+
+export default createWorkerExport(provider, options);

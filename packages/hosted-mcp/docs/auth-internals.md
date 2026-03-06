@@ -18,7 +18,7 @@ Stored when the user approves the consent form. Consumed (read + deleted) when U
 | `codeVerifier` | `string` | PKCE code verifier for the Umbraco token exchange |
 | `consentChoices` | `ConsentChoices?` | User's selections from the consent form |
 | `siteClientId` | `string` | Effective OAuth client ID (site-specific or global) |
-| `siteClientSecret` | `string?` | Effective OAuth client secret |
+| `siteClientSecret` | `string?` | Effective OAuth client secret (only for confidential clients; public clients omit this) |
 | `siteBaseUrl` | `string` | Effective Umbraco base URL |
 | `siteServerUrl` | `string?` | Effective server-side URL override |
 
@@ -70,11 +70,11 @@ Consent choices flow through KV state: stored alongside the PKCE verifier in `oa
 
 ### Storage
 
-After a successful authorization code exchange, `storeUmbracoToken()` writes the full `TokenResponse` to `umbraco_token:{key}` with a TTL.
+After a successful authorization code exchange, `storeUmbracoToken()` writes the full `TokenResponse` (including the refresh token) to `umbraco_token:{key}` with a 30-day TTL. The long TTL ensures the refresh token survives in KV so the fetch client can transparently obtain new access tokens on 401 responses.
 
 ### Retrieval
 
-On each MCP request, `createFetchClientFromKV()` calls `getStoredUmbracoToken()` to retrieve the token. If the token is not found (expired or missing), the server returns an error requiring re-authentication.
+On each MCP request, `createFetchClientFromKV()` calls `getStoredUmbracoToken()` to retrieve the token. If the token is not found (KV cleared or 30-day TTL expired), the server returns a degraded response with an `authentication-expired` tool prompting the user to reconnect.
 
 ### Refresh
 

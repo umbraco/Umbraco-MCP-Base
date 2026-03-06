@@ -4,42 +4,49 @@ import type { SiteConfig } from "../../types/multi-site.js";
 import type { ConsentChoices } from "../../types/auth.js";
 
 // ============================================================================
-// Mocks — jest.mock hoists to the top of the file (CJS-compatible)
+// Mocks — jest.unstable_mockModule for ESM + dynamic import
 // ============================================================================
 
 const mockStoreOAuthState = jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
 const mockConsumeOAuthState = jest.fn<(...args: unknown[]) => Promise<Record<string, unknown> | null>>();
 const mockStoreUmbracoToken = jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+const mockStoreLogoutRedirect = jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+const mockConsumeLogoutRedirect = jest.fn<(...args: unknown[]) => Promise<string | null>>();
+const mockMarkClientAuthed = jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+const mockIsClientAuthed = jest.fn<(...args: unknown[]) => Promise<boolean>>().mockResolvedValue(false);
 
-jest.mock("../token-storage.js", () => ({
+jest.unstable_mockModule("../token-storage.js", () => ({
   getBackofficeEndpoints: (baseUrl: string, serverUrl?: string) => {
     const browserBase = baseUrl.replace(/\/$/, "");
     const serverBase = serverUrl ? serverUrl.replace(/\/$/, "") : browserBase;
     return {
       authorization_endpoint: `${browserBase}/umbraco/management/api/v1/security/back-office/authorize`,
       token_endpoint: `${serverBase}/umbraco/management/api/v1/security/back-office/token`,
+      signout_endpoint: `${browserBase}/umbraco/management/api/v1/security/back-office/signout`,
     };
   },
-  storeOAuthState: (...args: unknown[]) => mockStoreOAuthState(...args),
-  consumeOAuthState: (...args: unknown[]) => mockConsumeOAuthState(...args),
-  storeUmbracoToken: (...args: unknown[]) => mockStoreUmbracoToken(...args),
+  storeOAuthState: mockStoreOAuthState,
+  consumeOAuthState: mockConsumeOAuthState,
+  storeUmbracoToken: mockStoreUmbracoToken,
+  storeLogoutRedirect: mockStoreLogoutRedirect,
+  consumeLogoutRedirect: mockConsumeLogoutRedirect,
+  markClientAuthed: mockMarkClientAuthed,
+  isClientAuthed: mockIsClientAuthed,
 }));
 
 const mockConsentResponse = jest.fn<(...args: unknown[]) => Response>();
 
-jest.mock("../consent.js", () => ({
-  consentResponse: (...args: unknown[]) => mockConsentResponse(...args),
+jest.unstable_mockModule("../consent.js", () => ({
+  consentResponse: mockConsentResponse,
 }));
 
 // Mock global fetch for token exchange
 const mockFetch = jest.fn<typeof fetch>();
 (globalThis as any).fetch = mockFetch;
 
-// Import after mocks are set up
-import {
-  createAuthorizeHandler,
-  createCallbackHandler,
-} from "../umbraco-handler.js";
+// Dynamic import after mocks are set up
+const { createAuthorizeHandler, createCallbackHandler, createLogoutCallbackHandler } =
+  await import("../umbraco-handler.js");
 
 // ============================================================================
 // Test Helpers
@@ -112,6 +119,10 @@ beforeEach(() => {
   mockStoreOAuthState.mockClear();
   mockConsumeOAuthState.mockClear();
   mockStoreUmbracoToken.mockClear();
+  mockStoreLogoutRedirect.mockClear();
+  mockConsumeLogoutRedirect.mockClear();
+  mockMarkClientAuthed.mockClear();
+  mockIsClientAuthed.mockClear().mockResolvedValue(false);
   mockConsentResponse.mockClear();
   mockFetch.mockReset();
 
@@ -301,6 +312,20 @@ describe("createAuthorizeHandler", () => {
       expect(location.searchParams.get("code_challenge_method")).toBe("S256");
     });
 
+    it("does not set prompt=login on approve redirect", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody(),
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.has("prompt")).toBe(false);
+    });
+
     it("stores state in KV with authRequest, codeVerifier, and site credentials", async () => {
       const env = createMockEnv();
       const handler = createAuthorizeHandler(env);
@@ -328,20 +353,127 @@ describe("createAuthorizeHandler", () => {
     });
   });
 
-  describe("POST — always forces Umbraco login", () => {
-    it("always sets prompt=login on approve redirect", async () => {
+  describe("POST — reauth", () => {
+    it("redirects to Umbraco signout endpoint", async () => {
       const env = createMockEnv();
       const handler = createAuthorizeHandler(env);
+      const form = new FormData();
+      form.set("action", "reauth");
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
-        body: createApproveFormBody(),
+        body: form,
       });
 
       const response = await handler(request, createMockAuthRequest());
 
       expect(response.status).toBe(302);
       const location = new URL(response.headers.get("Location")!);
-      expect(location.searchParams.get("prompt")).toBe("login");
+      expect(location.origin).toBe("https://umbraco.example.com");
+      expect(location.pathname).toBe(
+        "/umbraco/management/api/v1/security/back-office/signout"
+      );
+    });
+
+    it("includes post_logout_redirect_uri, state, and client_id in signout URL", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const form = new FormData();
+      form.set("action", "reauth");
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: form,
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("post_logout_redirect_uri")).toBe(
+        "https://worker.example.com/logout-callback"
+      );
+      expect(location.searchParams.get("state")).toBeTruthy();
+      expect(location.searchParams.get("client_id")).toBe("test-client-id");
+    });
+
+    it("stores logout redirect URL in KV", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const form = new FormData();
+      form.set("action", "reauth");
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: form,
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      expect(mockStoreLogoutRedirect).toHaveBeenCalledTimes(1);
+      const [kv, key, url] = mockStoreLogoutRedirect.mock.calls[0] as [
+        any,
+        string,
+        string,
+      ];
+      expect(kv).toBe(env.OAUTH_KV);
+      expect(typeof key).toBe("string");
+      expect(url).toContain("/umbraco/management/api/v1/security/back-office/authorize");
+    });
+
+    it("stores OAuth state in KV (same as approve)", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const form = new FormData();
+      form.set("action", "reauth");
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: form,
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      expect(mockStoreOAuthState).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("GET — showReauthButton", () => {
+    it("does not pass showReauthButton when option is not set", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "GET",
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.showReauthButton).toBe(false);
+    });
+
+    it("passes showReauthButton=true when option is set and client has authed before", async () => {
+      const env = createMockEnv();
+      mockIsClientAuthed.mockResolvedValue(true);
+      const handler = createAuthorizeHandler(env, { showReauthButton: true });
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "GET",
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.showReauthButton).toBe(true);
+      expect(mockIsClientAuthed).toHaveBeenCalledWith(env.OAUTH_KV, "mcp-client-1");
+    });
+
+    it("passes showReauthButton=false when option is set but client has not authed before", async () => {
+      const env = createMockEnv();
+      mockIsClientAuthed.mockResolvedValue(false);
+      const handler = createAuthorizeHandler(env, { showReauthButton: true });
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "GET",
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.showReauthButton).toBe(false);
     });
   });
 
@@ -985,5 +1117,81 @@ describe("createCallbackHandler", () => {
         )
       ).rejects.toThrow("Token exchange failed: 400");
     });
+  });
+
+  describe("client auth marker", () => {
+    it("marks client as authed after successful token exchange", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(makeStoredState());
+      mockFetch.mockResolvedValue(
+        createJsonResponse(200, {
+          access_token: "tok",
+          token_type: "Bearer",
+        })
+      );
+
+      const handler = createCallbackHandler(env);
+      await handler(
+        new Request(
+          "https://worker.example.com/callback?code=c&state=s"
+        )
+      );
+
+      expect(mockMarkClientAuthed).toHaveBeenCalledTimes(1);
+      expect(mockMarkClientAuthed).toHaveBeenCalledWith(
+        env.OAUTH_KV,
+        "mcp-client-1"
+      );
+    });
+  });
+});
+
+// ============================================================================
+// createLogoutCallbackHandler
+// ============================================================================
+
+describe("createLogoutCallbackHandler", () => {
+  it("redirects to stored authorize URL on valid state", async () => {
+    const env = createMockEnv();
+    mockConsumeLogoutRedirect.mockResolvedValue(
+      "https://umbraco.example.com/umbraco/management/api/v1/security/back-office/authorize?client_id=test"
+    );
+
+    const handler = createLogoutCallbackHandler(env);
+    const response = await handler(
+      new Request("https://worker.example.com/logout-callback?state=abc123")
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "https://umbraco.example.com/umbraco/management/api/v1/security/back-office/authorize?client_id=test"
+    );
+    expect(mockConsumeLogoutRedirect).toHaveBeenCalledWith(env.OAUTH_KV, "abc123");
+  });
+
+  it("returns 400 when state parameter is missing", async () => {
+    const env = createMockEnv();
+    const handler = createLogoutCallbackHandler(env);
+    const response = await handler(
+      new Request("https://worker.example.com/logout-callback")
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Missing state parameter" });
+  });
+
+  it("returns 400 when state is expired or invalid", async () => {
+    const env = createMockEnv();
+    mockConsumeLogoutRedirect.mockResolvedValue(null);
+
+    const handler = createLogoutCallbackHandler(env);
+    const response = await handler(
+      new Request("https://worker.example.com/logout-callback?state=expired")
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Invalid or expired logout state" });
   });
 });

@@ -59,6 +59,8 @@ export interface ConsentScreenOptions {
   sites?: { id: string; displayName: string; baseUrl: string }[];
   /** Override the entire consent screen rendering */
   renderConsent?: (options: ConsentScreenOptions) => string;
+  /** When true, show a "Log in as different user" button between Approve and Deny */
+  showReauthButton?: boolean;
 }
 
 // ============================================================================
@@ -100,6 +102,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     serverName,
     customCss,
     sites,
+    showReauthButton,
   } = options;
 
   const scopeList = scopes.length > 0
@@ -135,7 +138,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
       background: white;
       border-radius: 8px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      max-width: 480px;
+      max-width: 720px;
       width: 100%;
       padding: 2rem;
     }
@@ -167,13 +170,17 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
       border-color: #1b264f;
     }
     .btn-deny { background: white; color: #333; }
+    .btn-reauth { background: white; color: #1b264f; border-color: #1b264f; }
     .tool-selection { margin-top: 1rem; border-top: 1px solid #eee; padding-top: 1rem; }
     .tool-selection h2 { font-size: 0.95rem; color: #1b264f; margin-bottom: 0.75rem; }
+    .modes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; }
+    @media (max-width: 600px) { .modes-grid { grid-template-columns: 1fr; } }
     .mode-item { margin-bottom: 0.75rem; }
     .mode-item label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #333; cursor: pointer; }
     .mode-item input[type="checkbox"] { accent-color: #1b264f; }
     .mode-description { font-size: 0.8rem; color: #888; margin-left: 1.5rem; }
-    .mode-collections { margin-left: 1.5rem; margin-top: 0.25rem; }
+    .mode-collections { margin-left: 1.5rem; margin-top: 0.25rem; display: none; }
+    .mode-collections.visible { display: block; }
     .collection-item { margin-top: 0.25rem; }
     .collection-item label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #444; cursor: pointer; }
     .collection-item input[type="checkbox"] { accent-color: #1b264f; }
@@ -225,7 +232,8 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
       <input type="hidden" name="state" value="${escapeHtml(state)}" />
       ${toolSelectionHtml}
       <div class="actions">
-        <button type="submit" name="action" value="approve" class="btn-approve">Approve</button>
+        <button type="submit" name="action" value="approve" class="btn-approve">Approve</button>${showReauthButton ? `
+        <button type="submit" name="action" value="reauth" class="btn-reauth">Log in as different user</button>` : ""}
         <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
       </div>
     </form>
@@ -258,6 +266,7 @@ function renderToolSelection(config: ConsentToolConfig): string {
   if (config.modes && config.modes.length > 0) {
     parts.push(`<div class="tool-selection">`);
     parts.push(`<h2>Tool Modes</h2>`);
+    parts.push(`<div class="modes-grid">`);
 
     for (const mode of config.modes) {
       const checked = mode.defaultSelected ? " checked" : "";
@@ -274,7 +283,8 @@ function renderToolSelection(config: ConsentToolConfig): string {
         );
       }
       if (mode.collections.length > 0) {
-        parts.push(`<div class="mode-collections">`);
+        const visibleClass = mode.defaultSelected ? " visible" : "";
+        parts.push(`<div class="mode-collections${visibleClass}">`);
         for (const col of mode.collections) {
           parts.push(`<div class="collection-item">`);
           parts.push(
@@ -292,10 +302,20 @@ function renderToolSelection(config: ConsentToolConfig): string {
       parts.push(`</div>`);
     }
 
+    parts.push(`</div>`); // close .modes-grid
+
     parts.push(`<script>
 document.querySelectorAll('.mode-checkbox').forEach(function(modeCheckbox) {
   modeCheckbox.addEventListener('change', function() {
     var modeItem = this.closest('.mode-item');
+    var collections = modeItem.querySelector('.mode-collections');
+    if (collections) {
+      if (modeCheckbox.checked) {
+        collections.classList.add('visible');
+      } else {
+        collections.classList.remove('visible');
+      }
+    }
     var collectionCheckboxes = modeItem.querySelectorAll('.collection-checkbox');
     collectionCheckboxes.forEach(function(cb) {
       cb.disabled = !modeCheckbox.checked;

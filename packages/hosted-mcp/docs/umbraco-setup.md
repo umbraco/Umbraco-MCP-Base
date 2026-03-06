@@ -46,7 +46,7 @@ public class RegisterMcpClientHandler
         UmbracoApplicationStartingNotification notification,
         CancellationToken cancellationToken)
     {
-        const string clientId = "umbraco-mcp-hosted";
+        const string clientId = "umbraco-back-office-mcp";
 
         // Remove any existing registration so we can update it cleanly
         var existing = await _applicationManager.FindByClientIdAsync(clientId, cancellationToken);
@@ -58,8 +58,7 @@ public class RegisterMcpClientHandler
         var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = clientId,
-            ClientSecret = "your-secure-client-secret",
-            ClientType = OpenIddictConstants.ClientTypes.Confidential,
+            ClientType = OpenIddictConstants.ClientTypes.Public,
             DisplayName = "Umbraco MCP Server",
             RedirectUris =
             {
@@ -68,11 +67,18 @@ public class RegisterMcpClientHandler
                 // Local development callback URL
                 new Uri("http://localhost:8787/callback"),
             },
+            // Required for "Log in as different user" (RP-Initiated Logout)
+            PostLogoutRedirectUris =
+            {
+                new Uri("https://my-umbraco-mcp.workers.dev/logout-callback"),
+                new Uri("http://localhost:8787/logout-callback"),
+            },
             Permissions =
             {
                 OpenIddictConstants.Permissions.Endpoints.Authorization,
                 OpenIddictConstants.Permissions.Endpoints.Token,
                 OpenIddictConstants.Permissions.Endpoints.Revocation,
+                OpenIddictConstants.Permissions.Endpoints.EndSession,
                 OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode,
                 OpenIddictConstants.Permissions.GrantTypes.RefreshToken,
                 OpenIddictConstants.Permissions.ResponseTypes.Code,
@@ -94,7 +100,13 @@ public class RegisterMcpClientHandler
 
 The backoffice Settings > Users page creates **API users** that use the **client credentials** grant type. These are designed for server-to-server authentication (e.g., the stdio MCP server).
 
-The hosted MCP server requires the **authorization code** grant type because end users authenticate interactively through Umbraco's backoffice login. This grant type requires a redirect URI, which is not configurable through the backoffice UI.
+The hosted MCP server requires the **authorization code** grant type because end users authenticate interactively through Umbraco's backoffice login. This grant type requires a redirect URI and a **public** client type (PKCE-only, no client secret), neither of which are configurable through the backoffice UI.
+
+### Post-Logout Redirect URIs
+
+The `PostLogoutRedirectUris` and `Endpoints.EndSession` permission are required for the "Log in as different user" feature (`showReauthButton: true` in the Worker). This uses OpenID Connect RP-Initiated Logout to clear Umbraco's session cookie before starting a fresh authorization.
+
+If you don't need user switching, you can omit `PostLogoutRedirectUris` and the `Endpoints.EndSession` permission.
 
 ## Multi-Site Setup
 
@@ -110,28 +122,34 @@ RedirectUris =
 },
 ```
 
-Each site can use different OAuth client IDs and secrets. Register a separate Composer (or parameterize a single one) for each Umbraco instance.
+Each site can use different OAuth client IDs. Register a separate Composer (or parameterize a single one) for each Umbraco instance.
 
 ## Set Worker Secrets
 
-The Worker's credentials must match the Composer registration above:
+The Worker's client ID must match the Composer registration above:
 
 ```bash
-wrangler secret put UMBRACO_OAUTH_CLIENT_ID
-# Enter: umbraco-mcp-hosted
+# Umbraco instance URL
+wrangler secret put UMBRACO_BASE_URL
+# e.g., https://my-umbraco.example.com
 
-wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
-# Enter: your-secure-client-secret
+# OAuth client ID (must match the Composer)
+wrangler secret put UMBRACO_OAUTH_CLIENT_ID
+# Enter: umbraco-back-office-mcp
+
+# Cookie encryption key (generate with: openssl rand -hex 32)
+wrangler secret put COOKIE_ENCRYPTION_KEY
 ```
 
 For local development, set these in `.dev.vars`:
 
 ```
 UMBRACO_BASE_URL=https://localhost:44391
-UMBRACO_OAUTH_CLIENT_ID=umbraco-mcp-hosted
-UMBRACO_OAUTH_CLIENT_SECRET=your-secure-client-secret
+UMBRACO_OAUTH_CLIENT_ID=umbraco-back-office-mcp
 COOKIE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
+
+> **No client secret needed.** The OAuth client is registered as a **public** client with PKCE. There is no `UMBRACO_OAUTH_CLIENT_SECRET`.
 
 ## Redirect URI Configuration
 
@@ -151,7 +169,7 @@ You can register multiple redirect URIs in the Composer for different environmen
 1. Restart the Umbraco instance (so the Composer runs)
 2. Start the Worker: `npx wrangler dev --port 8787`
 3. Visit `http://localhost:8787` — you should see the landing page
-4. Use the MCP Inspector in Direct mode with `http://localhost:8787/mcp`
+4. Use the MCP Inspector in Direct mode with `http://localhost:8787/`
 5. The Inspector should trigger the OAuth flow: consent screen → Umbraco login → connected
 
 ## Troubleshooting
@@ -160,30 +178,10 @@ You can register multiple redirect URIs in the Composer for different environmen
 The callback URL sent by the Worker doesn't match any URI in the Composer's `RedirectUris`. Ensure `http://localhost:8787/callback` is listed for local dev. For multi-site, ensure `/callback/:siteId` is registered.
 
 **"Token exchange failed" / TLS errors in local dev**
-The Worker (workerd) cannot connect to Umbraco over HTTPS with a self-signed certificate. Use the `UMBRACO_SERVER_URL` env var to point server-side calls at an HTTP proxy:
-
-```bash
-# Start an HTTP-to-HTTPS proxy
-node -e "
-const http = require('http');
-const https = require('https');
-http.createServer((req, res) => {
-  const opts = { hostname: 'localhost', port: 44391, path: req.url, method: req.method,
-    headers: { ...req.headers, host: 'localhost:44391' }, rejectUnauthorized: false };
-  req.pipe(https.request(opts, proxyRes => { res.writeHead(proxyRes.statusCode, proxyRes.headers); proxyRes.pipe(res); }));
-}).listen(44380, () => console.log('Proxy on http://localhost:44380'));
-"
-```
-
-Then add to `.dev.vars`:
-```
-UMBRACO_SERVER_URL=http://localhost:44380
-```
-
-`UMBRACO_BASE_URL` (HTTPS) is still used for browser redirects. `UMBRACO_SERVER_URL` (HTTP) is only used for server-side token exchange.
+The Worker (workerd) cannot connect to Umbraco over HTTPS with a self-signed certificate. See [Local Development Setup](./local-dev-setup.md) for the fix — disable OpenIdDict's transport security requirement in dev mode and set `UMBRACO_SERVER_URL` to Umbraco's HTTP port.
 
 **"invalid_client" on token exchange**
-Verify the `ClientId` and `ClientSecret` in the Composer match `UMBRACO_OAUTH_CLIENT_ID` and `UMBRACO_OAUTH_CLIENT_SECRET` in the Worker's secrets/env vars.
+Verify the `ClientId` in the Composer matches `UMBRACO_OAUTH_CLIENT_ID` in the Worker's secrets/env vars. Also check that the client is registered as `Public` (not `Confidential`) — a public client uses PKCE and does not require a client secret.
 
 **"Could not find McpAgent binding for MCP_OBJECT"**
 The `agents/mcp` library defaults to looking for a Durable Object binding named `MCP_OBJECT`. If your wrangler.toml uses a different name (e.g. `MCP_AGENT`), pass `{ binding: "MCP_AGENT" }` to `McpAgent.serve()`.

@@ -1,13 +1,20 @@
 using OpenIddict.Abstractions;
+using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.Events;
 using Umbraco.Cms.Core.Notifications;
 
-namespace TestUmbraco;
+// TODO: Change this namespace to match your Umbraco project
+namespace MyUmbracoProject;
 
 /// <summary>
 /// Registers the MCP Worker as an OpenIdDict authorization_code client
 /// so the hosted MCP server can authenticate via Umbraco's backoffice.
+///
+/// Copy this file into your Umbraco project. Umbraco auto-discovers it via IComposer.
+///
+/// For Cloudflare Tunnel support, add "MCP_TUNNEL_URL" to appsettings.local.json
+/// (the scripts/tunnels.sh script does this automatically).
 /// </summary>
 public class McpOAuthComposer : IComposer
 {
@@ -38,6 +45,8 @@ public class RegisterMcpClientHandler
     {
         const string clientId = "umbraco-back-office-mcp";
 
+        // Remove any existing registration (e.g. client_credentials from the UI)
+        // so we can re-register with authorization_code grant + redirect URI.
         var existing = await _applicationManager.FindByClientIdAsync(clientId, cancellationToken);
         if (existing is not null)
         {
@@ -48,24 +57,21 @@ public class RegisterMcpClientHandler
         {
             ClientId = clientId,
             ClientType = OpenIddictConstants.ClientTypes.Public,
-            DisplayName = "Umbraco MCP Server (Test)",
+            DisplayName = "Umbraco MCP Server",
             RedirectUris =
             {
-                new Uri("http://localhost:8799/callback"),
                 new Uri("http://localhost:8787/callback"),
                 new Uri("http://localhost:8788/callback"),
-                new Uri("http://127.0.0.1:8799/callback"),
                 new Uri("http://127.0.0.1:8787/callback"),
                 new Uri("http://127.0.0.1:8788/callback"),
             },
+            // Required for "Log in as different user" (RP-Initiated Logout)
             PostLogoutRedirectUris =
             {
                 new Uri("http://localhost:8787/logout-callback"),
                 new Uri("http://localhost:8788/logout-callback"),
-                new Uri("http://localhost:8799/logout-callback"),
                 new Uri("http://127.0.0.1:8787/logout-callback"),
                 new Uri("http://127.0.0.1:8788/logout-callback"),
-                new Uri("http://127.0.0.1:8799/logout-callback"),
             },
             Permissions =
             {

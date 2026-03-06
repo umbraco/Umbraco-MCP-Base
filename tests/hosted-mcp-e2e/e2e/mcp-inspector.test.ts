@@ -72,7 +72,7 @@ async function connectInspector(
   const urlInput = page.getByRole("textbox", { name: "URL" });
   await urlInput.waitFor({ timeout: 5000 });
   await urlInput.clear();
-  await urlInput.fill(`${workerUrl}/mcp`);
+  await urlInput.fill(workerUrl);
 
   // Select Direct connection (browser handles OAuth redirect)
   const connectionTypeCombo = page.getByRole("combobox", { name: "Connection Type" });
@@ -108,6 +108,7 @@ async function handleOAuthFlow(
   _mainPage: Page,
   oauthPage: Page,
   consentOptions?: {
+    checkModes?: string[];
     uncheckModes?: string[];
     uncheckCollections?: string[];
     uncheckSlices?: string[];
@@ -119,6 +120,13 @@ async function handleOAuthFlow(
   await approveButton.waitFor();
 
   if (consentOptions) {
+    if (consentOptions.checkModes) {
+      for (const mode of consentOptions.checkModes) {
+        const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
+        if (!(await checkbox.isChecked())) await checkbox.check();
+      }
+    }
+
     if (consentOptions.uncheckModes) {
       for (const mode of consentOptions.uncheckModes) {
         const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
@@ -152,7 +160,7 @@ async function handleOAuthFlow(
 
   await approveButton.click();
 
-  // Umbraco login page — prompt=login always forces the login form
+  // Umbraco login page
   await oauthPage.waitForURL(
     (url) => url.hostname === "localhost" && url.pathname.includes("/umbraco"),
     { timeout: 15000 },
@@ -298,14 +306,14 @@ test.describe("MCP Inspector E2E", () => {
       }
     });
 
-    test("uncheck example-2 mode limits to example collection only", async ({
+    test("check only example mode limits to example collection only", async ({
       page,
     }) => {
       test.setTimeout(120000);
 
       const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
       await handleOAuthFlow(page, oauthPage, {
-        uncheckModes: ["example-2", "umbraco-server"],
+        checkModes: ["example"],
       });
 
       const tools = await getToolNames(page);
@@ -405,7 +413,7 @@ test.describe("MCP Inspector E2E", () => {
 
       const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
       await handleOAuthFlow(page, oauthPage, {
-        uncheckModes: ["example", "umbraco-server"],
+        checkModes: ["example-2"],
       });
 
       const tools = await getToolNames(page);
@@ -468,7 +476,7 @@ test.describe("MCP Inspector E2E", () => {
 
       const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
       await handleOAuthFlow(page, oauthPage, {
-        uncheckModes: ["example-2", "umbraco-server"],
+        checkModes: ["example"],
         uncheckSlices: allSlicesExcept("read"),
       });
 
@@ -508,7 +516,7 @@ test.describe("MCP Inspector E2E", () => {
 
       const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
       await handleOAuthFlow(page, oauthPage, {
-        uncheckModes: ["example-2", "umbraco-server"],
+        checkModes: ["example"],
         checkReadOnly: true,
       });
 
@@ -593,7 +601,7 @@ test.describe("MCP Inspector E2E", () => {
 
       const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
       await handleOAuthFlow(page, oauthPage, {
-        uncheckModes: ["example-2", "umbraco-server"],
+        checkModes: ["example"],
         uncheckSlices: allSlicesExcept("list"),
         checkReadOnly: true,
       });

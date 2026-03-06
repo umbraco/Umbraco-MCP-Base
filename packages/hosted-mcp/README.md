@@ -51,6 +51,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import {
   createDefaultHandler,
+  createWorkerExport,
   createPerRequestServer,
   getServerOptions,
   type HostedMcpEnv,
@@ -77,7 +78,7 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
   }
 }
 
-export default new OAuthProvider({
+const provider = new OAuthProvider({
   apiRoute: "/mcp",
   apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
   defaultHandler: createDefaultHandler(options),
@@ -85,6 +86,8 @@ export default new OAuthProvider({
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
 });
+
+export default createWorkerExport(provider, options);
 ```
 
 ### 3. Configure wrangler.toml
@@ -138,7 +141,7 @@ wrangler kv namespace create OAUTH_KV
 wrangler deploy
 ```
 
-Your MCP server is now accessible at `https://my-umbraco-mcp.<your-subdomain>.workers.dev/mcp`.
+Your MCP server is now accessible at `https://my-umbraco-mcp.<your-subdomain>.workers.dev/`.
 
 Having issues? See [Troubleshooting](./docs/troubleshooting.md).
 
@@ -148,13 +151,12 @@ The Worker serves several routes:
 
 | Path | Purpose |
 |------|---------|
-| `/mcp` | MCP endpoint (Streamable HTTP transport) |
+| `/` | MCP endpoint (Streamable HTTP) — browser visits show the landing page |
 | `/authorize` | OAuth consent screen + redirect to Umbraco |
 | `/callback` | Token exchange after Umbraco login |
-| `/` | Landing page (server name, version, Umbraco instance) |
 | `/info` | Diagnostic JSON endpoint (dev-only, requires `ENABLE_INFO_ENDPOINT=true`) |
 
-The landing page at `/` shows basic server info so operators can verify the deployment is live. For multi-site deployments it lists all configured sites. Custom landing page rendering is a [planned feature](./docs/future/custom-landing-page.md).
+When a browser visits `/` (plain GET with no auth header), the landing page is served with basic server info so operators can verify the deployment is live. MCP clients connecting to `/` (POST, GET+SSE, or requests with auth) are routed to the MCP protocol handler. For multi-site deployments the landing page lists all configured sites. Custom landing page rendering is a [planned feature](./docs/future/custom-landing-page.md).
 
 The `/info` endpoint returns JSON with available collections, modes, slices, and active config. It is gated behind the `ENABLE_INFO_ENDPOINT` environment variable and returns 404 when not enabled. Add `ENABLE_INFO_ENDPOINT=true` to `.dev.vars` for local development.
 
@@ -180,7 +182,7 @@ See [Architecture - Three-Tier Configuration](./docs/architecture.md#three-tier-
 
 ### Multi-Site Support
 
-A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/mcp`) — site selection happens during authorization via the consent screen's site picker.
+A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/`) — site selection happens during authorization via the consent screen's site picker.
 
 See [Multi-Site Deployments](./docs/multi-site.md) for setup instructions, route structure, and security details.
 

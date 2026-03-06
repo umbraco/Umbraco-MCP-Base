@@ -147,4 +147,4 @@ The template includes a Cloudflare Worker entry point for hosted deployment. Key
 - Umbraco needs the Worker registered as an authorization_code OpenIdDict client via a C# Composer (backoffice UI only supports client_credentials)
 
 Run locally: `npx wrangler dev --port 8787`
-Test with MCP Inspector in Direct mode: `http://localhost:8787/mcp`
+Test with MCP Inspector in Direct mode: `http://localhost:8787/`

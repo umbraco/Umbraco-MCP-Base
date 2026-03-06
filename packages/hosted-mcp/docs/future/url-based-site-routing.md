@@ -2,7 +2,7 @@
 
 ## Problem
 
-The current multi-site approach uses a consent screen site picker — all sites share `/mcp` and the user selects a site during authorization. This works well when a single MCP client needs access to multiple sites, but creates friction for Umbraco Cloud and similar platforms where each project has a known, predictable URL.
+The current multi-site approach uses a consent screen site picker — all sites share `/` and the user selects a site during authorization. This works well when a single MCP client needs access to multiple sites, but creates friction for Umbraco Cloud and similar platforms where each project has a known, predictable URL.
 
 In platform scenarios, the MCP client already knows which site it wants to connect to. Requiring the user to pick a site on the consent screen is an unnecessary step. A URL-based approach would let the MCP client URL directly determine the target site, with no picker needed.
 
@@ -11,17 +11,17 @@ In platform scenarios, the MCP client already knows which site it wants to conne
 Each site gets its own path prefix. The MCP client URL encodes the site identity:
 
 ```
-https://mcp.example.com/sites/project-abc/mcp   → Umbraco Cloud project "abc"
-https://mcp.example.com/sites/project-xyz/mcp   → Umbraco Cloud project "xyz"
+https://mcp.example.com/sites/project-abc/   → Umbraco Cloud project "abc"
+https://mcp.example.com/sites/project-xyz/   → Umbraco Cloud project "xyz"
 ```
 
 From the MCP client's perspective, these are just different server URLs. No changes needed on the client side.
 
 ### How it works with OAuthProvider
 
-OAuthProvider is configured with a static `apiRoute: "/mcp"`. It won't match `/sites/project-abc/mcp` directly. The solution is a **URL-rewriting layer** that wraps OAuthProvider:
+OAuthProvider is configured with a static `apiRoute: "/mcp"`. It won't match `/sites/project-abc/` directly. The solution is a **URL-rewriting layer** that wraps OAuthProvider:
 
-1. Incoming request to `/sites/project-abc/mcp` is rewritten to `/mcp`
+1. Incoming request to `/sites/project-abc/` is rewritten to `/mcp`
 2. OAuthProvider handles the rewritten request normally (routes to McpAgent)
 3. The site identity flows through the OAuth flow via the **`resource` parameter**
 
@@ -31,14 +31,14 @@ OAuthProvider is configured with a static `apiRoute: "/mcp"`. It won't match `/s
 MCP Client                     Router              OAuthProvider / Worker          Umbraco
     │                            │                        │                           │
     │── Connect                  │                        │                           │
-    │   /sites/abc/mcp ─────────>│── Rewrite to /mcp ───>│                           │
+    │   /sites/abc/ ────────────>│── Rewrite to /mcp ───>│                           │
     │<── 401 ────────────────────│<───────────────────────│                           │
     │                            │                        │                           │
     │── GET /.well-known ────────│── Pass through ───────>│                           │
     │<── { authorization_endpoint: "/authorize" } ────────│                           │
     │                            │                        │                           │
     │── GET /authorize           │                        │                           │
-    │   resource=/sites/abc/mcp ─│── Pass through ───────>│                           │
+    │   resource=/sites/abc/ ────│── Pass through ───────>│                           │
     │                            │                        │── Extract "abc" from       │
     │                            │                        │   resource URL             │
     │                            │                        │── resolveSite("abc")       │
@@ -56,7 +56,7 @@ MCP Client                     Router              OAuthProvider / Worker       
     │                            │                        │<── Umbraco tokens ─────────│
     │<── Auth complete ──────────│<───────────────────────│                           │
     │                            │                        │                           │
-    │── /sites/abc/mcp           │                        │                           │
+    │── /sites/abc/              │                        │                           │
     │   + Bearer token ─────────>│── Rewrite to /mcp ───>│                           │
     │                            │                        │── AuthProps.siteId="abc"   │
     │                            │                        │── API call (abc URL) ─────>│
@@ -64,8 +64,8 @@ MCP Client                     Router              OAuthProvider / Worker       
 ```
 
 Key points:
-- The **router only rewrites the MCP endpoint path** (`/sites/:siteId/mcp` → `/mcp`). All other routes (`/authorize`, `/callback/:siteId`, `/.well-known`, `/token`, `/register`) pass through unchanged.
-- The **`resource` parameter** carries the site identity through the OAuth flow. MCP clients set this to their server URL per the MCP spec (e.g., `resource=https://host/sites/abc/mcp`).
+- The **router only rewrites the MCP endpoint path** (`/sites/:siteId/` → `/mcp`). All other routes (`/authorize`, `/callback/:siteId`, `/.well-known`, `/token`, `/register`) pass through unchanged.
+- The **`resource` parameter** carries the site identity through the OAuth flow. MCP clients set this to their server URL per the MCP spec (e.g., `resource=https://host/sites/abc/`).
 - The **authorize handler** extracts the siteId from `authRequest.resource` (available on both GET and POST since OAuthProvider parses it), then calls `resolveSite("abc", env)` which returns a `SiteConfig` containing the Umbraco `baseUrl`, `oauthClientId`, and `oauthClientSecret`. These are used to construct the Umbraco authorization redirect — same mechanism as current multi-site, but the site is determined by URL instead of the consent form picker.
 - The **callback and per-request server** work the same as current multi-site — siteId and site credentials are stored in KV state during authorize and flow through into `AuthProps.consentChoices.siteId`.
 
@@ -81,7 +81,7 @@ If an MCP client doesn't set the `resource` parameter (non-compliant but possibl
 export interface SiteRoutingConfig {
   /** Path prefix pattern containing `:siteId` placeholder.
    *  Example: "/sites/:siteId"
-   *  The MCP endpoint becomes `{pathPrefix}/mcp` (e.g., "/sites/abc/mcp"). */
+   *  The MCP endpoint becomes `{pathPrefix}/` (e.g., "/sites/abc/"). */
   pathPrefix: string;
 
   /** Resolve a SiteConfig from the extracted site identifier.
@@ -189,7 +189,7 @@ siteRouting: {
 },
 ```
 
-MCP client connects to `https://mcp.example.com/sites/my-project/mcp`. New Umbraco Cloud projects work automatically — no config changes, no redeployment.
+MCP client connects to `https://mcp.example.com/sites/my-project/`. New Umbraco Cloud projects work automatically — no config changes, no redeployment.
 
 ## Implementation details
 
@@ -207,10 +207,10 @@ export function createSiteRouter(
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
 
-      // Check if path matches the site prefix + /mcp
-      // e.g., /sites/abc/mcp → extract "abc", rewrite to /mcp
+      // Check if path matches the site prefix
+      // e.g., /sites/abc/ → extract "abc", rewrite to /mcp
       const match = url.pathname.match(
-        new RegExp(`${prefixPattern.source}\\/mcp$`)
+        new RegExp(`${prefixPattern.source}\\/?$`)
       );
 
       if (match) {
@@ -224,7 +224,7 @@ export function createSiteRouter(
           );
         }
 
-        // Rewrite URL to strip prefix: /sites/abc/mcp → /mcp
+        // Rewrite URL to strip prefix: /sites/abc/ → /mcp
         const rewrittenUrl = new URL(request.url);
         rewrittenUrl.pathname = "/mcp";
         const rewrittenRequest = new Request(rewrittenUrl, request);
@@ -255,7 +255,7 @@ function extractSiteIdFromResource(
   if (!resource) return undefined;
   const url = typeof resource === "string" ? resource : resource[0];
   // Parse the resource URL and match the prefix pattern
-  // e.g., "https://host/sites/abc/mcp" → extract "abc"
+  // e.g., "https://host/sites/abc/" → extract "abc"
   const match = new URL(url).pathname.match(
     new RegExp(`${buildPrefixRegex(pathPrefix).source}`)
   );
@@ -279,7 +279,7 @@ No changes needed. The siteId arrives via `AuthProps.consentChoices.siteId` (sam
 |--------|-------------------|---------------------|
 | Site list | Static (defined in code) | Dynamic (`resolveSite` callback) |
 | Site selection | Consent screen picker | Determined by MCP client URL |
-| MCP client URL | Same for all sites (`/mcp`) | Unique per site (`/sites/:siteId/mcp`) |
+| MCP client URL | Same for all sites (`/`) | Unique per site (`/sites/:siteId/`) |
 | `.well-known` | One shared discovery | One shared discovery |
 | Consent screen | Shows site picker | No site picker (site already known) |
 | Callback URL | `/callback/:siteId` | `/callback/:siteId` (same) |

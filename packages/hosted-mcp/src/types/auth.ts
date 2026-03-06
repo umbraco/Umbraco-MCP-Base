@@ -68,4 +68,6 @@ export interface UmbracoAuthHandlerOptions {
   renderConsent?: (options: ConsentScreenOptions) => string;
   /** Available sites for multi-site deployments (shown as a picker on consent screen) */
   sites?: SiteConfig[];
+  /** Show a "Log in as different user" button on the consent screen (uses RP-Initiated Logout) */
+  showReauthButton?: boolean;
 }

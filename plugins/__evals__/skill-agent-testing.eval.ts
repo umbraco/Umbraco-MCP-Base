@@ -98,25 +98,25 @@ describe("Skill Testing", () => {
 
   describe("mcp-testing skill", () => {
     it(
-      "should provide test setup guidance",
+      "should provide eval test setup guidance",
       async () => {
         const result = await runSkillTest(
-          "Use the mcp-testing skill: How do I set up unit tests for MCP tools? What do I need to import?",
+          "Use the mcp-testing skill: How do I set up eval tests for MCP tools? What do I need to import and configure?",
           "skills/mcp-testing",
           { maxTurns: SKILL_TURNS }
         );
 
         expect(result.success).toBe(true);
 
-        // Should mention key testing utilities
+        // Should mention key eval testing utilities
         const verification = verifyOutputContainsAny(result.finalResult, [
-          "setupTestEnvironment",
-          "createMockRequestHandlerExtra",
-          "mcp-server-sdk/testing"
+          "configureEvals",
+          "runScenarioTest",
+          "mcp-server-sdk/evals"
         ]);
 
         if (!verification.passed) {
-          logTestResult(result, "Test setup guidance");
+          logTestResult(result, "Eval test setup guidance");
         }
 
         expect(verification.passed).toBe(true);

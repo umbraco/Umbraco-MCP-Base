@@ -31,7 +31,7 @@ describe("Landing page", () => {
   it("contains the MCP endpoint path", async () => {
     const response = await workerFetch("/");
     const body = await response.text();
-    expect(body).toContain("/mcp");
+    expect(body).toContain("<code>/</code>");
   });
 
   it("sets X-Frame-Options header", async () => {

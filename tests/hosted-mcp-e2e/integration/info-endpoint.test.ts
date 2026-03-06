@@ -33,7 +33,7 @@ describe("/info endpoint", () => {
     const response = await workerFetch("/info");
     const info = await response.json();
     expect(info.transport).toBe("streamable-http");
-    expect(info.mcpEndpoint).toBe("/mcp");
+    expect(info.mcpEndpoint).toBe("/");
   });
 
   it("lists registered collections", async () => {

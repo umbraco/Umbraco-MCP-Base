@@ -20,35 +20,36 @@ See [Umbraco Setup - Redirect URI Configuration](./umbraco-setup.md#redirect-uri
 
 **Cause**: The Worker runtime (workerd) cannot connect to HTTPS endpoints with self-signed certificates, which is common in local Umbraco development.
 
-**Fix**: Set `UMBRACO_SERVER_URL` to point server-side calls at an HTTP-to-HTTPS proxy:
+**Fix**: Two things are needed:
+
+1. **Disable OpenIdDict's HTTPS requirement** in your Umbraco `Program.cs` (dev only):
+
+```csharp
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.Configure<OpenIddictServerAspNetCoreOptions>(options =>
+    {
+        options.DisableTransportSecurityRequirement = true;
+    });
+}
+```
+
+2. **Set `UMBRACO_SERVER_URL`** in `.dev.vars` to point at Umbraco's HTTP port:
 
 ```
-# .dev.vars
 UMBRACO_BASE_URL=https://localhost:44391
-UMBRACO_SERVER_URL=http://localhost:44380
+UMBRACO_SERVER_URL=http://localhost:56472
 ```
 
-Then start an HTTP proxy:
+`UMBRACO_BASE_URL` (HTTPS) is used for browser redirects. `UMBRACO_SERVER_URL` (HTTP) is used for server-side token exchange. This is only needed for local dev with self-signed certs.
 
-```bash
-node -e "
-const http = require('http');
-const https = require('https');
-http.createServer((req, res) => {
-  const opts = { hostname: 'localhost', port: 44391, path: req.url, method: req.method,
-    headers: { ...req.headers, host: 'localhost:44391' }, rejectUnauthorized: false };
-  req.pipe(https.request(opts, proxyRes => { res.writeHead(proxyRes.statusCode, proxyRes.headers); proxyRes.pipe(res); }));
-}).listen(44380, () => console.log('Proxy on http://localhost:44380'));
-"
-```
-
-`UMBRACO_BASE_URL` (HTTPS) is still used for browser redirects. `UMBRACO_SERVER_URL` (HTTP) is only used for server-side token exchange. This is only needed for local dev with self-signed certs.
+See [Local Development Setup](./local-dev-setup.md) for the full walkthrough.
 
 ### "invalid_client" on token exchange
 
-**Cause**: The OAuth client ID or secret in the Worker doesn't match the Umbraco Composer registration.
+**Cause**: The OAuth client ID in the Worker doesn't match the Umbraco Composer registration, or the client type is wrong.
 
-**Fix**: Verify that `UMBRACO_OAUTH_CLIENT_ID` and `UMBRACO_OAUTH_CLIENT_SECRET` (in `.dev.vars` or Wrangler secrets) exactly match the `ClientId` and `ClientSecret` in your `McpOAuthComposer.cs`.
+**Fix**: Verify that `UMBRACO_OAUTH_CLIENT_ID` (in `.dev.vars` or Wrangler secrets) exactly matches the `ClientId` in your `McpOAuthComposer.cs`. Also check that the client is registered as `Public` (not `Confidential`) — the hosted MCP server uses PKCE and does not require a client secret.
 
 ### "Umbraco token not found or expired. Re-authentication required."
 

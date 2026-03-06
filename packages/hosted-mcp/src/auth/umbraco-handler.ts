@@ -30,6 +30,10 @@ import {
   storeOAuthState,
   consumeOAuthState,
   storeUmbracoToken,
+  storeLogoutRedirect,
+  consumeLogoutRedirect,
+  markClientAuthed,
+  isClientAuthed,
   type TokenResponse,
 } from "./token-storage.js";
 
@@ -160,7 +164,7 @@ export function createAuthorizeHandler(
         return Response.redirect(redirectUrl.toString(), 302);
       }
 
-      // User approved - extract consent choices from form
+      // User approved or wants to reauth — extract consent choices from form
       const consentChoices = parseConsentChoices(formData);
 
       // Resolve site-specific config if multi-site
@@ -202,11 +206,23 @@ export function createAuthorizeHandler(
       authUrl.searchParams.set("code_challenge", codeChallenge);
       authUrl.searchParams.set("code_challenge_method", "S256");
 
-      // Always force the Umbraco login form. Without this, Umbraco's
-      // session cookie silently re-authenticates the same user — there
-      // would be no way to switch accounts between MCP sessions.
-      authUrl.searchParams.set("prompt", "login");
+      if (action === "reauth") {
+        // Reauth: redirect through Umbraco's signout endpoint first to clear
+        // the session cookie, then back to the Worker's /logout-callback which
+        // redirects to the authorize URL for a fresh login.
+        await storeLogoutRedirect(env.OAUTH_KV, umbracoState, authUrl.toString());
 
+        const signoutUrl = new URL(endpoints.signout_endpoint);
+        signoutUrl.searchParams.set(
+          "post_logout_redirect_uri",
+          new URL("/logout-callback", url.origin).toString()
+        );
+        signoutUrl.searchParams.set("state", umbracoState);
+        signoutUrl.searchParams.set("client_id", siteClientId);
+        return Response.redirect(signoutUrl.toString(), 302);
+      }
+
+      // Approve: redirect directly to Umbraco authorize
       return Response.redirect(authUrl.toString(), 302);
     }
 
@@ -223,6 +239,13 @@ export function createAuthorizeHandler(
       baseUrl: s.baseUrl,
     }));
 
+    // Show reauth button only when the operator enabled it AND this client
+    // has completed at least one auth flow before (KV marker exists)
+    let showReauthButton = false;
+    if (options?.showReauthButton) {
+      showReauthButton = await isClientAuthed(env.OAUTH_KV, authRequest.clientId);
+    }
+
     return consentResponse({
       clientName: authRequest.clientId,
       umbracoBaseUrl: env.UMBRACO_BASE_URL,
@@ -235,6 +258,7 @@ export function createAuthorizeHandler(
       customCss: options?.customCss,
       renderConsent: options?.renderConsent,
       sites: consentSites,
+      showReauthButton,
     });
   };
 }
@@ -342,6 +366,9 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Store Umbraco tokens in KV (encrypted at rest by KV)
     await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens);
 
+    // Mark this MCP client as having completed auth (for reauth button visibility)
+    await markClientAuthed(env.OAUTH_KV, authRequest.clientId);
+
     // Extract user info from the token response if available,
     // or default to the subject from the access token
     const userInfo: UmbracoUserInfo = { sub: "unknown" };
@@ -356,5 +383,43 @@ export function createCallbackHandler(env: HostedMcpEnv) {
       },
       authRequest,
     };
+  };
+}
+
+// ============================================================================
+// Logout Callback Handler
+// ============================================================================
+
+/**
+ * Creates the handler for /logout-callback.
+ *
+ * After Umbraco's signout endpoint clears the session cookie, it redirects
+ * here with a `state` query parameter. We look up the stored authorize URL
+ * and redirect to it, forcing a fresh login form.
+ *
+ * @param env - Cloudflare Worker environment bindings
+ * @returns Handler function for the logout-callback endpoint
+ */
+export function createLogoutCallbackHandler(env: HostedMcpEnv) {
+  return async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
+    const state = url.searchParams.get("state");
+
+    if (!state) {
+      return new Response(
+        JSON.stringify({ error: "Missing state parameter" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const authorizeUrl = await consumeLogoutRedirect(env.OAUTH_KV, state);
+    if (!authorizeUrl) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired logout state" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    return Response.redirect(authorizeUrl, 302);
   };
 }

@@ -25,24 +25,15 @@ The Worker runs at `http://localhost:8787`. For local development, you'll need:
 - The OAuth client registered in Umbraco with `http://localhost:8787/callback` as the redirect URI (see [Umbraco Setup](./umbraco-setup.md))
 - A `.dev.vars` file with your secrets
 
-### Self-signed certificate workaround
+### Self-signed certificates
 
-The workerd runtime (used by `wrangler dev`) cannot connect to HTTPS endpoints with self-signed certificates. If your Umbraco instance uses a self-signed cert (common in local dev), you need an HTTP-to-HTTPS proxy for server-side calls.
+The workerd runtime (used by `wrangler dev`) cannot connect to HTTPS endpoints with self-signed certificates. See [Local Development Setup](./local-dev-setup.md) for the full walkthrough — it covers disabling OpenIdDict's transport security requirement in dev mode and configuring `UMBRACO_SERVER_URL` to use Umbraco's HTTP port.
 
-Set `UMBRACO_SERVER_URL` in `.dev.vars` to point at the proxy:
-
-```
-UMBRACO_BASE_URL=https://localhost:44391
-UMBRACO_SERVER_URL=http://localhost:44380
-```
-
-`UMBRACO_BASE_URL` is used for browser redirects (user's browser handles the cert). `UMBRACO_SERVER_URL` is used for server-side token exchange (via the HTTP proxy). See [Umbraco Setup - Troubleshooting](./umbraco-setup.md#troubleshooting) for proxy setup instructions.
-
-This is only needed for local dev with self-signed certs. In production, `UMBRACO_BASE_URL` points to a real domain with a valid certificate and `UMBRACO_SERVER_URL` is not needed.
+This is only needed for local dev. In production, `UMBRACO_BASE_URL` points to a real domain with a valid certificate and `UMBRACO_SERVER_URL` is not needed.
 
 ### 4. Test the connection
 
-Use the MCP Inspector in **Direct** mode with URL `http://localhost:8787/mcp`. The Inspector will trigger the OAuth flow automatically.
+Use the MCP Inspector in **Direct** mode with URL `http://localhost:8787/`. The Inspector will trigger the OAuth flow automatically.
 
 ## Production Deployment
 
@@ -67,13 +58,14 @@ id = "abc123..."
 wrangler secret put UMBRACO_BASE_URL
 # e.g., https://my-umbraco.example.com
 
-# OAuth credentials (must match Umbraco OpenIdDict registration)
+# OAuth client ID (must match Umbraco OpenIdDict registration)
 wrangler secret put UMBRACO_OAUTH_CLIENT_ID
-wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 
 # Cookie encryption key (generate with: openssl rand -hex 32)
 wrangler secret put COOKIE_ENCRYPTION_KEY
 ```
+
+> **No client secret needed.** The OAuth client is registered as a **public** client with PKCE.
 
 ### 3. Deploy
 
@@ -130,7 +122,7 @@ See [Customization Guide](./customization.md) for all options and examples.
 
 ## Multi-Site Deployment
 
-A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/mcp`) — site selection happens during authorization via the consent screen.
+A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/`) — site selection happens during authorization via the consent screen.
 
 See [Multi-Site Deployments](./multi-site.md) for full setup instructions, route structure, and security details.
 

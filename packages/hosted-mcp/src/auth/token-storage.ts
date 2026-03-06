@@ -15,6 +15,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 const BACKOFFICE_PATHS = {
   authorize: "/umbraco/management/api/v1/security/back-office/authorize",
   token: "/umbraco/management/api/v1/security/back-office/token",
+  signout: "/umbraco/management/api/v1/security/back-office/signout",
 } as const;
 
 /**
@@ -34,6 +35,7 @@ export function getBackofficeEndpoints(baseUrl: string, serverBaseUrl?: string) 
   return {
     authorization_endpoint: `${browserBase}${BACKOFFICE_PATHS.authorize}`,
     token_endpoint: `${serverBase}${BACKOFFICE_PATHS.token}`,
+    signout_endpoint: `${browserBase}${BACKOFFICE_PATHS.signout}`,
   };
 }
 
@@ -97,19 +99,22 @@ export async function consumeOAuthState(
 
 /**
  * Stores Umbraco tokens in KV.
- * Token is keyed by a unique reference and has a TTL matching the token expiry.
+ *
+ * Uses a long TTL (30 days) rather than matching the access token lifetime.
+ * The access token expires naturally, but the refresh token inside the entry
+ * allows the fetch client to transparently obtain a new one on 401 responses.
+ * A short TTL would delete both access AND refresh tokens from KV, leaving
+ * the MCP session permanently stuck with no way to recover.
  */
 export async function storeUmbracoToken(
   kv: KVNamespace,
   tokenKey: string,
-  tokens: TokenResponse,
-  expirationTtl?: number
+  tokens: TokenResponse
 ): Promise<void> {
-  const ttl = expirationTtl ?? tokens.expires_in ?? 3600;
   await kv.put(
     `umbraco_token:${tokenKey}`,
     JSON.stringify(tokens),
-    { expirationTtl: ttl + 300 } // Add 5 minutes buffer for refresh
+    { expirationTtl: 30 * 24 * 60 * 60 } // 30 days
   );
 }
 
@@ -128,6 +133,65 @@ export async function getStoredUmbracoToken(
   } catch {
     return null;
   }
+}
+
+// ============================================================================
+// Logout Redirect Storage
+// ============================================================================
+
+/**
+ * Stores the authorize URL for a reauth flow. After Umbraco's signout
+ * endpoint clears the session cookie, the /logout-callback handler reads
+ * this URL and redirects to it to start a fresh login.
+ */
+export async function storeLogoutRedirect(
+  kv: KVNamespace,
+  key: string,
+  authorizeUrl: string
+): Promise<void> {
+  await kv.put(`logout_redirect:${key}`, authorizeUrl, {
+    expirationTtl: 600, // 10 minutes
+  });
+}
+
+/**
+ * Reads and deletes a stored logout redirect URL (single-use).
+ */
+export async function consumeLogoutRedirect(
+  kv: KVNamespace,
+  key: string
+): Promise<string | null> {
+  const kvKey = `logout_redirect:${key}`;
+  const url = await kv.get(kvKey);
+  if (!url) return null;
+  await kv.delete(kvKey);
+  return url;
+}
+
+// ============================================================================
+// Client Auth Markers
+// ============================================================================
+
+/**
+ * Records that a client has completed at least one successful auth flow.
+ * Used to decide whether to show the "Reauth" button on the consent screen.
+ */
+export async function markClientAuthed(
+  kv: KVNamespace,
+  clientId: string
+): Promise<void> {
+  await kv.put(`client_authed:${clientId}`, "1");
+}
+
+/**
+ * Checks whether a client has previously completed an auth flow.
+ */
+export async function isClientAuthed(
+  kv: KVNamespace,
+  clientId: string
+): Promise<boolean> {
+  const val = await kv.get(`client_authed:${clientId}`);
+  return val !== null;
 }
 
 /**

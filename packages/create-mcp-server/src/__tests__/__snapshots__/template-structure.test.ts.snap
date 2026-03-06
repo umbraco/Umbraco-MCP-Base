@@ -3,6 +3,7 @@
 exports[`template structure should match the expected file listing 1`] = `
 [
   ".claude/settings.json",
+  ".dev.vars.example",
   ".discover.json",
   ".env.example",
   "CLAUDE.md",
@@ -16,6 +17,7 @@ exports[`template structure should match the expected file listing 1`] = `
   "package.json",
   "scripts/start-umbraco.ps1",
   "scripts/start-umbraco.sh",
+  "scripts/tunnels.sh",
   "src/auth/auth-policies.ts",
   "src/auth/index.ts",
   "src/config/__tests__/server-config.test.ts",
@@ -32,6 +34,7 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/mocks/server.ts",
   "src/mocks/store.ts",
   "src/testing/mock-mcp-server.ts",
+  "src/umbraco-api/api/client-fetch.ts",
   "src/umbraco-api/api/client.ts",
   "src/umbraco-api/api/generated/exampleApi.ts",
   "src/umbraco-api/api/generated/exampleApi.zod.ts",
@@ -60,6 +63,10 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/umbraco-api/tools/example/index.ts",
   "src/umbraco-api/tools/example/post/create-example.ts",
   "src/umbraco-api/tools/example/put/update-example.ts",
+  "src/umbraco-api/tools/umbraco-server/get/get-server-info.ts",
+  "src/umbraco-api/tools/umbraco-server/index.ts",
+  "src/worker.ts",
+  "test-results/.last-run.json",
   "tests/evals/example-crud.test.ts",
   "tests/evals/helpers/e2e-setup.ts",
   "tests/evals/jest.config.ts",
@@ -67,6 +74,9 @@ exports[`template structure should match the expected file listing 1`] = `
   "tests/evals/tool-filtering.test.ts",
   "tsconfig.json",
   "tsup.config.ts",
+  "umbraco/McpOAuthComposer.cs",
+  "umbraco/ProgramSnippet.cs",
+  "wrangler.toml",
 ]
 `;
 
@@ -128,6 +138,10 @@ npm run inspect
 │   │       ├── post/
 │   │       └── index.ts
 │   └── index.ts                # Server entry point
+├── scripts/
+│   └── tunnels.sh              # Cloudflare tunnels for remote MCP client testing
+├── umbraco/
+│   └── McpOAuthComposer.cs     # OAuth client registration (copy into your Umbraco project)
 ├── __tests__/
 │   └── example/                # Example tests
 ├── package.json
@@ -233,7 +247,9 @@ exports[`template structure should produce expected package.json for sample proj
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
     "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit"
+    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "dev:worker": "npx wrangler dev",
+    "deploy:worker": "npx wrangler deploy"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -250,8 +266,11 @@ exports[`template structure should produce expected package.json for sample proj
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
+    "@cloudflare/workers-oauth-provider": "^0.2.3",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0",
+    "agents": "^0.6.0",
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",
@@ -271,7 +290,9 @@ exports[`template structure should produce expected package.json for sample proj
     "ts-jest": "^29.3.2",
     "ts-node": "^10.9.2",
     "tsup": "^8.4.0",
-    "typescript": "^5.8.3"
+    "@playwright/test": "^1.52.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.69.0"
   }
 }"
 `;

@@ -77,6 +77,29 @@ describe("renderConsentScreen", () => {
     expect(html).toContain('value="deny"');
   });
 
+  it("does not render reauth button by default", () => {
+    const html = renderConsentScreen(createOptions());
+    expect(html).not.toContain('value="reauth"');
+  });
+
+  it("renders reauth button when showReauthButton is true", () => {
+    const html = renderConsentScreen(createOptions({ showReauthButton: true }));
+    expect(html).toContain('value="reauth"');
+    expect(html).toContain("Log in as different user");
+    expect(html).toContain("btn-reauth");
+  });
+
+  it("does not render reauth button when showReauthButton is false", () => {
+    const html = renderConsentScreen(createOptions({ showReauthButton: false }));
+    expect(html).not.toContain('value="reauth"');
+  });
+
+  it("always renders approve and deny buttons regardless of showReauthButton", () => {
+    const html = renderConsentScreen(createOptions({ showReauthButton: true }));
+    expect(html).toContain('value="approve"');
+    expect(html).toContain('value="deny"');
+  });
+
   it("escapes HTML special characters in client name", () => {
     const html = renderConsentScreen(
       createOptions({ clientName: '<script>alert("xss")</script>' })

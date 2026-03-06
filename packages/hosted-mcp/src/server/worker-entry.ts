@@ -24,6 +24,7 @@ import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import {
   createAuthorizeHandler,
   createCallbackHandler,
+  createLogoutCallbackHandler,
 } from "../auth/umbraco-handler.js";
 import type { ConsentToolConfig } from "../auth/consent.js";
 import { type CreateServerOptions, type SiteResolver } from "./create-server.js";
@@ -101,7 +102,7 @@ export function buildConsentToolConfig(
           displayName: c.metadata.displayName,
           description: c.metadata.description,
         })),
-      defaultSelected: true,
+      defaultSelected: false,
     })),
     slices: options.allSliceNames
       .filter((s) => s !== "other")
@@ -142,14 +143,83 @@ export function createDefaultHandler(options: HostedMcpServerOptions) {
       // Build consent tool config (only if enableConsentToolSelection resolved to true)
       const consentToolConfig = buildConsentToolConfig(optionsWithConsent);
 
-      // Merge auto-generated tool config and multi-site config into auth options
+      // Merge auto-generated tool config and multi-site config into auth options.
+      // Use the server name as the consent screen server name if not explicitly set.
       const effectiveAuthOptions: UmbracoAuthHandlerOptions = {
+        serverName: options.name,
         ...options.authOptions,
         ...(consentToolConfig ? { consentToolConfig } : {}),
         ...(options.multiSite ? { sites: options.multiSite.sites } : {}),
       };
 
       return handleDefaultRequest(request, env, options, effectiveAuthOptions);
+    },
+  };
+}
+
+/**
+ * OAuthProvider fetch interface (subset used by createWorkerExport).
+ */
+interface OAuthProviderLike {
+  fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext): Promise<Response>;
+}
+
+/**
+ * Creates the Worker export that wraps OAuthProvider with URL rewriting.
+ *
+ * OAuthProvider uses `pathname.startsWith(apiRoute)` to match the MCP
+ * endpoint. Setting `apiRoute: "/"` would match ALL paths, breaking
+ * OAuth endpoints. So we keep `apiRoute: "/mcp"` internally and rewrite
+ * incoming requests to `/` → `/mcp` before passing to OAuthProvider.
+ *
+ * - **Browser GET to `/`** (no auth header, not SSE) → serve landing page
+ * - **MCP request to `/`** (POST, GET+SSE, DELETE with auth) → rewrite to `/mcp`
+ * - **Everything else** (`/authorize`, `/callback`, `/info`, etc.) → pass through
+ *
+ * @param oauthProvider - The OAuthProvider instance (apiRoute must be "/mcp")
+ * @param options - Server configuration (used for landing page rendering)
+ */
+export function createWorkerExport(
+  oauthProvider: OAuthProviderLike,
+  options: HostedMcpServerOptions,
+) {
+  return {
+    async fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext): Promise<Response> {
+      // Fix protocol behind reverse proxies / tunnels (e.g. cloudflared).
+      // The proxy→worker hop is plain HTTP, but OAuthProvider derives
+      // discovery-document URLs from the request origin. Without this,
+      // they end up as http:// which clients like ChatGPT reject.
+      const proto = request.headers.get("x-forwarded-proto");
+      if (proto === "https" && new URL(request.url).protocol === "http:") {
+        const url = new URL(request.url);
+        url.protocol = "https:";
+        request = new Request(url.toString(), request);
+      }
+
+      const url = new URL(request.url);
+
+      if (url.pathname === "/") {
+        const method = request.method;
+        const hasAuth = request.headers.has("Authorization");
+        const acceptsSSE = request.headers.get("Accept")?.includes("text/event-stream");
+
+        // Browser visit: plain GET with no auth and not SSE → landing page
+        if (method === "GET" && !hasAuth && !acceptsSSE) {
+          if (options.multiSite) {
+            return renderMultiSiteLandingResponse(options.name, options.version, options.multiSite);
+          }
+          return renderLandingPageResponse(options.name, options.version, env.UMBRACO_BASE_URL);
+        }
+
+        // MCP request: rewrite / → /mcp so OAuthProvider routes it correctly
+        const rewrittenUrl = new URL(request.url);
+        rewrittenUrl.pathname = "/mcp";
+        const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
+        return oauthProvider.fetch(rewrittenRequest, env, ctx);
+      }
+
+      // All other paths pass through to OAuthProvider unchanged
+      return oauthProvider.fetch(request, env, ctx);
     },
   };
 }
@@ -193,9 +263,9 @@ async function handleSingleSiteRequest(
     return handleCallback(request, env);
   }
 
-  // Landing page
-  if (path === "/" || path === "") {
-    return renderLandingPageResponse(options.name, options.version, env.UMBRACO_BASE_URL);
+  // Handle logout callback (reauth flow: Umbraco signout redirects here)
+  if (path === "/logout-callback") {
+    return handleLogoutCallback(request, env);
   }
 
   // Diagnostic endpoint (dev-only)
@@ -244,9 +314,9 @@ async function handleMultiSiteRequest(
     return handleCallback(request, env);
   }
 
-  // Landing page with site listing
-  if (path === "/" || path === "") {
-    return renderMultiSiteLandingResponse(options.name, options.version, multiSite);
+  // Handle logout callback (reauth flow: Umbraco signout redirects here)
+  if (path === "/logout-callback") {
+    return handleLogoutCallback(request, env);
   }
 
   // Diagnostic endpoint (dev-only)
@@ -278,6 +348,14 @@ async function handleAuthorize(
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+async function handleLogoutCallback(
+  request: Request,
+  env: HostedMcpEnv,
+): Promise<Response> {
+  const handler = createLogoutCallbackHandler(env);
+  return handler(request);
 }
 
 async function handleCallback(
@@ -382,7 +460,7 @@ function renderLandingPage(
     <div class="version">v${escapeHtml(version)}</div>
     <dl class="info">
       <dt>MCP Endpoint</dt>
-      <dd><code>/mcp</code></dd>
+      <dd><code>/</code></dd>
       <dt>Umbraco Instance</dt>
       <dd><code>${escapeHtml(umbracoUrl)}</code></dd>
       <dt>Transport</dt>
@@ -443,7 +521,7 @@ function renderMultiSiteLandingPage(
     <div class="version">v${escapeHtml(version)}</div>
     <dl class="info">
       <dt>MCP Endpoint</dt>
-      <dd><code>/mcp</code></dd>
+      <dd><code>/</code></dd>
     </dl>
     <table>
       <thead>
@@ -475,7 +553,7 @@ function renderInfoResponse(
     name: options.name,
     version: options.version,
     transport: "streamable-http",
-    mcpEndpoint: "/mcp",
+    mcpEndpoint: "/",
     collections: options.collections.map((c) => ({
       name: c.metadata.name,
       displayName: c.metadata.displayName,
@@ -497,7 +575,7 @@ function renderMultiSiteInfoResponse(
     name: options.name,
     version: options.version,
     transport: "streamable-http",
-    mcpEndpoint: "/mcp",
+    mcpEndpoint: "/",
     collections: options.collections.map((c) => ({
       name: c.metadata.name,
       displayName: c.metadata.displayName,

@@ -14,7 +14,10 @@
   "scripts": {
     "build": "tsup",
     "compile": "tsc --noEmit",
-    "test": "NODE_OPTIONS='--experimental-vm-modules' jest"
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:integration": "npm run test:integration --prefix ../..",
+    "test:e2e": "npm run test:e2e --prefix ../.."
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",

@@ -1,8 +1,10 @@
 /**
  * MCP protocol integration tests.
  *
- * Verifies the Worker's /mcp endpoint enforces authentication
- * and responds correctly to unauthenticated requests.
+ * Verifies the Worker's root endpoint enforces authentication
+ * and responds correctly to unauthenticated MCP requests.
+ * The external MCP endpoint is `/` — createWorkerExport() rewrites
+ * to `/mcp` internally for OAuthProvider routing.
  */
 
 import { startWorker, stopWorker, workerFetch } from "./helpers/worker.js";
@@ -16,8 +18,8 @@ describe("MCP protocol", () => {
     await stopWorker();
   });
 
-  it("returns 401 for unauthenticated POST to /mcp", async () => {
-    const response = await workerFetch("/mcp", {
+  it("returns 401 for unauthenticated POST to /", async () => {
+    const response = await workerFetch("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -34,8 +36,8 @@ describe("MCP protocol", () => {
     expect(response.status).toBe(401);
   });
 
-  it("returns 401 for GET to /mcp without auth", async () => {
-    const response = await workerFetch("/mcp", {
+  it("returns 401 for SSE GET to / without auth", async () => {
+    const response = await workerFetch("/", {
       method: "GET",
       headers: { Accept: "text/event-stream" },
     });

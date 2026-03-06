@@ -48,7 +48,7 @@ describe("Consent screen", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
   });
 
-  it("consent page shows only approve and deny buttons", async () => {
+  it("consent page does not show reauth on first authorization", async () => {
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: "http://localhost:9999/callback",
@@ -62,7 +62,7 @@ describe("Consent screen", () => {
     const body = await response.text();
     expect(body).toContain('value="approve"');
     expect(body).toContain('value="deny"');
-    // No reauth button — prompt=login is always set on redirect
+    // No reauth button on first authorization (no client_authed marker in KV yet)
     expect(body).not.toContain('value="reauth"');
   });
 

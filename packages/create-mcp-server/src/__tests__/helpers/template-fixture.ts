@@ -47,6 +47,7 @@ const FIXTURE_FILES = [
   "tests/evals/tool-filtering.test.ts",
   "tests/evals/mcp-chaining.test.ts",
   "src/testing/mock-mcp-server.ts",
+  "umbraco/McpOAuthComposer.cs",
 ];
 
 /**

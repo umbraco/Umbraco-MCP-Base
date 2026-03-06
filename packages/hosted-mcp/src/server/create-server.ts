@@ -8,6 +8,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import {
   shouldIncludeTool,
   createToolAnnotations,
@@ -231,7 +232,30 @@ export async function createPerRequestServer(
   // Uses site-specific base URL when in multi-site mode.
   const fetchClient = await createFetchClientFromKV(effectiveEnv, props.umbracoTokenKey);
   if (!fetchClient) {
-    throw new Error("Umbraco token not found or expired. Re-authentication required.");
+    // Token is gone from KV (e.g. wrangler restart, KV expiry, or Umbraco restart
+    // invalidated it). Return a degraded server with a single tool that tells the
+    // client to disconnect and reconnect to trigger a fresh OAuth flow.
+    server.registerTool(
+      "authentication-expired",
+      {
+        description: "Your Umbraco session has expired. Disconnect and reconnect this MCP server to re-authenticate.",
+        inputSchema: z.object({}),
+        annotations: {
+          title: "Authentication Expired",
+          readOnlyHint: true,
+        },
+      },
+      async () => ({
+        content: [
+          {
+            type: "text" as const,
+            text: "Your Umbraco authentication has expired or been invalidated. Please disconnect and reconnect this MCP server to trigger a fresh login.",
+          },
+        ],
+        isError: true,
+      })
+    );
+    return server;
   }
 
   // Set the fetch client as the transport for UmbracoManagementClient.
