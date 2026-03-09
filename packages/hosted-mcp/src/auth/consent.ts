@@ -140,10 +140,21 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       max-width: 720px;
       width: 100%;
-      padding: 2rem;
+      overflow: hidden;
     }
-    h1 { font-size: 1.25rem; margin-bottom: 1.5rem; color: #1b264f; }
-    .field { margin-bottom: 1rem; }
+    .header {
+      background: #1b264f;
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .header svg { flex-shrink: 0; }
+    .header h1 { font-size: 1.25rem; margin: 0; color: white; }
+    .card-body { padding: 1.5rem 2rem 2rem; }
+    .fields-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; margin-bottom: 1rem; }
+    @media (max-width: 600px) { .fields-grid { grid-template-columns: 1fr; } }
+    .field { margin-bottom: 0; }
     .field-label { font-size: 0.75rem; text-transform: uppercase; color: #666; margin-bottom: 0.25rem; }
     .field-value { font-size: 0.95rem; color: #333; word-break: break-all; }
     .scopes { list-style: none; padding: 0; }
@@ -189,7 +200,9 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     .collection-item label:has(input:disabled) { color: #ccc; }
     .slice-selection { margin-top: 1rem; border-top: 1px solid #eee; padding-top: 1rem; }
     .slice-selection h2 { font-size: 0.95rem; color: #1b264f; margin-bottom: 0.75rem; }
-    .slice-item { display: inline-block; margin-right: 1rem; margin-bottom: 0.5rem; }
+    .slices-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; }
+    @media (max-width: 600px) { .slices-grid { grid-template-columns: repeat(3, 1fr); } }
+    .slice-item { margin: 0; }
     .slice-item label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #333; cursor: pointer; }
     .slice-item input[type="checkbox"] { accent-color: #1b264f; }
     .readonly-toggle { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
@@ -206,26 +219,32 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
 </head>
 <body>
   <div class="card">
-    <h1>${title}</h1>
-
-    <div class="field">
-      <div class="field-label">Application</div>
-      <div class="field-value">${escapeHtml(clientName)}</div>
+    <div class="header">
+      <svg width="28" height="28" viewBox="0 0 315.89 315.89" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M0 157.74a157.95 157.95 0 11158 158.15A157.95 157.95 0 010 157.74zm154.74 54.09a155.41 155.41 0 01-36.5-3.29 27.92 27.92 0 01-19.94-16q-5.35-12.34-5.21-38.1a243 243 0 011.69-26.84q1.55-13 3.09-21.46l1.07-5.59a2 2 0 000-.49 3.2 3.2 0 00-2.65-3.17l-20.37-3.22h-.44a3.19 3.19 0 00-3.11 2.48c-.35 1.31-.56 2.27-1.17 5.38-1.16 6-2.24 11.85-3.43 20.38a264.17 264.17 0 00-2.3 27.94 145.24 145.24 0 000 19.57q.72 25.94 8.9 41.42t27.72 22.3q19.53 6.81 54.43 6.66h2.91q34.94.15 54.41-6.66t27.71-22.3q8.17-15.53 8.91-41.42a145.24 145.24 0 000-19.57 266.84 266.84 0 00-2.3-27.94c-1.2-8.44-2.27-14.26-3.44-20.38-.61-3.11-.81-4.07-1.16-5.38a3.21 3.21 0 00-3.12-2.48h-.52l-20.38 3.18a3.2 3.2 0 00-2.68 3.17 4 4 0 000 .49l1.08 5.59q1.55 8.48 3.12 21.46a245.68 245.68 0 011.65 26.84q.27 25.69-5.21 38.07a27.9 27.9 0 01-19.76 16.07 155.19 155.19 0 01-36.48 3.29z"/></svg>
+      <h1>${title}</h1>
     </div>
+    <div class="card-body">
 
-    ${sites && sites.length > 0 ? siteSelectionHtml : `<div class="field">
-      <div class="field-label">Umbraco Instance</div>
-      <div class="field-value">${escapeHtml(umbracoBaseUrl)}</div>
-    </div>`}
+    <div class="fields-grid">
+      <div class="field">
+        <div class="field-label">Application</div>
+        <div class="field-value">${escapeHtml(clientName)}</div>
+      </div>
 
-    <div class="field">
-      <div class="field-label">Requested Permissions</div>
-      <ul class="scopes">${scopeList}</ul>
-    </div>
+      ${sites && sites.length > 0 ? siteSelectionHtml : `<div class="field">
+        <div class="field-label">Umbraco Instance</div>
+        <div class="field-value">${escapeHtml(umbracoBaseUrl)}</div>
+      </div>`}
 
-    <div class="field">
-      <div class="field-label">Redirect URI</div>
-      <div class="field-value">${escapeHtml(redirectUri)}</div>
+      <div class="field">
+        <div class="field-label">Requested Permissions</div>
+        <ul class="scopes">${scopeList}</ul>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Redirect URI</div>
+        <div class="field-value">${escapeHtml(redirectUri)}</div>
+      </div>
     </div>
 
     <form method="POST" action="${escapeHtml(actionUrl)}">
@@ -237,6 +256,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
         <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
       </div>
     </form>
+    </div>
   </div>
 </body>
 </html>`;
@@ -331,6 +351,7 @@ document.querySelectorAll('.mode-checkbox').forEach(function(modeCheckbox) {
   if (config.slices && config.slices.length > 0) {
     parts.push(`<div class="slice-selection">`);
     parts.push(`<h2>Operations</h2>`);
+    parts.push(`<div class="slices-grid">`);
 
     for (const slice of config.slices) {
       const checked = slice.defaultSelected !== false ? " checked" : "";
@@ -341,6 +362,7 @@ document.querySelectorAll('.mode-checkbox').forEach(function(modeCheckbox) {
       parts.push(`</div>`);
     }
 
+    parts.push(`</div>`); // close .slices-grid
     parts.push(`</div>`);
   }
 
