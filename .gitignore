@@ -8,3 +8,12 @@ coverage/
 junit.xml
 .DS_Store
 settings.local.json
+.worktrees/
+**/.wrangler/
+**/.dev.vars
+**/test-results/
+tests/umbraco-instance/bin/
+tests/umbraco-instance/obj/
+tests/umbraco-instance/umbraco/
+tests/umbraco-instance/appsettings-schema*.json
+tests/umbraco-instance/umbraco-package-schema.json
