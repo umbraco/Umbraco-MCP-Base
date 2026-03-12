@@ -1,34 +1,28 @@
 /**
- * MCP Client Manager Filter Passthrough Tests
+ * StdioConnection Filter Passthrough Tests
  *
- * Tests that filters are correctly passed through to chained servers.
+ * Tests that filters are correctly passed through as CLI args to chained servers.
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { McpClientManager, createMcpClientManager } from "../manager.js";
+import { StdioConnection } from "../stdio-connection.js";
+import type { McpStdioServerConfig, FilterConfig } from "../types.js";
 
-describe("McpClientManager Filter Passthrough", () => {
+describe("StdioConnection Filter Passthrough", () => {
   // Helper to access private buildArgs method for testing
-  function getBuildArgs(manager: McpClientManager, serverName: string): string[] {
-    const config = manager.getConfigs().get(serverName)!;
-    // Access private method via any cast (test-only)
-    return (manager as unknown as { buildArgs: (config: unknown) => string[] }).buildArgs(config);
+  function getBuildArgs(
+    config: McpStdioServerConfig,
+    filterConfig?: FilterConfig,
+  ): string[] {
+    const conn = new StdioConnection(config, filterConfig);
+    return (conn as unknown as { buildArgs: () => string[] }).buildArgs();
   }
 
   it("should build args with tool filters", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        tools: ["get-document", "list-documents"],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: ["--base-arg"],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: ["--base-arg"] },
+      { tools: ["get-document", "list-documents"] },
+    );
 
     expect(args).toContain("--base-arg");
     expect(args).toContain("--tools");
@@ -36,79 +30,45 @@ describe("McpClientManager Filter Passthrough", () => {
   });
 
   it("should build args with slice filters", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        slices: ["read", "list"],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: [],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { slices: ["read", "list"] },
+    );
 
     expect(args).toContain("--slices");
     expect(args).toContain("read,list");
   });
 
   it("should build args with mode filters", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        modes: ["content", "media"],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: [],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { modes: ["content", "media"] },
+    );
 
     expect(args).toContain("--modes");
     expect(args).toContain("content,media");
   });
 
   it("should build args with tool collection filters", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        toolCollections: ["document", "media-management"],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: [],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { toolCollections: ["document", "media-management"] },
+    );
 
     expect(args).toContain("--tool-collections");
     expect(args).toContain("document,media-management");
   });
 
   it("should build args with all filters combined", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: ["--base"] },
+      {
         tools: ["get-document"],
         toolCollections: ["document"],
         slices: ["read"],
         modes: ["content"],
       },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: ["--base"],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    );
 
     expect(args).toContain("--base");
     expect(args).toContain("--tools");
@@ -122,15 +82,11 @@ describe("McpClientManager Filter Passthrough", () => {
   });
 
   it("should not add filter args when no filters configured", () => {
-    const manager = createMcpClientManager();
-
-    manager.registerServer({
+    const args = getBuildArgs({
       name: "test",
       command: "test-cmd",
       args: ["--base-arg"],
     });
-
-    const args = getBuildArgs(manager, "test");
 
     expect(args).toEqual(["--base-arg"]);
     expect(args).not.toContain("--tools");
@@ -140,20 +96,10 @@ describe("McpClientManager Filter Passthrough", () => {
   });
 
   it("should not add filter args for empty arrays", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        tools: [],
-        slices: [],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: [],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { tools: [], slices: [] },
+    );
 
     expect(args).toEqual([]);
     expect(args).not.toContain("--tools");
@@ -161,19 +107,10 @@ describe("McpClientManager Filter Passthrough", () => {
   });
 
   it("should preserve base args order", () => {
-    const manager = createMcpClientManager({
-      filterConfig: {
-        tools: ["tool1"],
-      },
-    });
-
-    manager.registerServer({
-      name: "test",
-      command: "test-cmd",
-      args: ["-y", "@scope/package"],
-    });
-
-    const args = getBuildArgs(manager, "test");
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: ["-y", "@scope/package"] },
+      { tools: ["tool1"] },
+    );
 
     // Base args should come first
     expect(args[0]).toBe("-y");
