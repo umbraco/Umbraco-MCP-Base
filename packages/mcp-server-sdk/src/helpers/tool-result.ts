@@ -3,69 +3,85 @@
  *
  * This module provides helpers for creating standardized MCP tool results
  * with proper typing for structured content.
+ *
+ * By default, results include both `structuredContent` and a JSON-stringified
+ * `content` fallback for maximum client compatibility (per MCP spec guidance).
+ *
+ * Set `DISABLE_OUTPUT_COMPATIBILITY_MODE=true` (env var or
+ * --disable-output-compatibility-mode CLI flag) to disable compatibility mode
+ * and return `structuredContent` only, omitting the JSON duplication in `content`.
+ * Use this when your MCP client is known to support `structuredContent`
+ * (e.g. Claude Code, Claude Desktop).
+ *
+ * @see https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1624
  */
 
 /**
- * Creates a properly typed success tool result with structured content.
- *
- * This helper centralizes the type assertion needed because the MCP SDK's ToolCallback
- * type expects structuredContent to be `{ [x: string]: unknown } | undefined`, but at runtime
- * the SDK accepts any type (objects, arrays, primitives, null, etc.) as documented.
- *
- * By centralizing the assertion here, we:
- * 1. Avoid scattering `as any` throughout the codebase
- * 2. Document why the assertion is necessary
- * 3. Make it easier to update if the SDK types change
- * 4. Preserve the actual return type for better IDE support
- * 5. Only include structuredContent when outputSchema is defined (reduces token usage)
- * 6. Content is optional when structuredContent is provided (further reduces token usage)
- *
- * @param structuredContent - The structured data matching the outputSchema
- * @param includeStructured - Whether to include structuredContent (default: true)
- * @param content - Optional content array (defaults to empty when structuredContent provided)
- *
- * @returns A tool result that satisfies ToolCallback's type constraints
+ * Module-level flag for structured-only mode.
+ * Set via configureToolResultMode() during server startup, or falls back to
+ * reading the DISABLE_OUTPUT_COMPATIBILITY_MODE env var directly.
  */
-export function createToolResult<T = unknown>(
-  structuredContent?: T,
-  includeStructured: boolean = true,
-  content?: Array<{ type: "text"; text: string }>
-): {
+let _structuredOnly: boolean | null = null;
+
+/**
+ * Configures the tool result mode. Call this once at server startup
+ * after resolving the config via getServerConfig().
+ *
+ * @param structuredOnly - When true, content is not populated with a JSON
+ *   copy of structuredContent. When false (default), both fields are populated.
+ */
+export function configureToolResultMode(structuredOnly: boolean): void {
+  _structuredOnly = structuredOnly;
+}
+
+/**
+ * Returns true when structured-only mode is enabled.
+ * Checks the configured value first, then falls back to env var for
+ * environments where getServerConfig() is not used (e.g. Workers).
+ */
+function isStructuredOnly(): boolean {
+  if (_structuredOnly !== null) {
+    return _structuredOnly;
+  }
+  // Fallback: read env var directly (for cases where configureToolResultMode
+  // hasn't been called, e.g. hosted Workers or tests)
+  const envValue = typeof process !== "undefined" ? process.env?.DISABLE_OUTPUT_COMPATIBILITY_MODE : undefined;
+  return envValue === "true" || envValue === "1";
+}
+
+type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: { [x: string]: unknown };
-} {
-  // Type assertion is necessary here because ToolCallback's type definition is more
-  // restrictive than the actual runtime behavior. The MCP SDK accepts structuredContent
-  // of any type at runtime (objects, arrays, primitives, null), but TypeScript only
-  // allows objects with index signatures. This is a known limitation of the SDK's types.
+};
 
-  // When structuredContent is provided and no content is specified, use empty array
-  // to minimize token usage while still satisfying the MCP SDK's content requirement
-  // When no structuredContent, content must be provided (for tools without outputSchema)
-  const finalContent = content ?? (structuredContent !== undefined && includeStructured ? [] : [{ type: "text" as const, text: "" }]);
+/**
+ * Creates a tool result with structured content and compatibility fallback.
+ *
+ * @param data - The structured data matching the outputSchema. Omit for void operations.
+ * @returns A tool result with both structuredContent and content (unless compatibility mode is disabled)
+ */
+export function createToolResult<T = unknown>(data?: T): ToolResult {
+  if (data === undefined) {
+    return { content: [{ type: "text" as const, text: "" }] };
+  }
 
   return {
-    content: finalContent,
-    ...(includeStructured && structuredContent !== undefined && {
-      structuredContent: structuredContent as { [x: string]: unknown }
-    }),
+    content: isStructuredOnly()
+      ? []
+      : [{ type: "text" as const, text: JSON.stringify(data) }],
+    structuredContent: data as { [x: string]: unknown },
   };
 }
 
 /**
  * Creates a tool result for error responses with structured content.
- * API errors are typically ProblemDetails objects, so we use structured output.
  *
  * @param errorData - The error data (typically ProblemDetails from API)
  * @returns A tool result with isError flag set to true
  */
 export function createToolResultError<T = unknown>(
   errorData: T
-): {
-  content: Array<{ type: "text"; text: string }>;
-  structuredContent?: { [x: string]: unknown };
-  isError: boolean;
-} {
+): ToolResult & { isError: boolean } {
   return {
     ...createToolResult(errorData),
     isError: true,

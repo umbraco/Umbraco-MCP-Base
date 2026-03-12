@@ -34,6 +34,7 @@ export {
 
 // Tool result helpers
 export {
+  configureToolResultMode,
   createToolResult,
   createToolResultError,
 } from "./tool-result.js";

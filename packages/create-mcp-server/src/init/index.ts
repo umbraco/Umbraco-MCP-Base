@@ -7,7 +7,7 @@ import { removeExamples } from "./remove-examples.js";
 import { removeChaining } from "./remove-chaining.js";
 import { removeEvals } from "./remove-evals.js";
 import { setupInstance } from "./setup-instance.js";
-import { detectPsw, installPsw } from "./psw-cli.js";
+import { detectPsw, installPsw, PSW_VERSION } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
 import {
   promptUmbracoSetup,
@@ -65,11 +65,15 @@ export async function runInit(dir?: string): Promise<void> {
   // Step 2: Umbraco instance setup
   let umbracoChoice = await promptUmbracoSetup();
 
-  // Step 3: If creating, ensure PSW CLI is available
+  // Step 3: If creating, ensure PSW CLI is available and up to date
   if (umbracoChoice === "create") {
     const psw = detectPsw();
-    if (!psw.installed) {
-      const shouldInstall = await promptInstallPsw();
+    const needsInstall = !psw.installed || psw.version !== PSW_VERSION;
+    if (needsInstall) {
+      if (psw.installed) {
+        console.log(pc.dim(`  PSW CLI ${psw.version} found, updating to ${PSW_VERSION}...`));
+      }
+      const shouldInstall = psw.installed || await promptInstallPsw();
       if (shouldInstall) {
         try {
           installPsw();

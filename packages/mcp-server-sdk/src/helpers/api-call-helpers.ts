@@ -197,7 +197,7 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
   if (!validation.valid) {
     // Fallback behavior for invalid responses
     if (options?.void) {
-      return createToolResult(undefined, false);
+      return createToolResult();
     }
     return createToolResult(validation.fallback);
   }
@@ -210,7 +210,7 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
       if (options.successMessage) {
         return createToolResult({ message: options.successMessage });
       }
-      return createToolResult(undefined, false);
+      return createToolResult();
     }
 
     // GET with data
@@ -254,7 +254,7 @@ export function processVoidResponse(
 ): CallToolResult {
   // Success status codes (200-299)
   if (response.status >= 200 && response.status < 300) {
-    return createToolResult(undefined, false);
+    return createToolResult();
   }
 
   // Error status codes (400+, 500+, etc.) - throw for decorator to handle
