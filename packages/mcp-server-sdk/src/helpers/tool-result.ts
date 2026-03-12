@@ -4,23 +4,35 @@
  * This module provides helpers for creating standardized MCP tool results
  * with proper typing for structured content.
  *
- * Results always use `structuredContent` with a minimal `content` placeholder.
- * This satisfies the MCP SDK's outputSchema validation while keeping token
- * usage low. Clients that support structuredContent read the real data;
- * clients that only read content see a pointer to it.
+ * By default, results include both `structuredContent` and a JSON-stringified
+ * `content` fallback for maximum client compatibility (per MCP spec guidance).
+ *
+ * Set `TOOL_STRUCTURED_RESULT=true` to return `structuredContent` only,
+ * omitting the JSON duplication in `content`. Use this when your MCP client
+ * is known to support `structuredContent` (e.g. Claude Code, Claude Desktop).
  *
  * @see https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1624
  */
 
 /**
+ * Returns true when structured-only mode is enabled via env var.
+ * In this mode, content is not populated with a JSON copy of structuredContent.
+ */
+function isStructuredOnly(): boolean {
+  const envValue = typeof process !== "undefined" ? process.env?.TOOL_STRUCTURED_RESULT : undefined;
+  return envValue === "true" || envValue === "1";
+}
+
+/**
  * Creates a properly typed success tool result with structured content.
  *
- * When structuredContent is provided, it is always included in the result
- * and content contains a minimal placeholder to satisfy the MCP protocol.
+ * Default: both `structuredContent` and `content` (JSON stringified) are returned.
+ * With `TOOL_STRUCTURED_RESULT=true`: only `structuredContent` is returned,
+ * with an empty `content` array.
  *
  * @param structuredContent - The structured data matching the outputSchema
  * @param includeStructured - Whether to include structuredContent (default: true)
- * @param content - Optional explicit content array (bypasses placeholder)
+ * @param content - Optional explicit content array (bypasses auto-formatting)
  *
  * @returns A tool result that satisfies ToolCallback's type constraints
  */
@@ -43,7 +55,9 @@ export function createToolResult<T = unknown>(
 
   if (structuredContent !== undefined && includeStructured) {
     return {
-      content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+      content: isStructuredOnly()
+        ? []
+        : [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
       structuredContent: structuredContent as { [x: string]: unknown },
     };
   }
