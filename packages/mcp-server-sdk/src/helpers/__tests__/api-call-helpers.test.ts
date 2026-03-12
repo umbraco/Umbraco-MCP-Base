@@ -16,9 +16,6 @@ import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals
 import type { AxiosResponse } from "axios";
 import type { ProblemDetails } from "../problem-details.js";
 
-// Enable structured content mode for these tests (they assert structuredContent fields)
-process.env.TOOL_STRUCTURED_RESULT = "true";
-
 // Store original console.warn
 const originalConsoleWarn = console.warn;
 

@@ -36,9 +36,6 @@ export {
 export {
   createToolResult,
   createToolResultError,
-  setToolResultStructured,
-  getToolResultStructured,
-  detectToolResultMode,
 } from "./tool-result.js";
 
 // Validation error
