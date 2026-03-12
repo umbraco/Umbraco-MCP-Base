@@ -2,6 +2,7 @@ import { config as loadEnv } from "dotenv";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { resolve } from "path";
+import { configureToolResultMode } from "../helpers/tool-result.js";
 
 export interface UmbracoAuthConfig {
   clientId: string;
@@ -20,6 +21,7 @@ export interface UmbracoServerConfig {
   excludeTools?: string[];
   allowedMediaPaths?: string[];
   readonly?: boolean;
+  disableOutputCompatibilityMode?: boolean;
   configSources: {
     clientId: "cli" | "env";
     clientSecret: "cli" | "env";
@@ -33,6 +35,7 @@ export interface UmbracoServerConfig {
     excludeTools?: "cli" | "env" | "none";
     allowedMediaPaths?: "cli" | "env" | "none";
     readonly?: "cli" | "env" | "none";
+    disableOutputCompatibilityMode?: "cli" | "env" | "none";
     envFile: "cli" | "default";
   };
 }
@@ -68,6 +71,7 @@ const CONFIG_FIELDS: ConfigFieldDefinition[] = [
   { name: "excludeTools", envVar: "UMBRACO_EXCLUDE_TOOLS", cliFlag: "umbraco-exclude-tools", type: "csv" },
   { name: "allowedMediaPaths", envVar: "UMBRACO_ALLOWED_MEDIA_PATHS", cliFlag: "umbraco-allowed-media-paths", type: "csv-path" },
   { name: "readonly", envVar: "UMBRACO_READONLY", cliFlag: "umbraco-readonly", type: "boolean" },
+  { name: "disableOutputCompatibilityMode", envVar: "DISABLE_OUTPUT_COMPATIBILITY_MODE", cliFlag: "disable-output-compatibility-mode", type: "boolean" },
 ];
 
 // ============================================================================
@@ -173,6 +177,7 @@ interface CliArgs {
   "umbraco-exclude-tools"?: string;
   "umbraco-allowed-media-paths"?: string;
   "umbraco-readonly"?: boolean;
+  "disable-output-compatibility-mode"?: boolean;
   env?: string;
 }
 
@@ -258,6 +263,7 @@ export function getServerConfig(
     excludeTools: "none",
     allowedMediaPaths: "none",
     readonly: "none",
+    disableOutputCompatibilityMode: "none",
     envFile: envFileSource,
   };
 
@@ -315,6 +321,9 @@ export function getServerConfig(
 
     console.log(); // Empty line for better readability
   }
+
+  // Auto-configure tool result mode from resolved config
+  configureToolResultMode(config.disableOutputCompatibilityMode === true);
 
   return {
     config: {
