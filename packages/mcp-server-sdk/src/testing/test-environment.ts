@@ -10,6 +10,7 @@ import { jest } from "@jest/globals";
  * Sets up the standard test environment for all tests.
  *
  * This helper:
+ * - Disables output compatibility mode (structured content only)
  * - Mocks console.error in beforeEach to suppress expected error output
  * - Restores console.error in afterEach to prevent test pollution
  *
@@ -26,6 +27,9 @@ import { jest } from "@jest/globals";
  */
 export function setupTestEnvironment(): void {
   let originalConsoleError: typeof console.error;
+
+  // Disable output compatibility mode so tool results only contain structuredContent
+  process.env.DISABLE_OUTPUT_COMPATIBILITY_MODE = "true";
 
   beforeEach(() => {
     originalConsoleError = console.error;
