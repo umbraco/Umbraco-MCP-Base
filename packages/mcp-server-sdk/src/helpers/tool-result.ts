@@ -62,7 +62,7 @@ type ToolResult = {
  */
 export function createToolResult<T = unknown>(data?: T): ToolResult {
   if (data === undefined) {
-    return { content: [] };
+    return { content: [{ type: "text" as const, text: "" }] };
   }
 
   return {
