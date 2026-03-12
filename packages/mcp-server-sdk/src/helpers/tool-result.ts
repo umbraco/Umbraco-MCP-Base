@@ -43,7 +43,7 @@ export function createToolResult<T = unknown>(
 
   if (structuredContent !== undefined && includeStructured) {
     return {
-      content: [{ type: "text" as const, text: "See structuredContent" }],
+      content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
       structuredContent: structuredContent as { [x: string]: unknown },
     };
   }
