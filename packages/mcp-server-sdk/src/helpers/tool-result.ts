@@ -3,26 +3,94 @@
  *
  * This module provides helpers for creating standardized MCP tool results
  * with proper typing for structured content.
+ *
+ * By default, results use `content` only (JSON stringified) for maximum client
+ * compatibility. When the connected client is known to support `structuredContent`
+ * (e.g. Claude Desktop, Claude Code), the module auto-upgrades to use
+ * `structuredContent` instead.
+ *
+ * Override with env var: TOOL_STRUCTURED_RESULT=true|false
+ *
+ * @see https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1624
  */
 
+/** Clients known to properly handle structuredContent */
+const STRUCTURED_CONTENT_CLIENTS = [
+  "claude-ai",       // Claude Desktop
+  "claude-code",     // Claude Code CLI
+  "claudecode",      // Claude Code (alternate)
+];
+
+/** Module-level flag controlling whether to use structuredContent */
+let useStructuredContent: boolean | undefined;
+
 /**
- * Creates a properly typed success tool result with structured content.
+ * Configure whether tool results use `structuredContent` or `content`.
  *
- * This helper centralizes the type assertion needed because the MCP SDK's ToolCallback
- * type expects structuredContent to be `{ [x: string]: unknown } | undefined`, but at runtime
- * the SDK accepts any type (objects, arrays, primitives, null, etc.) as documented.
+ * - `true`: Results use `structuredContent` only (for clients that support it)
+ * - `false`: Results use `content` only with JSON stringified data (universal compatibility)
  *
- * By centralizing the assertion here, we:
- * 1. Avoid scattering `as any` throughout the codebase
- * 2. Document why the assertion is necessary
- * 3. Make it easier to update if the SDK types change
- * 4. Preserve the actual return type for better IDE support
- * 5. Only include structuredContent when outputSchema is defined (reduces token usage)
- * 6. Content is optional when structuredContent is provided (further reduces token usage)
+ * Called automatically by `detectToolResultMode()`, or set manually.
+ * Can also be set via `TOOL_STRUCTURED_RESULT` env var (takes precedence).
+ */
+export function setToolResultStructured(enabled: boolean): void {
+  useStructuredContent = enabled;
+}
+
+/**
+ * Returns the current structured content mode.
+ */
+export function getToolResultStructured(): boolean {
+  return resolveMode();
+}
+
+/**
+ * Auto-detect the tool result mode from the MCP client info.
+ * Call this after the MCP server connects to a transport.
+ *
+ * @param clientName - The `clientInfo.name` from the MCP initialize handshake
+ *
+ * @example
+ * ```typescript
+ * // After server.connect(transport)
+ * const clientInfo = server.server.getClientVersion();
+ * if (clientInfo) {
+ *   detectToolResultMode(clientInfo.name);
+ * }
+ * ```
+ */
+export function detectToolResultMode(clientName: string): void {
+  const normalised = clientName.toLowerCase().trim();
+  const isStructuredClient = STRUCTURED_CONTENT_CLIENTS.some(
+    (name) => normalised === name || normalised.includes(name),
+  );
+  useStructuredContent = isStructuredClient;
+}
+
+/**
+ * Resolve the effective mode. Priority:
+ * 1. TOOL_STRUCTURED_RESULT env var
+ * 2. Auto-detected / manually set value
+ * 3. Default: false (content only)
+ */
+function resolveMode(): boolean {
+  const envValue = typeof process !== "undefined" ? process.env?.TOOL_STRUCTURED_RESULT : undefined;
+  if (envValue !== undefined) {
+    return envValue === "true" || envValue === "1";
+  }
+  return useStructuredContent ?? false;
+}
+
+/**
+ * Creates a properly typed success tool result.
+ *
+ * When structured mode is enabled (auto-detected or via env var), the result
+ * uses `structuredContent`. Otherwise, JSON is stringified into `content` for
+ * client compatibility.
  *
  * @param structuredContent - The structured data matching the outputSchema
- * @param includeStructured - Whether to include structuredContent (default: true)
- * @param content - Optional content array (defaults to empty when structuredContent provided)
+ * @param includeStructured - Whether to include structuredContent when in structured mode (default: true)
+ * @param content - Optional explicit content array (bypasses auto-formatting)
  *
  * @returns A tool result that satisfies ToolCallback's type constraints
  */
@@ -34,21 +102,36 @@ export function createToolResult<T = unknown>(
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: { [x: string]: unknown };
 } {
-  // Type assertion is necessary here because ToolCallback's type definition is more
-  // restrictive than the actual runtime behavior. The MCP SDK accepts structuredContent
-  // of any type at runtime (objects, arrays, primitives, null), but TypeScript only
-  // allows objects with index signatures. This is a known limitation of the SDK's types.
+  // Explicit content always wins
+  if (content) {
+    return {
+      content,
+      ...(includeStructured && resolveMode() && structuredContent !== undefined && {
+        structuredContent: structuredContent as { [x: string]: unknown },
+      }),
+    };
+  }
 
-  // When structuredContent is provided and no content is specified, use empty array
-  // to minimize token usage while still satisfying the MCP SDK's content requirement
-  // When no structuredContent, content must be provided (for tools without outputSchema)
-  const finalContent = content ?? (structuredContent !== undefined && includeStructured ? [] : [{ type: "text" as const, text: "" }]);
+  const structured = resolveMode();
 
+  if (structuredContent !== undefined && includeStructured) {
+    if (structured) {
+      // Structured mode: structuredContent only, empty content
+      return {
+        content: [],
+        structuredContent: structuredContent as { [x: string]: unknown },
+      };
+    } else {
+      // Compatible mode: JSON stringified in content, no structuredContent
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+      };
+    }
+  }
+
+  // No structuredContent provided
   return {
-    content: finalContent,
-    ...(includeStructured && structuredContent !== undefined && {
-      structuredContent: structuredContent as { [x: string]: unknown }
-    }),
+    content: [{ type: "text" as const, text: "" }],
   };
 }
 

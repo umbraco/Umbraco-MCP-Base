@@ -14,6 +14,9 @@
 export {
   createToolResult,
   createToolResultError,
+  setToolResultStructured,
+  getToolResultStructured,
+  detectToolResultMode,
 } from "./helpers/tool-result.js";
 
 export {
