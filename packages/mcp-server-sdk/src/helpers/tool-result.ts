@@ -65,6 +65,9 @@ export function detectToolResultMode(clientName: string): void {
     (name) => normalised === name || normalised.includes(name),
   );
   useStructuredContent = isStructuredClient;
+  console.error(
+    `[tool-result] MCP client: "${clientName}" → ${isStructuredClient ? "structuredContent" : "content"} mode`,
+  );
 }
 
 /**
