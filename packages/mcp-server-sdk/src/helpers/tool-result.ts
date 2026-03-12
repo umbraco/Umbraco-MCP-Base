@@ -119,15 +119,17 @@ export function createToolResult<T = unknown>(
 
   if (structuredContent !== undefined && includeStructured) {
     if (structured) {
-      // Structured mode: structuredContent only, empty content
+      // Structured mode: structuredContent with minimal content placeholder
       return {
-        content: [],
+        content: [{ type: "text" as const, text: "See structuredContent" }],
         structuredContent: structuredContent as { [x: string]: unknown },
       };
     } else {
-      // Compatible mode: JSON stringified in content, no structuredContent
+      // Compatible mode: both fields — structuredContent for SDK validation,
+      // JSON stringified in content for clients that only read content
       return {
         content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+        structuredContent: structuredContent as { [x: string]: unknown },
       };
     }
   }
