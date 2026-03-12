@@ -49,64 +49,39 @@ function isStructuredOnly(): boolean {
   return envValue === "true" || envValue === "1";
 }
 
-/**
- * Creates a properly typed success tool result with structured content.
- *
- * Default: both `structuredContent` and `content` (JSON stringified) are returned.
- * With `DISABLE_OUTPUT_COMPATIBILITY_MODE=true`: only `structuredContent` is returned,
- * with an empty `content` array.
- *
- * @param structuredContent - The structured data matching the outputSchema
- * @param includeStructured - Whether to include structuredContent (default: true)
- * @param content - Optional explicit content array (bypasses auto-formatting)
- *
- * @returns A tool result that satisfies ToolCallback's type constraints
- */
-export function createToolResult<T = unknown>(
-  structuredContent?: T,
-  includeStructured: boolean = true,
-  content?: Array<{ type: "text"; text: string }>
-): {
+type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: { [x: string]: unknown };
-} {
-  if (content) {
-    return {
-      content,
-      ...(includeStructured && structuredContent !== undefined && {
-        structuredContent: structuredContent as { [x: string]: unknown },
-      }),
-    };
-  }
+};
 
-  if (structuredContent !== undefined && includeStructured) {
-    return {
-      content: isStructuredOnly()
-        ? []
-        : [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
-      structuredContent: structuredContent as { [x: string]: unknown },
-    };
+/**
+ * Creates a tool result with structured content and compatibility fallback.
+ *
+ * @param data - The structured data matching the outputSchema. Omit for void operations.
+ * @returns A tool result with both structuredContent and content (unless compatibility mode is disabled)
+ */
+export function createToolResult<T = unknown>(data?: T): ToolResult {
+  if (data === undefined) {
+    return { content: [] };
   }
 
   return {
-    content: [{ type: "text" as const, text: "" }],
+    content: isStructuredOnly()
+      ? []
+      : [{ type: "text" as const, text: JSON.stringify(data) }],
+    structuredContent: data as { [x: string]: unknown },
   };
 }
 
 /**
  * Creates a tool result for error responses with structured content.
- * API errors are typically ProblemDetails objects, so we use structured output.
  *
  * @param errorData - The error data (typically ProblemDetails from API)
  * @returns A tool result with isError flag set to true
  */
 export function createToolResultError<T = unknown>(
   errorData: T
-): {
-  content: Array<{ type: "text"; text: string }>;
-  structuredContent?: { [x: string]: unknown };
-  isError: boolean;
-} {
+): ToolResult & { isError: boolean } {
   return {
     ...createToolResult(errorData),
     isError: true,
