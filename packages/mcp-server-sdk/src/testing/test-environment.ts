@@ -10,6 +10,7 @@ import { jest } from "@jest/globals";
  * Sets up the standard test environment for all tests.
  *
  * This helper:
+ * - Enables structured content mode so tests can assert on structuredContent
  * - Mocks console.error in beforeEach to suppress expected error output
  * - Restores console.error in afterEach to prevent test pollution
  *
@@ -25,6 +26,11 @@ import { jest } from "@jest/globals";
  * ```
  */
 export function setupTestEnvironment(): void {
+  // Enable structured content mode for tests — tool handlers return structuredContent
+  // so tests can assert on typed output. In production, the mode is auto-detected
+  // from the MCP client or set via TOOL_STRUCTURED_RESULT env var.
+  process.env.TOOL_STRUCTURED_RESULT = "true";
+
   let originalConsoleError: typeof console.error;
 
   beforeEach(() => {
