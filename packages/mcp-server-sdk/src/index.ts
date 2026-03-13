@@ -12,6 +12,7 @@
 // ============================================================================
 
 export {
+  configureToolResultMode,
   createToolResult,
   createToolResultError,
 } from "./helpers/tool-result.js";

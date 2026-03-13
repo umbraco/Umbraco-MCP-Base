@@ -12,5 +12,11 @@ junit.xml
 settings.local.json
 .claude/projects/
 .worktrees/
-.wrangler/
-test-results/
+**/.wrangler/
+**/.dev.vars
+**/test-results/
+tests/umbraco-instance/bin/
+tests/umbraco-instance/obj/
+tests/umbraco-instance/umbraco/
+tests/umbraco-instance/appsettings-schema*.json
+tests/umbraco-instance/umbraco-package-schema.json
