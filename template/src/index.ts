@@ -18,6 +18,10 @@ import {
   parseProxiedToolName,
   createCollectionConfigLoader,
   shouldIncludeTool,
+  toolToJsonSchema,
+  toolToSummary,
+  formatToolTable,
+  generateContextFile,
   type CollectionConfiguration,
 } from "@umbraco-cms/mcp-server-sdk";
 
@@ -104,6 +108,55 @@ for (const collection of collections) {
 
     registeredToolCount++;
   }
+}
+
+// ============================================================================
+// CLI Introspection (runs before server start, exits immediately)
+// ============================================================================
+
+const cliFlags = serverConfig.cliFlags;
+
+if (cliFlags?.listTools) {
+  const summaries = collections.flatMap((col) =>
+    col.tools({}).map((tool) => toolToSummary(tool, col.metadata.name))
+  );
+  console.log(formatToolTable(summaries));
+  process.exit(0);
+}
+
+if (cliFlags?.describeTool) {
+  const toolName = cliFlags.describeTool;
+  let found = false;
+  for (const col of collections) {
+    const tool = col.tools({}).find((t) => t.name === toolName);
+    if (tool) {
+      const schema = toolToJsonSchema(tool);
+      console.log(JSON.stringify({
+        name: tool.name,
+        collection: col.metadata.name,
+        description: tool.description,
+        slices: tool.slices,
+        annotations: tool.annotations ?? {},
+        inputSchema: schema,
+      }, null, 2));
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    console.error(`Tool '${toolName}' not found. Use --list-tools to see available tools.`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+if (cliFlags?.generateContext) {
+  const context = generateContextFile(collections, {
+    serverName: "my-umbraco-mcp",
+    serverVersion: packageJson.version,
+  });
+  console.log(context);
+  process.exit(0);
 }
 
 // Start the server

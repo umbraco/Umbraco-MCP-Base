@@ -47,3 +47,34 @@ export {
 
 // Problem details type
 export { type ProblemDetails } from "./problem-details.js";
+
+// Input sanitization
+export {
+  rejectControlCharacters,
+  rejectPathTraversal,
+  rejectEmbeddedQueryParams,
+  rejectPreEncodedStrings,
+  sanitizeStringInput,
+  validateUUID,
+  withInputSanitization,
+  RAW_FIELD_MARKER,
+  type SanitizeStringOptions,
+} from "./input-sanitizer.js";
+
+// Response trimming
+export {
+  trimArrayResponse,
+  summarizeDeepResponse,
+  estimateTokenSize,
+  pickFields,
+  omitFields,
+  type TrimArrayOptions,
+  type SummarizeDeepOptions,
+} from "./response-trimmer.js";
+
+// Dry-run mode
+export {
+  configureDryRunMode,
+  isDryRunEnabled,
+  withDryRun,
+} from "./dry-run.js";

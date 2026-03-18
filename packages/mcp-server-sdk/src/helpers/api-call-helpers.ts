@@ -37,6 +37,7 @@ import { AxiosResponse } from "axios";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
+import { pickFields, omitFields } from "./response-trimmer.js";
 
 /**
  * Custom error class for API errors.
@@ -140,6 +141,10 @@ export interface ApiCallOptions<T = unknown> {
   transformError?: (error: ProblemDetails) => ProblemDetails;
   /** Transform success data before returning */
   transformData?: (data: T) => unknown;
+  /** Only include these top-level keys in the response (field mask) */
+  fields?: string[];
+  /** Exclude these top-level keys from the response */
+  excludeFields?: string[];
 }
 
 /**
@@ -214,9 +219,19 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
     }
 
     // GET with data
-    const data = options?.transformData
+    let data: unknown = options?.transformData
       ? options.transformData(response.data as T)
       : response.data;
+
+    // Apply field masks if specified
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      if (options?.fields) {
+        data = pickFields(data as Record<string, unknown>, options.fields);
+      } else if (options?.excludeFields) {
+        data = omitFields(data as Record<string, unknown>, options.excludeFields);
+      }
+    }
+
     return createToolResult(data);
   }
 

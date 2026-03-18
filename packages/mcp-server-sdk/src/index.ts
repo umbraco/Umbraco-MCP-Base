@@ -52,6 +52,47 @@ export {
   type ProblemDetails,
 } from "./helpers/problem-details.js";
 
+// Input Sanitization
+export {
+  rejectControlCharacters,
+  rejectPathTraversal,
+  rejectEmbeddedQueryParams,
+  rejectPreEncodedStrings,
+  sanitizeStringInput,
+  validateUUID,
+  withInputSanitization,
+  RAW_FIELD_MARKER,
+  type SanitizeStringOptions,
+} from "./helpers/input-sanitizer.js";
+
+// Response Trimming
+export {
+  trimArrayResponse,
+  summarizeDeepResponse,
+  estimateTokenSize,
+  pickFields,
+  omitFields,
+  type TrimArrayOptions,
+  type SummarizeDeepOptions,
+} from "./helpers/response-trimmer.js";
+
+// Dry-Run Mode
+export {
+  configureDryRunMode,
+  isDryRunEnabled,
+  withDryRun,
+} from "./helpers/dry-run.js";
+
+// CLI Introspection & Context Generation
+export {
+  toolToJsonSchema,
+  toolToSummary,
+  formatToolTable,
+  generateContextFile,
+  type ToolSummary,
+  type GenerateContextOptions,
+} from "./cli/index.js";
+
 // ============================================================================
 // Types
 // ============================================================================

@@ -11,6 +11,8 @@ import { ToolDefinition, ToolAnnotations } from "../types/tool-definition.js";
 import { createToolResultError } from "./tool-result.js";
 import { UmbracoApiError } from "./api-call-helpers.js";
 import { ToolValidationError } from "./tool-validation-error.js";
+import { withInputSanitization } from "./input-sanitizer.js";
+import { withDryRun } from "./dry-run.js";
 
 // Re-export everything from split modules for convenience
 export {
@@ -209,7 +211,9 @@ export function createToolAnnotations(tool: ToolDefinition<any, any>): ToolAnnot
 
 /**
  * Standard decorator composition for all tools.
- * Applies: withPreExecutionCheck -> withErrorHandling
+ * Applies: withErrorHandling → withInputSanitization → withDryRun → withPreExecutionCheck → handler
+ *
+ * Input sanitization runs before dry-run so agents get validation feedback even in dry-run mode.
  *
  * @example
  * export default withStandardDecorators(myTool);
@@ -217,5 +221,5 @@ export function createToolAnnotations(tool: ToolDefinition<any, any>): ToolAnnot
 export function withStandardDecorators<Args extends undefined | ZodRawShape, OutputArgs extends undefined | ZodRawShape | ZodType = undefined>(
   tool: ToolDefinition<Args, OutputArgs>
 ): ToolDefinition<Args, OutputArgs> {
-  return compose<Args, OutputArgs>(withErrorHandling, withPreExecutionCheck)(tool);
+  return compose<Args, OutputArgs>(withErrorHandling, withInputSanitization, withDryRun, withPreExecutionCheck)(tool);
 }
