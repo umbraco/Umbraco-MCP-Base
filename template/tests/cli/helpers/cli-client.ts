@@ -8,7 +8,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Options for creating a CLI test client.
@@ -39,7 +42,7 @@ export interface CliTestClient {
  * - USE_MOCK_API=true for MSW mock server (no real Umbraco needed)
  */
 export async function createCliTestClient(options?: CliClientOptions): Promise<CliTestClient> {
-  const projectRoot = resolve(import.meta.dirname, "../../..");
+  const projectRoot = resolve(__dirname, "../../..");
   const entryPoint = resolve(projectRoot, "dist/index.js");
 
   const transport = new StdioClientTransport({

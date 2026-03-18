@@ -7,9 +7,11 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { execFileSync } from "child_process";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-const projectRoot = resolve(import.meta.dirname, "../../..");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(__dirname, "../../..");
 const entryPoint = resolve(projectRoot, "dist/index.js");
 
 const baseEnv = {
@@ -42,10 +44,10 @@ describe("CLI Introspection Commands", () => {
   });
 
   it("--describe-tool should output JSON for a specific tool", () => {
-    const output = runCli(["--describe-tool", "example-get-all-examples"]);
+    const output = runCli(["--describe-tool", "get-example"]);
 
     const parsed = JSON.parse(output);
-    expect(parsed.name).toBe("example-get-all-examples");
+    expect(parsed.name).toBe("get-example");
     expect(parsed.collection).toBeDefined();
     expect(parsed.description).toBeDefined();
     expect(parsed.inputSchema).toBeDefined();
