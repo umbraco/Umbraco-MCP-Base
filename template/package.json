@@ -4,6 +4,10 @@
   "type": "module",
   "description": "MCP server for my Umbraco add-on",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./collections": "./dist/collections.js"
+  },
   "bin": {
     "my-umbraco-mcp": "dist/index.js"
   },
@@ -41,7 +45,6 @@
     "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
     "agents": "^0.6.0",
-    "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",

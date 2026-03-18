@@ -614,6 +614,95 @@ describe("createAuthorizeHandler", () => {
       )[2];
       expect(data.consentChoices).toBeUndefined();
     });
+
+    it("splits prefixed modes into chainedModeSelections", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody({
+          "selectedModes[]": ["content", "demo:alerts", "demo:reporting"],
+        }),
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const data = (
+        mockStoreOAuthState.mock.calls[0] as [any, string, Record<string, unknown>]
+      )[2];
+      const choices = data.consentChoices as ConsentChoices;
+      expect(choices.selectedModes).toEqual(["content"]);
+      expect(choices.chainedModeSelections).toEqual({
+        demo: ["alerts", "reporting"],
+      });
+    });
+
+    it("splits prefixed collections into chainedCollectionSelections", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody({
+          "selectedModes[]": ["demo:alerts"],
+          "selectedCollections[]": ["document", "demo:notification"],
+        }),
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const data = (
+        mockStoreOAuthState.mock.calls[0] as [any, string, Record<string, unknown>]
+      )[2];
+      const choices = data.consentChoices as ConsentChoices;
+      expect(choices.selectedCollections).toEqual(["document"]);
+      expect(choices.chainedCollectionSelections).toEqual({
+        demo: ["notification"],
+      });
+    });
+
+    it("handles only chained modes with no main modes", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody({
+          "selectedModes[]": ["demo:alerts"],
+        }),
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const data = (
+        mockStoreOAuthState.mock.calls[0] as [any, string, Record<string, unknown>]
+      )[2];
+      const choices = data.consentChoices as ConsentChoices;
+      expect(choices.selectedModes).toBeUndefined();
+      expect(choices.chainedModeSelections).toEqual({
+        demo: ["alerts"],
+      });
+    });
+
+    it("handles multiple chained server prefixes", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        body: createApproveFormBody({
+          "selectedModes[]": ["demo:alerts", "forms:forms"],
+        }),
+      });
+
+      await handler(request, createMockAuthRequest());
+
+      const data = (
+        mockStoreOAuthState.mock.calls[0] as [any, string, Record<string, unknown>]
+      )[2];
+      const choices = data.consentChoices as ConsentChoices;
+      expect(choices.chainedModeSelections).toEqual({
+        demo: ["alerts"],
+        forms: ["forms"],
+      });
+    });
   });
 
   describe("POST — approve (multi-site)", () => {

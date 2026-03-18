@@ -40,8 +40,8 @@ describe("MCP Tool Proxy", () => {
       const proxiedTools = await discoverProxiedTools(manager);
 
       expect(proxiedTools.length).toBe(2); // echo and add from test server
-      expect(proxiedTools.map((t) => t.prefixedName)).toContain("test:echo");
-      expect(proxiedTools.map((t) => t.prefixedName)).toContain("test:add");
+      expect(proxiedTools.map((t) => t.prefixedName)).toContain("test--echo");
+      expect(proxiedTools.map((t) => t.prefixedName)).toContain("test--add");
     });
 
     it("should include server name in proxied tools", async () => {
@@ -54,7 +54,7 @@ describe("MCP Tool Proxy", () => {
 
     it("should include original tool definition", async () => {
       const proxiedTools = await discoverProxiedTools(manager);
-      const echoTool = proxiedTools.find((t) => t.prefixedName === "test:echo");
+      const echoTool = proxiedTools.find((t) => t.prefixedName === "test--echo");
 
       expect(echoTool).toBeDefined();
       expect(echoTool?.originalTool.name).toBe("echo");
@@ -83,9 +83,9 @@ describe("MCP Tool Proxy", () => {
 
   describe("isProxiedToolName", () => {
     it("should return true for prefixed names", () => {
-      expect(isProxiedToolName("cms:get-document")).toBe(true);
-      expect(isProxiedToolName("test:echo")).toBe(true);
-      expect(isProxiedToolName("server:tool-name")).toBe(true);
+      expect(isProxiedToolName("cms--get-document")).toBe(true);
+      expect(isProxiedToolName("test--echo")).toBe(true);
+      expect(isProxiedToolName("server--tool-name")).toBe(true);
     });
 
     it("should return false for non-prefixed names", () => {
@@ -97,14 +97,14 @@ describe("MCP Tool Proxy", () => {
 
   describe("parseProxiedToolName", () => {
     it("should parse server name and tool name", () => {
-      const result = parseProxiedToolName("cms:get-document");
+      const result = parseProxiedToolName("cms--get-document");
 
       expect(result.serverName).toBe("cms");
       expect(result.toolName).toBe("get-document");
     });
 
     it("should handle tool names with hyphens", () => {
-      const result = parseProxiedToolName("test:my-complex-tool-name");
+      const result = parseProxiedToolName("test--my-complex-tool-name");
 
       expect(result.serverName).toBe("test");
       expect(result.toolName).toBe("my-complex-tool-name");
@@ -157,7 +157,7 @@ describe("MCP Tool Proxy", () => {
             description: "Gets a document by ID",
             inputSchema: { type: "object", properties: { id: { type: "string" } } },
           },
-          prefixedName: "cms:get-document",
+          prefixedName: "cms--get-document",
           serverName: "cms",
         },
       ];
@@ -165,7 +165,7 @@ describe("MCP Tool Proxy", () => {
       const definitions = proxiedToolsToDefinitions(proxiedTools);
 
       expect(definitions.length).toBe(1);
-      expect(definitions[0].name).toBe("cms:get-document");
+      expect(definitions[0].name).toBe("cms--get-document");
       expect(definitions[0].description).toContain("[Proxied from cms]");
       expect(definitions[0].description).toContain("Gets a document by ID");
     });
@@ -174,7 +174,7 @@ describe("MCP Tool Proxy", () => {
       const proxiedTools = [
         {
           originalTool: { name: "mystery-tool" },
-          prefixedName: "test:mystery-tool",
+          prefixedName: "test--mystery-tool",
           serverName: "test",
         },
       ];
@@ -188,7 +188,7 @@ describe("MCP Tool Proxy", () => {
       const proxiedTools = [
         {
           originalTool: { name: "no-schema" },
-          prefixedName: "test:no-schema",
+          prefixedName: "test--no-schema",
           serverName: "test",
         },
       ];

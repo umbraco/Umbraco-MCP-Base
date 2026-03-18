@@ -76,14 +76,71 @@ async function generatePkce(): Promise<{
  * Extracts consent choices from a form submission.
  */
 function parseConsentChoices(formData: FormData): ConsentChoices | undefined {
-  const selectedModes = formData.getAll("selectedModes[]").map(String).filter(Boolean);
-  const selectedCollections = formData.getAll("selectedCollections[]").map(String).filter(Boolean);
+  const rawModes = formData.getAll("selectedModes[]").map(String).filter(Boolean);
+  const rawCollections = formData.getAll("selectedCollections[]").map(String).filter(Boolean);
   const selectedSlices = formData.getAll("selectedSlices[]").map(String).filter(Boolean);
   const readOnly = formData.get("readOnly") === "true";
   const siteId = formData.get("siteId")?.toString() || undefined;
 
+  // Split prefixed values (e.g., "demo:alerts") into main vs chained
+  const selectedModes: string[] = [];
+  const chainedModeSelections: Record<string, string[]> = {};
+
+  for (const value of rawModes) {
+    const colonIdx = value.indexOf(":");
+    if (colonIdx > 0) {
+      const prefix = value.substring(0, colonIdx);
+      const mode = value.substring(colonIdx + 1);
+      if (!chainedModeSelections[prefix]) {
+        chainedModeSelections[prefix] = [];
+      }
+      chainedModeSelections[prefix].push(mode);
+    } else {
+      selectedModes.push(value);
+    }
+  }
+
+  const selectedCollections: string[] = [];
+  const chainedCollectionSelections: Record<string, string[]> = {};
+
+  for (const value of rawCollections) {
+    const colonIdx = value.indexOf(":");
+    if (colonIdx > 0) {
+      const prefix = value.substring(0, colonIdx);
+      const col = value.substring(colonIdx + 1);
+      if (!chainedCollectionSelections[prefix]) {
+        chainedCollectionSelections[prefix] = [];
+      }
+      chainedCollectionSelections[prefix].push(col);
+    } else {
+      selectedCollections.push(value);
+    }
+  }
+
+  // Process deselected collections (explicitly unchecked by the user).
+  // These are submitted as hidden inputs by the consent form JS.
+  const rawDeselected = formData.getAll("deselectedCollections[]").map(String).filter(Boolean);
+  for (const value of rawDeselected) {
+    const colonIdx = value.indexOf(":");
+    if (colonIdx > 0) {
+      const prefix = value.substring(0, colonIdx);
+      // Ensure the chained server entry exists (possibly empty) so the worker
+      // knows collection filtering was active for this server.
+      if (!chainedCollectionSelections[prefix]) {
+        chainedCollectionSelections[prefix] = [];
+      }
+    }
+    // Main server deselected collections are handled by mergeConsentChoices
+    // comparing selected collections against mode-expanded collections.
+  }
+
+  const hasChainedModes = Object.keys(chainedModeSelections).length > 0;
+  const hasChainedCollections = Object.keys(chainedCollectionSelections).length > 0;
+
   // Only return if there are actual choices
-  if (selectedModes.length === 0 && selectedCollections.length === 0 && selectedSlices.length === 0 && !readOnly && !siteId) {
+  if (selectedModes.length === 0 && selectedCollections.length === 0 &&
+      selectedSlices.length === 0 && !readOnly && !siteId &&
+      !hasChainedModes && !hasChainedCollections) {
     return undefined;
   }
 
@@ -102,6 +159,12 @@ function parseConsentChoices(formData: FormData): ConsentChoices | undefined {
   }
   if (siteId) {
     choices.siteId = siteId;
+  }
+  if (hasChainedModes) {
+    choices.chainedModeSelections = chainedModeSelections;
+  }
+  if (hasChainedCollections) {
+    choices.chainedCollectionSelections = chainedCollectionSelections;
   }
   return choices;
 }

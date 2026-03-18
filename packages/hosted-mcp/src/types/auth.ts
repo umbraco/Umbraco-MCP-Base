@@ -33,6 +33,10 @@ export interface ConsentChoices {
   readOnly?: boolean;
   /** The site ID for multi-site deployments */
   siteId?: string;
+  /** Selected modes for chained servers, keyed by server name */
+  chainedModeSelections?: Record<string, string[]>;
+  /** Selected collections for chained servers, keyed by server name */
+  chainedCollectionSelections?: Record<string, string[]>;
 }
 
 /**

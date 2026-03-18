@@ -34,6 +34,8 @@ export interface ConsentModeOption {
   collections: { name: string; displayName: string; description: string }[];
   /** Whether this mode is selected by default */
   defaultSelected?: boolean;
+  /** Group label for visual separation (e.g., "Add-Ons" for chained server modes) */
+  group?: string;
 }
 
 export interface ConsentScreenOptions {
@@ -113,7 +115,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     ? `Authorize ${escapeHtml(serverName)}`
     : "Authorize MCP Client";
 
-  const toolSelectionHtml = toolConfig ? renderToolSelection(toolConfig) : "";
+  const toolSelectionHtml = toolConfig ? renderToolSelection(toolConfig, serverName) : "";
   const siteSelectionHtml = sites && sites.length > 0 ? renderSiteSelection(sites) : "";
   const customCssBlock = customCss ? `<style>${customCss}</style>` : "";
 
@@ -205,6 +207,9 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     .slice-item { margin: 0; }
     .slice-item label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #333; cursor: pointer; }
     .slice-item input[type="checkbox"] { accent-color: #1b264f; }
+    .addon-group-header { margin-top: 1rem; font-size: 0.85rem; color: #666; border-top: 1px solid #eee; padding-top: 0.75rem; }
+    .addon-badge { font-size: 0.65rem; background: #e8e8e8; color: #666; padding: 0.15rem 0.4rem; border-radius: 3px; vertical-align: middle; font-weight: normal; text-transform: uppercase; letter-spacing: 0.03em; }
+    .addon-group { opacity: 0.95; }
     .readonly-toggle { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
     .readonly-toggle label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #333; cursor: pointer; }
     .site-selection { margin-bottom: 1rem; }
@@ -280,49 +285,78 @@ export function consentResponse(options: ConsentScreenOptions): Response {
 // Internal Helpers
 // ============================================================================
 
-function renderToolSelection(config: ConsentToolConfig): string {
+function renderModeItem(mode: ConsentModeOption): string {
+  const parts: string[] = [];
+  const checked = mode.defaultSelected ? " checked" : "";
+  const disabled = mode.defaultSelected ? "" : " disabled";
+  const collectionChecked = mode.defaultSelected ? " checked" : "";
+
+  parts.push(`<div class="mode-item" data-mode="${escapeHtml(mode.name)}">`);
+  parts.push(
+    `<label><input type="checkbox" name="selectedModes[]" value="${escapeHtml(mode.name)}"${checked} class="mode-checkbox"> ${escapeHtml(mode.displayName)}</label>`
+  );
+  if (mode.description) {
+    parts.push(
+      `<div class="mode-description">${escapeHtml(mode.description)}</div>`
+    );
+  }
+  if (mode.collections.length > 0) {
+    const visibleClass = mode.defaultSelected ? " visible" : "";
+    parts.push(`<div class="mode-collections${visibleClass}">`);
+    for (const col of mode.collections) {
+      parts.push(`<div class="collection-item">`);
+      parts.push(
+        `<label><input type="checkbox" name="selectedCollections[]" value="${escapeHtml(col.name)}"${collectionChecked}${disabled} class="collection-checkbox"> ${escapeHtml(col.displayName)}</label>`
+      );
+      if (col.description) {
+        parts.push(
+          `<span class="collection-description">${escapeHtml(col.description)}</span>`
+        );
+      }
+      parts.push(`</div>`);
+    }
+    parts.push(`</div>`);
+  }
+  parts.push(`</div>`);
+  return parts.join("\n");
+}
+
+function renderToolSelection(config: ConsentToolConfig, serverName?: string): string {
   const parts: string[] = [];
 
   if (config.modes && config.modes.length > 0) {
     parts.push(`<div class="tool-selection">`);
-    parts.push(`<h2>Tool Modes</h2>`);
-    parts.push(`<div class="modes-grid">`);
 
+    // Group modes: ungrouped (main) first, then by group name (chained servers)
+    const mainModes = config.modes.filter((m) => !m.group);
+    const groupedModes = new Map<string, typeof config.modes>();
     for (const mode of config.modes) {
-      const checked = mode.defaultSelected ? " checked" : "";
-      const disabled = mode.defaultSelected ? "" : " disabled";
-      const collectionChecked = mode.defaultSelected ? " checked" : "";
-
-      parts.push(`<div class="mode-item" data-mode="${escapeHtml(mode.name)}">`);
-      parts.push(
-        `<label><input type="checkbox" name="selectedModes[]" value="${escapeHtml(mode.name)}"${checked} class="mode-checkbox"> ${escapeHtml(mode.displayName)}</label>`
-      );
-      if (mode.description) {
-        parts.push(
-          `<div class="mode-description">${escapeHtml(mode.description)}</div>`
-        );
+      if (mode.group) {
+        if (!groupedModes.has(mode.group)) groupedModes.set(mode.group, []);
+        groupedModes.get(mode.group)!.push(mode);
       }
-      if (mode.collections.length > 0) {
-        const visibleClass = mode.defaultSelected ? " visible" : "";
-        parts.push(`<div class="mode-collections${visibleClass}">`);
-        for (const col of mode.collections) {
-          parts.push(`<div class="collection-item">`);
-          parts.push(
-            `<label><input type="checkbox" name="selectedCollections[]" value="${escapeHtml(col.name)}"${collectionChecked}${disabled} class="collection-checkbox"> ${escapeHtml(col.displayName)}</label>`
-          );
-          if (col.description) {
-            parts.push(
-              `<span class="collection-description">${escapeHtml(col.description)}</span>`
-            );
-          }
-          parts.push(`</div>`);
-        }
-        parts.push(`</div>`);
+    }
+
+    // Render main server modes with server name if available
+    if (mainModes.length > 0) {
+      const mainHeading = serverName ? escapeHtml(serverName) : "Tool Modes";
+      parts.push(`<h2>${mainHeading}</h2>`);
+      parts.push(`<div class="modes-grid">`);
+      for (const mode of mainModes) {
+        parts.push(renderModeItem(mode));
       }
       parts.push(`</div>`);
     }
 
-    parts.push(`</div>`); // close .modes-grid
+    // Render chained server mode groups with "Add-on" label
+    for (const [groupName, modes] of groupedModes) {
+      parts.push(`<h2 class="addon-group-header">${escapeHtml(groupName)} <span class="addon-badge">Add-on</span></h2>`);
+      parts.push(`<div class="modes-grid addon-group">`);
+      for (const mode of modes) {
+        parts.push(renderModeItem(mode));
+      }
+      parts.push(`</div>`);
+    }
 
     parts.push(`<script>
 document.querySelectorAll('.mode-checkbox').forEach(function(modeCheckbox) {
@@ -343,6 +377,26 @@ document.querySelectorAll('.mode-checkbox').forEach(function(modeCheckbox) {
     });
   });
 });
+// On form submit, record deselected collections so the server knows what was unchecked.
+// Unchecked checkboxes aren't in form data, so we add hidden inputs for deselections.
+var form = document.querySelector('form');
+if (form) {
+  form.addEventListener('submit', function() {
+    document.querySelectorAll('input[name="deselectedCollections[]"]').forEach(function(el) { el.remove(); });
+    document.querySelectorAll('.mode-checkbox:checked').forEach(function(modeCheckbox) {
+      var modeItem = modeCheckbox.closest('.mode-item');
+      modeItem.querySelectorAll('.collection-checkbox').forEach(function(cb) {
+        if (!cb.disabled && !cb.checked) {
+          var hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'deselectedCollections[]';
+          hidden.value = cb.value;
+          form.appendChild(hidden);
+        }
+      });
+    });
+  });
+}
 </script>`);
 
     parts.push(`</div>`);

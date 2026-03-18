@@ -1,7 +1,7 @@
 /**
  * Fetch-based API Client for Cloudflare Workers
  *
- * This is the Workers counterpart to client.ts (which uses Axios for stdio mode).
+ * This is the Workers counterpart to client.ts (which uses fetch for stdio mode).
  * Uses native fetch() and returns HttpResponse-compatible objects for use with
  * the SDK's api-call-helpers.
  *
@@ -18,7 +18,7 @@ import {
  * Creates a fetch-based API client for use in Workers.
  *
  * This wraps the hosted package's createUmbracoFetchClient with the
- * same client interface as the Axios-based client (ExampleApiClient).
+ * same client interface as the stdio client (ExampleApiClient).
  *
  * @param config - Configuration with base URL and access token
  * @returns Client function compatible with configureApiClient

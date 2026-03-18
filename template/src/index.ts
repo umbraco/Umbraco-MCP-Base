@@ -13,6 +13,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   configureApiClient,
+  initializeUmbracoFetch,
   createToolAnnotations,
   discoverProxiedTools,
   parseProxiedToolName,
@@ -37,6 +38,15 @@ import { mcpServers } from "./config/mcp-servers.js";
 
 // Import registries for tool filtering
 import { allModes, allModeNames, allSliceNames, loadServerConfig, clearConfigCache } from "./config/index.js";
+
+// Initialize the SDK's fetch client for real Umbraco API calls.
+// This enables the Orval-generated client to authenticate via client_credentials.
+const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:44391";
+const clientId = process.env.UMBRACO_CLIENT_ID || "";
+const clientSecret = process.env.UMBRACO_CLIENT_SECRET || "";
+if (clientId) {
+  initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+}
 
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.

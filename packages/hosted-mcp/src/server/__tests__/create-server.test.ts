@@ -242,6 +242,34 @@ describe("mergeConsentChoices with selectedSlices", () => {
   });
 });
 
+describe("mergeConsentChoices with chainedModeSelections", () => {
+  it("disables main tools when only chained modes are selected", () => {
+    const envConfig: ServerConfigForCollections = {};
+    const choices: ConsentChoices = {
+      chainedModeSelections: { demo: ["alerts"] },
+    };
+    const result = mergeConsentChoices(envConfig, choices);
+    expect(result.toolModes).toEqual(["__none__"]);
+  });
+
+  it("does not disable main tools when main modes are also selected", () => {
+    const envConfig: ServerConfigForCollections = {};
+    const choices: ConsentChoices = {
+      selectedModes: ["content"],
+      chainedModeSelections: { demo: ["alerts"] },
+    };
+    const result = mergeConsentChoices(envConfig, choices);
+    expect(result.toolModes).toEqual(["content"]);
+  });
+
+  it("does not affect main tools when no chained modes exist", () => {
+    const envConfig: ServerConfigForCollections = {};
+    const choices: ConsentChoices = {};
+    const result = mergeConsentChoices(envConfig, choices);
+    expect(result.toolModes).toBeUndefined();
+  });
+});
+
 describe("mergeConsentChoices with selectedCollections", () => {
   const modeRegistry: ToolModeDefinition[] = [
     {
@@ -656,6 +684,153 @@ describe("resolveRequestSite", () => {
       baseUrl: "https://my-project.example.com",
       oauthClientId: "default-client",
     });
+  });
+});
+
+describe("buildConsentToolConfig with chainedServers", () => {
+  const chainedNotificationTool = createMockTool("get-notification", ["read"]);
+  const chainedAnalyticsTool = createMockTool("get-analytics-summary", ["read"]);
+
+  const chainedServer = {
+    name: "demo",
+    displayName: "Demo Add-On",
+    modeRegistry: [
+      {
+        name: "alerts",
+        displayName: "Alerts & Notifications",
+        description: "Notification tools",
+        collections: ["notification"],
+      },
+      {
+        name: "reporting",
+        displayName: "Reporting",
+        description: "Analytics tools",
+        collections: ["analytics"],
+      },
+    ] as import("@umbraco-cms/mcp-server-sdk").ToolModeDefinition[],
+    collections: [
+      createMockCollection("notification", [chainedNotificationTool], "Notifications", "Notification management"),
+      createMockCollection("analytics", [chainedAnalyticsTool], "Analytics", "Analytics tools"),
+    ],
+    allModeNames: ["alerts", "reporting"] as readonly string[],
+    allSliceNames: ["read", "list", "create"] as readonly string[],
+  };
+
+  it("appends chained modes with prefixed names", () => {
+    const options: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [createMockCollection("document", [], "Documents", "Docs")],
+      modeRegistry: [{ name: "content", displayName: "Content", description: "Content", collections: ["document"] }],
+      allModeNames: ["content"],
+      allSliceNames: ["read"],
+      enableConsentToolSelection: true,
+      chainedServers: [chainedServer],
+    };
+
+    const config = buildConsentToolConfig(options);
+    expect(config).toBeDefined();
+    // 1 main + 2 chained = 3 modes
+    expect(config!.modes).toHaveLength(3);
+
+    // Main mode unchanged
+    expect(config!.modes![0].name).toBe("content");
+    expect(config!.modes![0].displayName).toBe("Content");
+
+    // Chained modes have prefixed names and group label
+    expect(config!.modes![1].name).toBe("demo:alerts");
+    expect(config!.modes![1].displayName).toBe("Alerts & Notifications");
+    expect(config!.modes![1].group).toBe("Demo Add-On");
+    expect(config!.modes![1].description).toBe("Notification tools");
+
+    expect(config!.modes![2].name).toBe("demo:reporting");
+    expect(config!.modes![2].displayName).toBe("Reporting");
+    expect(config!.modes![2].group).toBe("Demo Add-On");
+  });
+
+  it("prefixes chained collection names within modes", () => {
+    const options: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: [],
+      enableConsentToolSelection: true,
+      chainedServers: [chainedServer],
+    };
+
+    const config = buildConsentToolConfig(options);
+    const alertsMode = config!.modes!.find((m) => m.name === "demo:alerts");
+    expect(alertsMode).toBeDefined();
+    expect(alertsMode!.collections).toHaveLength(1);
+    expect(alertsMode!.collections[0].name).toBe("demo:notification");
+    expect(alertsMode!.collections[0].displayName).toBe("Notifications");
+  });
+
+  it("deduplicates slices across main and chained servers", () => {
+    const options: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: ["read", "list", "other"],
+      enableConsentToolSelection: true,
+      chainedServers: [chainedServer],
+    };
+
+    const config = buildConsentToolConfig(options);
+    const sliceNames = config!.slices!.map((s) => s.name);
+    // "read" and "list" appear in both, "create" only in chained, "other" excluded
+    expect(sliceNames).toEqual(["read", "list", "create"]);
+  });
+
+  it("works with no chained servers", () => {
+    const options: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: ["read"],
+      enableConsentToolSelection: true,
+    };
+
+    const config = buildConsentToolConfig(options);
+    expect(config!.modes).toHaveLength(0);
+    expect(config!.slices).toHaveLength(1);
+  });
+
+  it("supports multiple chained servers", () => {
+    const secondChained = {
+      name: "forms",
+      displayName: "Forms Add-On",
+      modeRegistry: [
+        { name: "forms", displayName: "Forms", description: "Form tools", collections: ["form"] },
+      ] as import("@umbraco-cms/mcp-server-sdk").ToolModeDefinition[],
+      collections: [createMockCollection("form", [], "Forms", "Form management")],
+      allModeNames: ["forms"] as readonly string[],
+      allSliceNames: ["read", "create"] as readonly string[],
+    };
+
+    const options: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: ["read"],
+      enableConsentToolSelection: true,
+      chainedServers: [chainedServer, secondChained],
+    };
+
+    const config = buildConsentToolConfig(options);
+    // 0 main + 2 demo + 1 forms = 3
+    expect(config!.modes).toHaveLength(3);
+    expect(config!.modes![2].name).toBe("forms:forms");
+    expect(config!.modes![2].displayName).toBe("Forms");
+    expect(config!.modes![2].group).toBe("Forms Add-On");
   });
 });
 

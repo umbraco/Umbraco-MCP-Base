@@ -34,6 +34,7 @@ export {
   getServerOptions,
   buildConsentToolConfig,
   type HostedMcpServerOptions,
+  type ChainedServerConsentConfig,
   type AuthProps,
 } from "./server/worker-entry.js";
 
@@ -48,6 +49,11 @@ export {
   type CreateServerOptions,
   type SiteResolver,
 } from "./server/create-server.js";
+
+export {
+  registerChainedTools,
+  type RegisterChainedToolsOptions,
+} from "./server/register-chained-tools.js";
 
 // ============================================================================
 // Auth

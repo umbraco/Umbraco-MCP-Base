@@ -15,6 +15,7 @@ import type { CollectionConfiguration } from "../types/collection-configuration.
 import { DEFAULT_COLLECTION_CONFIG } from "../types/collection-configuration.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 import { createCollectionConfigLoader } from "../tool-filtering/collection-config-loader.js";
+import { configureApiClient, getApiClient } from "../helpers/api-call-helpers.js";
 import type { McpConnection, McpInProcessServerConfig, FilterConfig } from "./types.js";
 
 interface ResolvedTool {
@@ -76,12 +77,33 @@ export class InProcessConnection implements McpConnection {
       sendRequest: async () => ({}) as any,
     };
 
-    const result = await match.tool.handler(args, extra as any);
-    return result as {
-      content: Array<{ type: string; text?: string }>;
-      structuredContent?: unknown;
-      isError?: boolean;
-    };
+    // If this server has its own clientFactory, temporarily swap the global
+    // API client so the chained tool's handler gets the right Orval client.
+    let previousClient: unknown = null;
+    let hadPreviousClient = false;
+    if (this.config.clientFactory) {
+      try {
+        previousClient = getApiClient();
+        hadPreviousClient = true;
+      } catch {
+        // No previous client configured — that's fine
+      }
+      configureApiClient(this.config.clientFactory);
+    }
+
+    try {
+      const result = await match.tool.handler(args, extra as any);
+      return result as {
+        content: Array<{ type: string; text?: string }>;
+        structuredContent?: unknown;
+        isError?: boolean;
+      };
+    } finally {
+      // Restore the previous API client
+      if (this.config.clientFactory && hadPreviousClient) {
+        configureApiClient(() => previousClient);
+      }
+    }
   }
 
   async close(): Promise<void> {
@@ -131,7 +153,9 @@ export class InProcessConnection implements McpConnection {
         includeTools: this.filterConfig?.tools,
         includeToolCollections: this.filterConfig?.toolCollections,
         includeSlices: this.filterConfig?.slices,
+        excludeSlices: this.filterConfig?.excludeSlices,
         toolModes: this.filterConfig?.modes,
+        readOnly: this.filterConfig?.readOnly,
       });
     }
 

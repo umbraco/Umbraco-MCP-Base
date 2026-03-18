@@ -129,6 +129,14 @@ export function mergeConsentChoices(
       // Admin has no mode restriction — user selection becomes the restriction
       merged.toolModes = [...choices.selectedModes];
     }
+  } else if (
+    choices.chainedModeSelections &&
+    Object.keys(choices.chainedModeSelections).length > 0 &&
+    (!choices.selectedModes || choices.selectedModes.length === 0)
+  ) {
+    // User selected chained server modes but no main modes — disable all main tools.
+    // Use a sentinel mode that won't match any real mode to ensure no main tools appear.
+    merged.toolModes = ["__none__"];
   }
 
   // Merge selected collections: exclude deselected collections within the effective modes

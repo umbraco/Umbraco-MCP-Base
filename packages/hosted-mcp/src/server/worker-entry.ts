@@ -26,9 +26,28 @@ import {
   createCallbackHandler,
   createLogoutCallbackHandler,
 } from "../auth/umbraco-handler.js";
-import type { ConsentToolConfig } from "../auth/consent.js";
+import type { ConsentModeOption, ConsentToolConfig } from "../auth/consent.js";
 import { type CreateServerOptions, type SiteResolver } from "./create-server.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
+
+/**
+ * Configuration for a chained MCP server's consent screen integration.
+ * Provides the metadata needed to show chained server modes on the consent screen.
+ */
+export interface ChainedServerConsentConfig {
+  /** Prefix used for tool names and mode values (e.g., "demo") */
+  name: string;
+  /** Display name shown as consent section header (e.g., "Demo Add-On") */
+  displayName: string;
+  /** Mode definitions from the chained server */
+  modeRegistry: ToolModeDefinition[];
+  /** Tool collections from the chained server */
+  collections: ToolCollectionExport[];
+  /** All valid mode names from the chained server */
+  allModeNames: readonly string[];
+  /** All valid slice names from the chained server */
+  allSliceNames: readonly string[];
+}
 
 /**
  * Options for creating a hosted MCP server Worker.
@@ -57,6 +76,8 @@ export interface HostedMcpServerOptions {
   /** Dynamic site resolver for URL-based site routing.
    *  See CreateServerOptions.resolveSite for details. */
   resolveSite?: SiteResolver;
+  /** Chained MCP servers to include on consent screen and /info endpoint */
+  chainedServers?: ChainedServerConsentConfig[];
 }
 
 /**
@@ -90,27 +111,63 @@ export function buildConsentToolConfig(
 ): ConsentToolConfig | undefined {
   if (!options.enableConsentToolSelection) return undefined;
 
-  return {
-    modes: options.modeRegistry.map((m) => ({
-      name: m.name,
-      displayName: m.displayName,
-      description: m.description,
-      collections: options.collections
-        .filter((c) => m.collections.includes(c.metadata.name))
-        .map((c) => ({
-          name: c.metadata.name,
-          displayName: c.metadata.displayName,
-          description: c.metadata.description,
-        })),
-      defaultSelected: false,
-    })),
-    slices: options.allSliceNames
-      .filter((s) => s !== "other")
-      .map((s) => ({
-        name: s,
-        displayName: s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " "),
-        defaultSelected: true,
+  // Main server modes
+  const modes: ConsentModeOption[] = options.modeRegistry.map((m) => ({
+    name: m.name,
+    displayName: m.displayName,
+    description: m.description,
+    collections: options.collections
+      .filter((c) => m.collections.includes(c.metadata.name))
+      .map((c) => ({
+        name: c.metadata.name,
+        displayName: c.metadata.displayName,
+        description: c.metadata.description,
       })),
+    defaultSelected: false,
+  }));
+
+  // Append chained server modes with prefixed names
+  if (options.chainedServers) {
+    for (const chained of options.chainedServers) {
+      for (const m of chained.modeRegistry) {
+        modes.push({
+          name: `${chained.name}:${m.name}`,
+          displayName: m.displayName,
+          description: m.description,
+          collections: chained.collections
+            .filter((c) => m.collections.includes(c.metadata.name))
+            .map((c) => ({
+              name: `${chained.name}:${c.metadata.name}`,
+              displayName: c.metadata.displayName,
+              description: c.metadata.description,
+            })),
+          defaultSelected: false,
+          group: chained.displayName,
+        });
+      }
+    }
+  }
+
+  // Collect and deduplicate slices from main server and all chained servers
+  const sliceSet = new Set<string>();
+  for (const s of options.allSliceNames) {
+    if (s !== "other") sliceSet.add(s);
+  }
+  if (options.chainedServers) {
+    for (const chained of options.chainedServers) {
+      for (const s of chained.allSliceNames) {
+        if (s !== "other") sliceSet.add(s);
+      }
+    }
+  }
+
+  return {
+    modes,
+    slices: [...sliceSet].map((s) => ({
+      name: s,
+      displayName: s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " "),
+      defaultSelected: true,
+    })),
     showReadOnlyToggle: true,
   };
 }
@@ -549,7 +606,7 @@ function renderInfoResponse(
   env: HostedMcpEnv,
 ): Response {
   const workerConfig = loadWorkerConfig(env);
-  return Response.json({
+  const info: Record<string, unknown> = {
     name: options.name,
     version: options.version,
     transport: "streamable-http",
@@ -562,7 +619,22 @@ function renderInfoResponse(
     modes: [...options.allModeNames],
     slices: [...options.allSliceNames].filter((s) => s !== "other"),
     config: workerConfig,
-  });
+  };
+
+  if (options.chainedServers && options.chainedServers.length > 0) {
+    info.chainedServers = options.chainedServers.map((cs) => ({
+      name: cs.name,
+      displayName: cs.displayName,
+      collections: cs.collections.map((c) => ({
+        name: c.metadata.name,
+        displayName: c.metadata.displayName,
+        toolCount: c.tools(undefined).length,
+      })),
+      modes: [...cs.allModeNames],
+    }));
+  }
+
+  return Response.json(info);
 }
 
 function renderMultiSiteInfoResponse(
@@ -571,7 +643,7 @@ function renderMultiSiteInfoResponse(
   multiSite: MultiSiteConfig,
 ): Response {
   const workerConfig = loadWorkerConfig(env);
-  return Response.json({
+  const info: Record<string, unknown> = {
     name: options.name,
     version: options.version,
     transport: "streamable-http",
@@ -589,7 +661,22 @@ function renderMultiSiteInfoResponse(
       displayName: s.displayName,
       baseUrl: s.baseUrl,
     })),
-  });
+  };
+
+  if (options.chainedServers && options.chainedServers.length > 0) {
+    info.chainedServers = options.chainedServers.map((cs) => ({
+      name: cs.name,
+      displayName: cs.displayName,
+      collections: cs.collections.map((c) => ({
+        name: c.metadata.name,
+        displayName: c.metadata.displayName,
+        toolCount: c.tools(undefined).length,
+      })),
+      modes: [...cs.allModeNames],
+    }));
+  }
+
+  return Response.json(info);
 }
 
 function escapeHtml(str: string): string {

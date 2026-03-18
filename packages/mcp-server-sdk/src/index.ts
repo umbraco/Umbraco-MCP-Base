@@ -198,21 +198,28 @@ export {
 
 export {
   // Singleton exports (recommended for most use cases)
-  UmbracoAxios,
+  initializeUmbracoFetch,
+  isUmbracoFetchInitialized,
+  clearUmbracoFetchToken,
+  UmbracoManagementClient,
+  // Custom transport for specialized environments
+  setCustomTransport,
+  // Factory for advanced use cases
+  createUmbracoFetchClient,
+  // Backwards-compatible aliases (deprecated — use Fetch variants)
   initializeUmbracoAxios,
   isUmbracoAxiosInitialized,
   clearUmbracoAxiosToken,
-  UmbracoManagementClient,
-  // Custom transport for non-Axios environments (e.g., Workers)
-  setCustomTransport,
-  // Factory for advanced use cases
   createUmbracoAxiosClient,
   // Orval helpers
   orvalImportFixer,
   // Types
+  type UmbracoFetchAuthConfig,
   type UmbracoAxiosAuthConfig,
   type UmbracoManagementClientOptions,
   type CustomTransport,
+  type CreateUmbracoFetchClientOptions,
   type CreateUmbracoAxiosClientOptions,
+  type UmbracoFetchClientResult,
   type UmbracoAxiosClientResult,
 } from "./http/index.js";

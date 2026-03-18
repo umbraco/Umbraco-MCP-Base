@@ -44,7 +44,7 @@ export interface McpStdioServerConfig {
   /**
    * Unique identifier and prefix for proxied tools.
    * Tools from this server will be exposed as `{name}:tool-name`.
-   * @example "cms" → tools exposed as "cms:get-document"
+   * @example "cms" → tools exposed as "cms--get-document"
    */
   name: string;
 
@@ -120,6 +120,29 @@ export interface McpInProcessServerConfig {
    * @default true
    */
   proxyTools?: boolean;
+
+  /**
+   * Factory function that returns the API client for this server's tools.
+   *
+   * When provided, `configureApiClient` is temporarily swapped to this factory
+   * before each tool handler call, then restored afterwards. This allows
+   * in-process chained servers to use their own Orval-generated client
+   * (with methods like `client.getCulture()`) without conflicting with the
+   * host server's API client.
+   *
+   * @example
+   * ```typescript
+   * import { UmbracoManagementClient } from "@umbraco-cms/mcp-dev";
+   *
+   * manager.registerServer({
+   *   transport: "in-process",
+   *   name: "cms",
+   *   collections,
+   *   clientFactory: () => UmbracoManagementClient.getClient(),
+   * });
+   * ```
+   */
+  clientFactory?: () => unknown;
 }
 
 /**
@@ -150,6 +173,10 @@ export interface FilterConfig {
   toolCollections?: string[];
   /** Slices (operation types) to enable */
   slices?: string[];
+  /** Slices (operation types) to exclude */
+  excludeSlices?: string[];
   /** Modes (domain groupings) to enable */
   modes?: string[];
+  /** When true, only include tools with readOnlyHint annotation */
+  readOnly?: boolean;
 }
