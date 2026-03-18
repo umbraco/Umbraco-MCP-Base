@@ -16,3 +16,8 @@ export {
   generateContextFile,
   type GenerateContextOptions,
 } from "./context-generator.js";
+
+export {
+  handleCliCommands,
+  type HandleCliCommandsOptions,
+} from "./handle-cli-commands.js";

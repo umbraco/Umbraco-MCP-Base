@@ -69,6 +69,11 @@ src/
 - `UmbracoManagementClient` - Orval mutator for generated API clients
 - `createUmbracoAxiosClient` - Factory for custom client instances (advanced)
 
+**CLI Helpers:**
+- `handleCliCommands` - One-call handler for `--list-tools`, `--describe-tool`, `--generate-context` (prints + exits if a flag is set)
+- `toolToJsonSchema`, `toolToSummary`, `formatToolTable` - Lower-level introspection utilities
+- `generateContextFile` - Generate CONTEXT.md from collections
+
 **Tool Filtering:**
 - `createCollectionConfigLoader` - Load filter config from registries
 - `shouldIncludeTool`, `filterTools` - Apply filtering rules

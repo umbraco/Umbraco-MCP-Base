@@ -30,7 +30,7 @@ Workspace-specific commands use `-w` flag: `npm run build -w packages/mcp-server
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `@umbraco-cms/mcp-server-sdk` | Main: tool helpers, decorators, types, config loaders |
+| `@umbraco-cms/mcp-server-sdk` | Main: tool helpers, decorators, types, config loaders, CLI helpers (`handleCliCommands`) |
 | `@umbraco-cms/mcp-server-sdk/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
 | `@umbraco-cms/mcp-server-sdk/evals` | LLM eval framework: runScenarioTest, verification helpers |
 | `@umbraco-cms/mcp-server-sdk/config` | Configuration loading |

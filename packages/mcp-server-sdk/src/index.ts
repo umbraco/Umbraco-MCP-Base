@@ -89,8 +89,10 @@ export {
   toolToSummary,
   formatToolTable,
   generateContextFile,
+  handleCliCommands,
   type ToolSummary,
   type GenerateContextOptions,
+  type HandleCliCommandsOptions,
 } from "./cli/index.js";
 
 // ============================================================================
