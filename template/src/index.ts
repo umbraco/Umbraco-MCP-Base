@@ -70,7 +70,7 @@ const server = new McpServer({
 clearConfigCache();
 
 // Load server configuration (includes filtering settings from env vars)
-const serverConfig = loadServerConfig(true);
+const serverConfig = await loadServerConfig(true);
 
 // Create collection config loader with our registries
 const configLoader = createCollectionConfigLoader({

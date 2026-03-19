@@ -11,9 +11,12 @@
  * - Worker and Inspector started automatically in beforeAll
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { startWorker, stopWorker } from "./helpers/worker-setup.js";
-import { startInspector, stopInspector } from "./helpers/inspector-setup.js";
+import {
+  startInspector, connectInspector, handleOAuthFlow,
+  getToolNames, callTool, type InspectorHandle,
+} from "@umbraco-cms/mcp-hosted/testing";
 
 // ============================================================================
 // Tool lists
@@ -93,188 +96,21 @@ const CHAINED_MODES = {
 /** All mode checkboxes */
 const ALL_MODES_MAP = { ...MAIN_MODES, ...CHAINED_MODES };
 
-/** Chained collection checkboxes (value → display name) */
-const CHAINED_COLLECTIONS = {
-  "demo:notification": "notification",
-  "demo:analytics": "analytics",
-  "demo:umbraco": "umbraco",
-};
-
-// ============================================================================
-// Shared helpers
-// ============================================================================
-
-async function connectInspector(
-  page: Page,
-  workerUrl: string,
-  inspectorUrl: string,
-): Promise<Page> {
-  await page.goto(inspectorUrl);
-  await page.waitForLoadState("networkidle");
-
-  const transportCombo = page.getByRole("combobox", { name: "Transport Type" });
-  await transportCombo.click();
-  await page.getByRole("option", { name: "Streamable HTTP" }).click();
-
-  const urlInput = page.getByRole("textbox", { name: "URL" });
-  await urlInput.waitFor({ timeout: 5000 });
-  await urlInput.clear();
-  await urlInput.fill(workerUrl);
-
-  const connectionTypeCombo = page.getByRole("combobox", { name: "Connection Type" });
-  await connectionTypeCombo.click();
-  await page.getByRole("option", { name: "Direct" }).click();
-
-  const isAuthorizeUrl = (url: URL) =>
-    url.pathname === "/authorize" || url.pathname.includes("authorize") || url.pathname.includes("/umbraco");
-
-  const popupPromise = page.context().waitForEvent("page").catch(() => null);
-  const navigationPromise = page.waitForURL(isAuthorizeUrl).then(() => null as Page | null);
-
-  await page.getByRole("button", { name: "Connect" }).click();
-
-  const popup = await Promise.race([popupPromise, navigationPromise]);
-  const oauthPage = popup ?? page;
-
-  if (popup) {
-    await popup.waitForURL(isAuthorizeUrl, { timeout: 15000 });
-  }
-
-  return oauthPage;
-}
-
-async function handleOAuthFlow(
-  _mainPage: Page,
-  oauthPage: Page,
-  consentOptions?: {
-    checkModes?: string[];
-    uncheckModes?: string[];
-    uncheckCollections?: string[];
-    uncheckSlices?: string[];
-    checkReadOnly?: boolean;
-  },
-): Promise<void> {
-  const approveButton = oauthPage.locator('button[value="approve"]');
-  await approveButton.waitFor();
-
-  if (consentOptions) {
-    if (consentOptions.checkModes) {
-      for (const mode of consentOptions.checkModes) {
-        const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
-        if (!(await checkbox.isChecked())) await checkbox.check();
-      }
-    }
-
-    if (consentOptions.uncheckModes) {
-      for (const mode of consentOptions.uncheckModes) {
-        const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
-        if (await checkbox.isChecked()) await checkbox.uncheck();
-      }
-    }
-
-    if (consentOptions.uncheckCollections) {
-      for (const name of consentOptions.uncheckCollections) {
-        const checkboxes = oauthPage.locator(`.collection-checkbox[value="${name}"]`);
-        const count = await checkboxes.count();
-        for (let i = 0; i < count; i++) {
-          const cb = checkboxes.nth(i);
-          if (await cb.isEnabled() && await cb.isChecked()) await cb.uncheck();
-        }
-      }
-    }
-
-    if (consentOptions.uncheckSlices) {
-      for (const slice of consentOptions.uncheckSlices) {
-        const checkbox = oauthPage.locator(`.slice-checkbox[value="${slice}"]`);
-        if (await checkbox.isChecked()) await checkbox.uncheck();
-      }
-    }
-
-    if (consentOptions.checkReadOnly) {
-      const readOnlyCheckbox = oauthPage.locator('input[name="readOnly"]');
-      if (!(await readOnlyCheckbox.isChecked())) await readOnlyCheckbox.check();
-    }
-  }
-
-  await approveButton.click();
-
-  // Umbraco login page
-  await oauthPage.waitForURL(
-    (url) => url.hostname === "localhost" && url.pathname.includes("/umbraco"),
-    { timeout: 15000 },
-  );
-
-  const emailInput = oauthPage.getByRole("textbox").first();
-  await emailInput.waitFor({ timeout: 10000 });
-  await emailInput.fill("admin@admin.com");
-  await oauthPage.getByRole("textbox").nth(1).fill("1234567890");
-  await oauthPage.getByRole("button", { name: "Login" }).click();
-}
-
-/**
- * Navigate to the Tools tab, click List Tools, and extract tool names.
- * Checks for both main and chained tools.
- */
-async function getToolNames(page: Page): Promise<string[]> {
-  await expect(page.getByText("Connected")).toBeVisible({ timeout: 15000 });
-
-  const toolsTab = page.getByRole("tab", { name: /Tools/i });
-  await toolsTab.waitFor({ timeout: 10000 });
-  await toolsTab.click();
-
-  const listToolsButton = page.getByRole("button", { name: /List Tools/i });
-  await listToolsButton.waitFor({ timeout: 10000 });
-  await listToolsButton.click();
-
-  // Wait for at least one known tool to appear
-  await expect(
-    page.locator(ALL_TOOLS.map((t) => `:text-is("${t}")`).join(", ")).first(),
-  ).toBeVisible({ timeout: 10000 });
-
-  const visibleTools: string[] = [];
-  for (const tool of ALL_TOOLS) {
-    const isVisible = await page
-      .getByText(tool, { exact: true })
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (isVisible) visibleTools.push(tool);
-  }
-  return visibleTools;
-}
-
-/**
- * Click a tool in the list, run it, and return the result text.
- */
-async function callTool(page: Page, toolName: string, resultMarker: string): Promise<string> {
-  await page.getByText(toolName).click();
-
-  const runButton = page.getByRole("button", { name: /Run|Execute/i });
-  await runButton.waitFor({ timeout: 5000 });
-  await runButton.click();
-
-  await expect(page.getByText(resultMarker).first()).toBeVisible({
-    timeout: 10000,
-  });
-
-  return (await page.locator("body").textContent()) ?? "";
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
 
 test.describe("Chained MCP Inspector E2E", () => {
   let workerUrl: string;
-  let inspectorUrl: string;
+  let inspector: InspectorHandle;
 
   test.beforeAll(async () => {
     workerUrl = await startWorker();
-    inspectorUrl = await startInspector();
+    inspector = await startInspector({ client: 6294, proxy: 6297 });
   });
 
   test.afterAll(async () => {
-    await stopInspector();
+    await inspector.stop();
     await stopWorker();
   });
 
@@ -288,12 +124,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("list all tools — 16 total: 10 main + 6 chained", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["example", "example-2", "umbraco-server", "demo:alerts", "demo:reporting"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // All 10 main tools
     for (const tool of MAIN_TOOLS) {
@@ -309,12 +145,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("select only demo:alerts — only 3 notification tools", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["demo:alerts"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Only notification tools should be present (proxied, so unfiltered by main mode)
     for (const tool of NOTIFICATION_TOOLS) {
@@ -335,12 +171,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("select example + demo:reporting — 6 example + 3 reporting", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["example", "demo:reporting"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Example tools present
     const exampleTools = [
@@ -372,13 +208,13 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("readOnly toggle excludes demo--send-notification", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["example", "example-2", "umbraco-server", "demo:alerts", "demo:reporting"],
       checkReadOnly: true,
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Write tools excluded (main + chained)
     const excludedWriteTools = [
@@ -407,13 +243,13 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("read-only slice filter — only read tools from both servers", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["example", "example-2", "umbraco-server", "demo:alerts", "demo:reporting"],
       uncheckSlices: allSlicesExcept("read"),
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Only read-slice tools from both servers
     const expectedTools = [
@@ -444,12 +280,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("call demo--list-notifications returns static mock data", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["demo:alerts"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
     expect(tools).toContain("demo--list-notifications");
 
     const result = await callTool(page, "demo--list-notifications", "Welcome");
@@ -460,12 +296,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("call demo--get-server-version returns real Umbraco version via fetch", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["demo:reporting"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
     expect(tools).toContain("demo--get-server-version");
 
     // Call the tool — it hits the real Umbraco management API via the SDK fetch client
@@ -481,7 +317,7 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("consent screen shows chained mode checkboxes alongside main modes", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     const approveButton = oauthPage.locator('button[value="approve"]');
     await approveButton.waitFor();
 
@@ -519,7 +355,7 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("checking a chained mode reveals its collection checkboxes", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     const approveButton = oauthPage.locator('button[value="approve"]');
     await approveButton.waitFor();
 
@@ -559,7 +395,7 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("uncheck chained collection — demo:alerts with notification unchecked yields no tools", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["demo:alerts"],
       uncheckCollections: ["demo:notification"],
@@ -576,13 +412,13 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("select demo:alerts + example, uncheck demo:notification — only example tools", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["demo:alerts", "example"],
       uncheckCollections: ["demo:notification"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Example tools should be present
     const exampleTools = [
@@ -609,12 +445,12 @@ test.describe("Chained MCP Inspector E2E", () => {
   test("no chained modes selected — only main tools appear", async ({ page }) => {
     test.setTimeout(120000);
 
-    const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
     await handleOAuthFlow(page, oauthPage, {
       checkModes: ["example"],
     });
 
-    const tools = await getToolNames(page);
+    const tools = await getToolNames(page, ALL_TOOLS);
 
     // Main example tools present
     const exampleTools = [

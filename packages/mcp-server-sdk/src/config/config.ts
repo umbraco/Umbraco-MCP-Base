@@ -1,6 +1,4 @@
 import { config as loadEnv } from "dotenv";
-import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
 import { resolve } from "path";
 import { configureToolResultMode } from "../helpers/tool-result.js";
 
@@ -182,6 +180,66 @@ interface CliArgs {
 }
 
 // ============================================================================
+// Yargs CLI Parsing (lazy-loaded)
+// ============================================================================
+
+/**
+ * Parse CLI arguments using yargs. Lazy-loaded to avoid bundling yargs
+ * into Cloudflare Worker builds where its ESM shim crashes due to
+ * import.meta.url being undefined in the Worker runtime.
+ */
+let parseCliArgs: ((allFields: ConfigFieldDefinition[]) => CliArgs) | undefined;
+
+async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> {
+  if (!parseCliArgs) {
+    // Lazy-import yargs — this module is only needed in stdio/CLI mode,
+    // never in Workers. The dynamic import ensures yargs's ESM shim
+    // (which calls createRequire(import.meta.url) at module level) is
+    // never evaluated in Worker builds where import.meta.url is undefined.
+    // Use variable indirection to prevent esbuild/wrangler from statically
+    // analyzing and bundling yargs (which crashes in Worker runtime)
+    const yargsPath = "yargs";
+    const helpersPath = "yargs/helpers";
+    const yargsModule = await import(/* @vite-ignore */ yargsPath) as any;
+    const helpersModule = await import(/* @vite-ignore */ helpersPath) as any;
+    // yargs ESM exports: default is the factory function in yargs@17,
+    // but in yargs@18 the default export may be nested differently
+    const yargs = typeof yargsModule.default === "function"
+      ? yargsModule.default
+      : typeof yargsModule === "function"
+        ? yargsModule
+        : yargsModule.default?.default ?? yargsModule.default;
+    const hideBin = helpersModule.hideBin ?? helpersModule.default?.hideBin;
+
+    parseCliArgs = (fields: ConfigFieldDefinition[]) => {
+      const yargsOptions: Record<string, { type: "string" | "boolean"; description: string; default?: boolean }> = {
+        env: {
+          type: "string",
+          description: "Path to custom .env file to load environment variables from",
+        },
+      };
+
+      for (const field of fields) {
+        const yargsType = field.type === "boolean" ? "boolean" : "string";
+        yargsOptions[field.cliFlag] = {
+          type: yargsType,
+          description: `${field.envVar} - ${field.type}${field.required ? " (required)" : ""}`,
+          ...(field.type === "boolean" ? { default: false } : {}),
+        };
+      }
+
+      return yargs(hideBin(process.argv))
+        .options(yargsOptions)
+        .help()
+        .version(process.env.NPM_PACKAGE_VERSION ?? "unknown")
+        .parseSync() as CliArgs;
+    };
+  }
+
+  return parseCliArgs(allFields);
+}
+
+// ============================================================================
 // Main Configuration Function
 // ============================================================================
 
@@ -197,36 +255,15 @@ export interface GetServerConfigResult {
   custom: Record<string, string | string[] | boolean | undefined>;
 }
 
-export function getServerConfig(
+export async function getServerConfig(
   isStdioMode: boolean,
   options: GetServerConfigOptions = {}
-): GetServerConfigResult {
+): Promise<GetServerConfigResult> {
   const { additionalFields = [] } = options;
   const allFields = [...CONFIG_FIELDS, ...additionalFields];
 
-  // Build yargs options dynamically from field definitions
-  const yargsOptions: Record<string, { type: "string" | "boolean"; description: string; default?: boolean }> = {
-    env: {
-      type: "string",
-      description: "Path to custom .env file to load environment variables from",
-    },
-  };
-
-  for (const field of allFields) {
-    const yargsType = field.type === "boolean" ? "boolean" : "string";
-    yargsOptions[field.cliFlag] = {
-      type: yargsType,
-      description: `${field.envVar} - ${field.type}${field.required ? " (required)" : ""}`,
-      ...(field.type === "boolean" ? { default: false } : {}),
-    };
-  }
-
-  // Parse command line arguments
-  const argv = yargs(hideBin(process.argv))
-    .options(yargsOptions)
-    .help()
-    .version(process.env.NPM_PACKAGE_VERSION ?? "unknown")
-    .parseSync() as CliArgs;
+  // Parse command line arguments via lazy-loaded yargs
+  const argv = await getCliArgs(allFields);
 
   // Load environment variables ASAP from custom path or default
   let envFilePath: string;

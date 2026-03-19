@@ -10,9 +10,12 @@
  * - Worker and Inspector started automatically in beforeAll
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { startWorker, stopWorker } from "./helpers/worker-setup.js";
-import { startInspector, stopInspector } from "./helpers/inspector-setup.js";
+import {
+  startInspector, connectInspector, handleOAuthFlow,
+  getToolNames, callTool, type InspectorHandle,
+} from "@umbraco-cms/mcp-hosted/testing";
 
 // ============================================================================
 // All 10 tools across 3 collections
@@ -46,188 +49,6 @@ function allSlicesExcept(...keep: string[]): string[] {
 }
 
 // ============================================================================
-// Shared helpers
-// ============================================================================
-
-/**
- * Connect the MCP Inspector to the Worker's MCP endpoint.
- * Sets transport to Streamable HTTP, enters the URL, selects Direct
- * connection, and clicks Connect. Returns the popup page (or the
- * current page) that will navigate through the OAuth flow.
- */
-async function connectInspector(
-  page: Page,
-  workerUrl: string,
-  inspectorUrl: string,
-): Promise<Page> {
-  await page.goto(inspectorUrl);
-  await page.waitForLoadState("networkidle");
-
-  // Select Streamable HTTP transport
-  const transportCombo = page.getByRole("combobox", { name: "Transport Type" });
-  await transportCombo.click();
-  await page.getByRole("option", { name: "Streamable HTTP" }).click();
-
-  // Enter the Worker's MCP endpoint URL
-  const urlInput = page.getByRole("textbox", { name: "URL" });
-  await urlInput.waitFor({ timeout: 5000 });
-  await urlInput.clear();
-  await urlInput.fill(workerUrl);
-
-  // Select Direct connection (browser handles OAuth redirect)
-  const connectionTypeCombo = page.getByRole("combobox", { name: "Connection Type" });
-  await connectionTypeCombo.click();
-  await page.getByRole("option", { name: "Direct" }).click();
-
-  // Click Connect — Inspector may open a popup or navigate the current page
-  const isAuthorizeUrl = (url: URL) =>
-    url.pathname === "/authorize" || url.pathname.includes("authorize") || url.pathname.includes("/umbraco");
-
-  const popupPromise = page.context().waitForEvent("page").catch(() => null);
-  const navigationPromise = page.waitForURL(isAuthorizeUrl).then(() => null as Page | null);
-
-  await page.getByRole("button", { name: "Connect" }).click();
-
-  const popup = await Promise.race([popupPromise, navigationPromise]);
-  const oauthPage = popup ?? page;
-
-  if (popup) {
-    await popup.waitForURL(isAuthorizeUrl, { timeout: 15000 });
-  }
-
-  return oauthPage;
-}
-
-/**
- * Handle the OAuth flow on the consent/login page.
- *
- * @param oauthPage - The page showing consent screen or Umbraco login
- * @param consentOptions - Optional consent screen interactions
- */
-async function handleOAuthFlow(
-  _mainPage: Page,
-  oauthPage: Page,
-  consentOptions?: {
-    checkModes?: string[];
-    uncheckModes?: string[];
-    uncheckCollections?: string[];
-    uncheckSlices?: string[];
-    checkReadOnly?: boolean;
-  },
-): Promise<void> {
-  // Consent screen — approve (with optional checkbox modifications)
-  const approveButton = oauthPage.locator('button[value="approve"]');
-  await approveButton.waitFor();
-
-  if (consentOptions) {
-    if (consentOptions.checkModes) {
-      for (const mode of consentOptions.checkModes) {
-        const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
-        if (!(await checkbox.isChecked())) await checkbox.check();
-      }
-    }
-
-    if (consentOptions.uncheckModes) {
-      for (const mode of consentOptions.uncheckModes) {
-        const checkbox = oauthPage.locator(`.mode-checkbox[value="${mode}"]`);
-        if (await checkbox.isChecked()) await checkbox.uncheck();
-      }
-    }
-
-    if (consentOptions.uncheckCollections) {
-      for (const name of consentOptions.uncheckCollections) {
-        const checkboxes = oauthPage.locator(`.collection-checkbox[value="${name}"]`);
-        const count = await checkboxes.count();
-        for (let i = 0; i < count; i++) {
-          const cb = checkboxes.nth(i);
-          if (await cb.isEnabled() && await cb.isChecked()) await cb.uncheck();
-        }
-      }
-    }
-
-    if (consentOptions.uncheckSlices) {
-      for (const slice of consentOptions.uncheckSlices) {
-        const checkbox = oauthPage.locator(`.slice-checkbox[value="${slice}"]`);
-        if (await checkbox.isChecked()) await checkbox.uncheck();
-      }
-    }
-
-    if (consentOptions.checkReadOnly) {
-      const readOnlyCheckbox = oauthPage.locator('input[name="readOnly"]');
-      if (!(await readOnlyCheckbox.isChecked())) await readOnlyCheckbox.check();
-    }
-  }
-
-  await approveButton.click();
-
-  // Umbraco login page
-  await oauthPage.waitForURL(
-    (url) => url.hostname === "localhost" && url.pathname.includes("/umbraco"),
-    { timeout: 15000 },
-  );
-
-  const emailInput = oauthPage.getByRole("textbox").first();
-  await emailInput.waitFor({ timeout: 10000 });
-  await emailInput.fill("admin@admin.com");
-  await oauthPage.getByRole("textbox").nth(1).fill("1234567890");
-  await oauthPage.getByRole("button", { name: "Login" }).click();
-}
-
-/**
- * Navigate to the Tools tab, click List Tools, and extract tool names.
- */
-async function getToolNames(page: Page): Promise<string[]> {
-  // Wait for connected state (OAuth flow already completed in handleOAuthFlow)
-  await expect(page.getByText("Connected")).toBeVisible({ timeout: 15000 });
-
-  // Click the Tools tab
-  const toolsTab = page.getByRole("tab", { name: /Tools/i });
-  await toolsTab.waitFor({ timeout: 10000 });
-  await toolsTab.click();
-
-  // Click List Tools
-  const listToolsButton = page.getByRole("button", { name: /List Tools/i });
-  await listToolsButton.waitFor({ timeout: 10000 });
-  await listToolsButton.click();
-
-  // Wait for at least one known tool to appear
-  await expect(
-    page.locator(ALL_TOOLS.map((t) => `:text-is("${t}")`).join(", ")).first(),
-  ).toBeVisible({ timeout: 10000 });
-
-  // Check which of our known tools are visible on the page
-  const visibleTools: string[] = [];
-  for (const tool of ALL_TOOLS) {
-    const isVisible = await page
-      .getByText(tool, { exact: true })
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (isVisible) visibleTools.push(tool);
-  }
-  return visibleTools;
-}
-
-/**
- * Click a tool in the list, run it, and return the result text.
- */
-async function callTool(page: Page, toolName: string): Promise<string> {
-  await page.getByText(toolName).click();
-
-  const runButton = page.getByRole("button", { name: /Run|Execute/i });
-  await runButton.waitFor({ timeout: 5000 });
-  await runButton.click();
-
-  // Wait for result to appear (assemblyVersion is a marker for get-server-info)
-  await expect(page.getByText("assemblyVersion").first()).toBeVisible({
-    timeout: 10000,
-  });
-
-  // Return all visible text in the result area
-  return (await page.locator("body").textContent()) ?? "";
-}
-
-// ============================================================================
 // Tests: without tool selection
 // ============================================================================
 
@@ -243,32 +64,32 @@ test.describe("MCP Inspector E2E", () => {
 
   test.describe("without tool selection", () => {
     let workerUrl: string;
-    let inspectorUrl: string;
+    let inspector: InspectorHandle;
 
     test.beforeAll(async () => {
       workerUrl = await startWorker();
-      inspectorUrl = await startInspector();
+      inspector = await startInspector({ client: 6284, proxy: 6287 });
     });
 
     test.afterAll(async () => {
-      await stopInspector();
+      await inspector.stop();
       await stopWorker();
     });
 
     test("connect, list all tools, call get-server-info", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage);
 
       // Verify all 10 tools present
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
       for (const tool of ALL_TOOLS) {
         expect(tools).toContain(tool);
       }
 
       // Call get-server-info to prove the full auth chain works
-      const result = await callTool(page, "get-server-info");
+      const result = await callTool(page, "get-server-info", "assemblyVersion");
       expect(result).toContain("assemblyVersion");
     });
 
@@ -280,27 +101,27 @@ test.describe("MCP Inspector E2E", () => {
 
   test.describe("with tool selection", () => {
     let workerUrl: string;
-    let inspectorUrl: string;
+    let inspector: InspectorHandle;
 
     test.beforeAll(async () => {
       workerUrl = await startWorker({
         ENABLE_CONSENT_TOOL_SELECTION: "true",
       });
-      inspectorUrl = await startInspector();
+      inspector = await startInspector({ client: 6284, proxy: 6287 });
     });
 
     test.afterAll(async () => {
-      await stopInspector();
+      await inspector.stop();
       await stopWorker();
     });
 
     test("default consent (all selected) lists all tools", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage);
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
       for (const tool of ALL_TOOLS) {
         expect(tools).toContain(tool);
       }
@@ -311,12 +132,12 @@ test.describe("MCP Inspector E2E", () => {
     }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         checkModes: ["example"],
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // Only example collection tools should be present
       const expectedTools = [
@@ -346,13 +167,13 @@ test.describe("MCP Inspector E2E", () => {
     test("select only read slice limits to read tools", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
 
       await handleOAuthFlow(page, oauthPage, {
         uncheckSlices: allSlicesExcept("read"),
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // Only read-slice tools should be present
       const expectedTools = ["get-example", "get-widget", "get-server-info"];
@@ -378,10 +199,10 @@ test.describe("MCP Inspector E2E", () => {
     test("readOnly toggle excludes write tools", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, { checkReadOnly: true });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // Write tools should NOT be present
       const excludedTools = [
@@ -411,12 +232,12 @@ test.describe("MCP Inspector E2E", () => {
     test("select only example-2 mode", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         checkModes: ["example-2"],
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // Only example-2 collection tools
       const expectedTools = ["get-widget", "list-widgets", "create-widget"];
@@ -442,12 +263,12 @@ test.describe("MCP Inspector E2E", () => {
     test("select only create slice", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         uncheckSlices: allSlicesExcept("create"),
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // Only create-slice tools
       const expectedTools = ["create-example", "create-widget"];
@@ -474,13 +295,13 @@ test.describe("MCP Inspector E2E", () => {
     test("mode + slice cross-filter", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         checkModes: ["example"],
         uncheckSlices: allSlicesExcept("read"),
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // example mode + read slice → only get-example
       expect(tools).toContain("get-example");
@@ -490,7 +311,7 @@ test.describe("MCP Inspector E2E", () => {
     test("deny consent prevents connection", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
 
       // Click deny instead of approve
       const denyButton = oauthPage.locator('button[value="deny"]');
@@ -514,13 +335,13 @@ test.describe("MCP Inspector E2E", () => {
     test("readOnly + mode filters compose", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         checkModes: ["example"],
         checkReadOnly: true,
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // example mode + readOnly → read-only tools from example collection
       const expectedTools = ["get-example", "list-examples", "search-examples"];
@@ -548,12 +369,12 @@ test.describe("MCP Inspector E2E", () => {
     }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         uncheckSlices: allSlicesExcept("read", "list"),
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // read + list slices → get-* and list-* tools
       const expectedTools = [
@@ -583,30 +404,30 @@ test.describe("MCP Inspector E2E", () => {
     test("tool call works after filtering", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         uncheckSlices: allSlicesExcept("read"),
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
       expect(tools).toContain("get-server-info");
 
       // Execute get-server-info to prove the auth chain works with filtered token
-      const result = await callTool(page, "get-server-info");
+      const result = await callTool(page, "get-server-info", "assemblyVersion");
       expect(result).toContain("assemblyVersion");
     });
 
     test("readOnly + mode + slice triple filter", async ({ page }) => {
       test.setTimeout(120000);
 
-      const oauthPage = await connectInspector(page, workerUrl, inspectorUrl);
+      const oauthPage = await connectInspector(page, workerUrl, inspector.url);
       await handleOAuthFlow(page, oauthPage, {
         checkModes: ["example"],
         uncheckSlices: allSlicesExcept("list"),
         checkReadOnly: true,
       });
 
-      const tools = await getToolNames(page);
+      const tools = await getToolNames(page, ALL_TOOLS);
 
       // example mode + list slice + readOnly → list-examples only
       expect(tools).toContain("list-examples");

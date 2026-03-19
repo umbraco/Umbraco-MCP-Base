@@ -1,9 +1,13 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/testing/index.ts"],
   format: ["esm"],
-  dts: true,
+  dts: {
+    compilerOptions: {
+      types: ["@cloudflare/workers-types", "@types/jest", "node"],
+    },
+  },
   sourcemap: true,
   clean: true,
   target: "es2022",
@@ -12,5 +16,6 @@ export default defineConfig({
     "@cloudflare/workers-oauth-provider",
     "@modelcontextprotocol/sdk",
     "@umbraco-cms/mcp-server-sdk",
+    "@playwright/test",
   ],
 });
