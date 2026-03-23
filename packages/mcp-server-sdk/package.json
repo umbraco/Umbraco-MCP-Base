@@ -43,7 +43,9 @@
     "build": "tsup",
     "compile": "tsc --noEmit",
     "watch": "tsup --watch",
-    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test": "npm run test:parallel && npm run test:stdio",
+    "test:parallel": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathIgnorePatterns='src/mcp-client/__tests__/(manager|proxy).test.ts'",
+    "test:stdio": "NODE_OPTIONS='--experimental-vm-modules' jest --runInBand --testPathPattern='src/mcp-client/__tests__/(manager|proxy).test.ts'",
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
     "prepublishOnly": "npm run build"
   },

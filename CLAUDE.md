@@ -49,7 +49,36 @@ Workspace-specific commands use `-w` flag: `npm run build -w packages/mcp-server
 
 **MCP Chaining** - Proxy tools from other MCP servers via McpClientManager.
 
+## Playwright / E2E Testing
+
+- The test Umbraco instance lives at `tests/umbraco-instance/`
+- You MUST start the Umbraco instance before running any Playwright tests: `dotnet run --project tests/umbraco-instance`
+- This applies when running tests against any host (this repo, CMS, Forms, etc.) — the instance must always be running first
+- When running Playwright tests for the first time in a session, run a single test first to verify the setup is working. If it passes, then run the full suite.
+- Stale `workerd` processes can hold ports (8787, 8789 etc.) after interrupted test runs. If tests fail with "Address already in use", kill them: `lsof -i :8787` then `kill -9 <pid>`
+
+## Integration Tests
+
+- Run with `npm run test:integration` and `npm run test:integration:chained`
+- Use Wrangler's `unstable_dev()` — do NOT use `unstable_startWorker()` which hangs with OAuthProvider-wrapped Workers
+- Require `--runInBand --forceExit` because Wrangler workers don't exit cleanly
+- Wrangler migrations must use `new_sqlite_classes`, not `new_classes`, for Durable Objects
+
+## Eval Tests
+
+- Run with `npm run test:evals` (from template or host projects)
+- Require `npm run build` first — evals run against `dist/index.js`, not source
+- Require `ANTHROPIC_API_KEY` environment variable or a Claude Code subscription
+
+## Self-Signed Certificates
+
+The local Umbraco instance uses HTTPS with self-signed certs. TLS rejection must be disabled in three places:
+- Environment variable: `NODE_TLS_REJECT_UNAUTHORIZED=0`
+- Jest setup file: `https.globalAgent.options.rejectUnauthorized = false` (env var alone is insufficient in Jest VM context)
+- Playwright config: `ignoreHTTPSErrors: true`
+
 ## Requirements
 
 - Node.js 22+
+- .NET 10 (for test Umbraco instance)
 - ESM modules (type: "module")
