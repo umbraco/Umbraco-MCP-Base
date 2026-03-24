@@ -97,6 +97,7 @@ All packages are versioned together and published from the `main` branch via Azu
 3. Run `npm install --package-lock-only` to update `package-lock.json`
 4. Commit, push, and create a PR from the release branch into `main`
 5. The CI pipeline publishes packages when the PR is merged to `main`
+6. Manually create a GitHub Release tagged `v<version>` from the merge commit
 
 ### Version scheme
 

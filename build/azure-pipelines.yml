@@ -322,58 +322,6 @@ stages:
           displayName: Publish CLI to npm
           workingDirectory: $(Pipeline.Workspace)/cli-package
 
-- stage: GitHubRelease
-  displayName: 'GitHub Release'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  dependsOn:
-    - Deploy_Npm
-  jobs:
-    - job: CreateRelease
-      displayName: Create GitHub Release
-      steps:
-        - checkout: self
-
-        - script: |
-            version=$(node -p "require('./package.json').version")
-            tag="v${version}"
-            echo "##vso[task.setvariable variable=releaseVersion]${version}"
-            echo "##vso[task.setvariable variable=releaseTag]${tag}"
-
-            if [[ "$version" == *"-"* ]]; then
-              echo "##vso[task.setvariable variable=isPrerelease]true"
-            else
-              echo "##vso[task.setvariable variable=isPrerelease]false"
-            fi
-          displayName: 'Determine version and tag'
-
-        - task: GitHubRelease@1
-          displayName: 'Create GitHub Release'
-          inputs:
-            gitHubConnection: 'GitHub - Umbraco'
-            repositoryName: '$(Build.Repository.Name)'
-            action: 'create'
-            target: '$(Build.SourceVersion)'
-            tagSource: 'userSpecifiedTag'
-            tag: '$(releaseTag)'
-            title: '$(releaseTag)'
-            releaseNotesSource: 'inline'
-            releaseNotesInline: |
-              ## Packages
-
-              | Package | Version |
-              |---------|---------|
-              | `@umbraco-cms/mcp-server-sdk` | $(releaseVersion) |
-              | `@umbraco-cms/mcp-hosted` | $(releaseVersion) |
-              | `@umbraco-cms/create-umbraco-mcp-server` | $(releaseVersion) |
-
-              ### Install
-
-              ```bash
-              npm install @umbraco-cms/mcp-server-sdk@$(releaseVersion)
-              npm install @umbraco-cms/mcp-hosted@$(releaseVersion)
-              npx @umbraco-cms/create-umbraco-mcp-server@$(releaseVersion) my-project
-              ```
-            isPreRelease: $(isPrerelease)
-            addChangeLog: true
-            changeLogCompareToRelease: 'lastFullRelease'
-            changeLogType: 'commitBased'
+# GitHub Release is created manually after npm publish.
+# To automate, add a GitHubRelease@1 stage here once a GitHub service
+# connection is configured in Azure DevOps.
