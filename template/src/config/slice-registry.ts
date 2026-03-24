@@ -18,42 +18,11 @@ export const toolSliceNames = [
   // Base slices from toolkit (create, read, update, delete, list)
   ...baseSliceNames,
 
-  // Navigation
-  'tree',
-  'folders',
-
   // Query
   'search',
-  'references',
 
-  // Workflow
-  'publish',
-  'recycle-bin',
-  'move',
-  'copy',
-  'sort',
-  'validate',
-  'rename',
-
-  // Information
-  'configuration',
-  'audit',
-  'urls',
-  'domains',
-  'permissions',
-  'user-status',
-  'current-user',
-
-  // Entity Management
-  'notifications',
-  'public-access',
-  'scaffolding',
-  'blueprints',
-
-  // System
-  'server-info',
-  'diagnostics',
-  'templates',
+  // Add your slices here as you build out your MCP server
+  // 'tree', 'publish', 'move', 'copy', etc.
 ] as const;
 
 /**

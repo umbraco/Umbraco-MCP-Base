@@ -1,9 +1,13 @@
 {
   "name": "@umbraco-cms/mcp-template",
-  "version": "17.0.0-beta.4",
+  "version": "17.0.0-beta.5",
   "type": "module",
   "description": "MCP server for my Umbraco add-on",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./collections": "./dist/collections.js"
+  },
   "bin": {
     "my-umbraco-mcp": "dist/index.js"
   },
@@ -15,9 +19,12 @@
     "generate": "orval --config orval.config.ts",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
-    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
+    "test:evals": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:e2e": "npx playwright test --config tests/hosted-e2e/playwright.config.ts",
+    "dev:worker": "npx wrangler dev",
+    "deploy:worker": "npx wrangler deploy"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -34,9 +41,11 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
+    "@cloudflare/workers-oauth-provider": "^0.2.3",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
-    "axios": "^1.8.4",
+    "agents": "^0.6.0",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",
@@ -55,6 +64,8 @@
     "ts-jest": "^29.3.2",
     "ts-node": "^10.9.2",
     "tsup": "^8.4.0",
-    "typescript": "^5.8.3"
+    "@playwright/test": "^1.52.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.69.0"
   }
 }

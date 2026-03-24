@@ -1,0 +1,20 @@
+# Wrangler config for chained MCP integration tests.
+# Uses the test worker that combines template tools + demo chained MCP.
+
+name = "my-umbraco-mcp-chained-test"
+main = "worker/worker.ts"
+compatibility_date = "2025-02-24"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "chaining-test-kv"
+
+[durable_objects]
+bindings = [
+  { name = "MCP_AGENT", class_name = "UmbracoMcpAgent" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UmbracoMcpAgent"]

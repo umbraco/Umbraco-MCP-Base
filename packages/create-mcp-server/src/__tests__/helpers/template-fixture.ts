@@ -47,6 +47,7 @@ const FIXTURE_FILES = [
   "tests/evals/tool-filtering.test.ts",
   "tests/evals/mcp-chaining.test.ts",
   "src/testing/mock-mcp-server.ts",
+  "umbraco/McpOAuthComposer.cs",
 ];
 
 /**
@@ -93,6 +94,9 @@ export function loadScaffoldedFixture(
     pkg.description = `MCP server for ${projectName}`;
     if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
       pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = "^17.0.0";
+    }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = "^17.0.0";
     }
     fixture[pkgPath] = JSON.stringify(pkg, null, 2) + "\n";
   }

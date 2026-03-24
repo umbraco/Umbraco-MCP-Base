@@ -137,7 +137,6 @@ describe("removeExamples", () => {
     )!;
     expect(modeRegistry).not.toContain("name: 'example'");
     expect(modeRegistry).not.toContain("name: 'example-2'");
-    expect(modeRegistry).not.toContain("name: 'all-examples'");
   });
 
   it("should be idempotent", () => {
