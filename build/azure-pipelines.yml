@@ -3,6 +3,7 @@ trigger:
     include:
     - main
     - feature/*
+    - release/*
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -12,6 +13,8 @@ variables:
     value: '22.x'
   - name: sdkPackagePath
     value: 'packages/mcp-server-sdk'
+  - name: hostedPackagePath
+    value: 'packages/hosted-mcp'
   - name: cliPackagePath
     value: 'packages/create-mcp-server'
 
@@ -64,6 +67,55 @@ stages:
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifact: 'sdk-package'
+
+  - job: BuildHosted
+    displayName: 'Build Hosted MCP Package'
+    steps:
+    - task: NodeTool@0
+      displayName: 'Use Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: '$(nodeVersion)'
+
+    - task: Cache@2
+      displayName: 'Cache node_modules'
+      inputs:
+        key: 'npm | "$(Agent.OS)" | package-lock.json'
+        restoreKeys: |
+          npm | "$(Agent.OS)"
+          npm
+        path: 'node_modules'
+
+    - script: npm ci
+      displayName: 'Install dependencies'
+
+    - script: npm run build
+      displayName: 'Build SDK (workspace dependency)'
+
+    - script: npm run build -w $(hostedPackagePath)
+      displayName: 'Build Hosted MCP'
+
+    - script: npm test -w $(hostedPackagePath)
+      displayName: 'Run Hosted MCP tests'
+
+    - task: PublishTestResults@2
+      displayName: 'Publish Hosted MCP test results'
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '$(hostedPackagePath)/junit.xml'
+        testRunTitle: 'Hosted MCP Tests'
+        failTaskOnFailedTests: true
+        failTaskOnMissingResultsFile: false
+
+    - script: npm pack --pack-destination $(Build.ArtifactStagingDirectory)
+      displayName: 'Create NPM package'
+      workingDirectory: $(hostedPackagePath)
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Hosted MCP package to artifacts'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'hosted-package'
 
   - job: BuildCLI
     displayName: 'Build CLI Package'
@@ -170,6 +222,56 @@ stages:
           displayName: Publish SDK to npm
           workingDirectory: $(Pipeline.Workspace)/sdk-package
 
+    - job: PublishHosted
+      displayName: Publish Hosted MCP to NPM
+      steps:
+        - checkout: self
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: 'hosted-package'
+        - bash: echo "@umbraco-cms:registry=https://registry.npmjs.org" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/hosted-package
+          displayName: Add scoped registry to .npmrc
+        - task: npmAuthenticate@0
+          displayName: Authenticate with npm
+          inputs:
+            workingFile: $(Pipeline.Workspace)/hosted-package/.npmrc
+            customEndpoint: "NPM - Umbraco Backoffice"
+        - script: |
+            npm init -y
+            tgz=(*.tgz)
+            tar -xf "${tgz[0]}" --strip-components=1 package/package.json
+            name=$(node -p "require('./package.json').name")
+            version=$(node -p "require('./package.json').version")
+
+            if npm view "${name}@${version}" version 2>/dev/null; then
+              echo "##[warning]Skipping ${name}@${version} — already published"
+              exit 0
+            fi
+
+            if [[ "$version" == *"alpha"* ]]; then tag="alpha"
+            elif [[ "$version" == *"beta"* ]]; then tag="beta"
+            elif [[ "$version" == *"rc"* ]]; then tag="rc"
+            else tag="latest"
+            fi
+
+            echo "Publishing ${name}@${version} with tag ${tag}"
+            npm publish "${tgz[0]}" --tag "$tag" --access public
+
+            # Also set latest if no stable version exists yet
+            if [[ "$tag" != "latest" ]]; then
+              latest=$(npm view "$name" dist-tags.latest 2>/dev/null || echo "")
+              if [[ -z "$latest" || "$latest" == *"-"* ]]; then
+                echo "No stable release found (latest=${latest:-none}), also tagging as latest"
+                npm dist-tag add "${name}@${version}" latest
+              fi
+            fi
+          displayName: Publish Hosted MCP to npm
+          workingDirectory: $(Pipeline.Workspace)/hosted-package
+
     - job: PublishCLI
       displayName: Publish CLI to NPM
       steps:
@@ -219,3 +321,59 @@ stages:
             fi
           displayName: Publish CLI to npm
           workingDirectory: $(Pipeline.Workspace)/cli-package
+
+- stage: GitHubRelease
+  displayName: 'GitHub Release'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  dependsOn:
+    - Deploy_Npm
+  jobs:
+    - job: CreateRelease
+      displayName: Create GitHub Release
+      steps:
+        - checkout: self
+
+        - script: |
+            version=$(node -p "require('./package.json').version")
+            tag="v${version}"
+            echo "##vso[task.setvariable variable=releaseVersion]${version}"
+            echo "##vso[task.setvariable variable=releaseTag]${tag}"
+
+            if [[ "$version" == *"-"* ]]; then
+              echo "##vso[task.setvariable variable=isPrerelease]true"
+            else
+              echo "##vso[task.setvariable variable=isPrerelease]false"
+            fi
+          displayName: 'Determine version and tag'
+
+        - task: GitHubRelease@1
+          displayName: 'Create GitHub Release'
+          inputs:
+            gitHubConnection: 'GitHub - Umbraco'
+            repositoryName: '$(Build.Repository.Name)'
+            action: 'create'
+            target: '$(Build.SourceVersion)'
+            tagSource: 'userSpecifiedTag'
+            tag: '$(releaseTag)'
+            title: '$(releaseTag)'
+            releaseNotesSource: 'inline'
+            releaseNotesInline: |
+              ## Packages
+
+              | Package | Version |
+              |---------|---------|
+              | `@umbraco-cms/mcp-server-sdk` | $(releaseVersion) |
+              | `@umbraco-cms/mcp-hosted` | $(releaseVersion) |
+              | `@umbraco-cms/create-umbraco-mcp-server` | $(releaseVersion) |
+
+              ### Install
+
+              ```bash
+              npm install @umbraco-cms/mcp-server-sdk@$(releaseVersion)
+              npm install @umbraco-cms/mcp-hosted@$(releaseVersion)
+              npx @umbraco-cms/create-umbraco-mcp-server@$(releaseVersion) my-project
+              ```
+            isPreRelease: $(isPrerelease)
+            addChangeLog: true
+            changeLogCompareToRelease: 'lastFullRelease'
+            changeLogType: 'commitBased'
