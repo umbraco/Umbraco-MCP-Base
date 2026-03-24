@@ -95,6 +95,9 @@ export function loadScaffoldedFixture(
     if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
       pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = "^17.0.0";
     }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = "^17.0.0";
+    }
     fixture[pkgPath] = JSON.stringify(pkg, null, 2) + "\n";
   }
 

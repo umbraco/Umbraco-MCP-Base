@@ -27,6 +27,7 @@ function buildTemplateFsEntries(): Record<string, string> {
     bin: { "my-umbraco-mcp": "dist/index.js" },
     description: "MCP server for my Umbraco add-on",
     dependencies: {
+      "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
       "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
     },
     devDependencies: { msw: "^2.12.7" },
@@ -103,6 +104,7 @@ describe("scaffoldProject", () => {
     expect(pkg.version).toBe("1.0.0");
     expect(pkg.description).toBe("MCP server for My-Commerce-MCP");
     expect(pkg.dependencies["@umbraco-cms/mcp-server-sdk"]).toBe("^17.0.0");
+    expect(pkg.dependencies["@umbraco-cms/mcp-hosted"]).toBe("^17.0.0");
   });
 
   it("should transform README title", () => {

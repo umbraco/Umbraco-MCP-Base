@@ -59,9 +59,12 @@ function transformPackageJson(
     [kebabName]: "./dist/index.js",
   };
 
-  // Update SDK dependency from file: path to published version
+  // Update SDK dependencies from file: paths to published versions
   if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
     pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = sdkVersion;
+  }
+  if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+    pkg.dependencies["@umbraco-cms/mcp-hosted"] = sdkVersion;
   }
 
   // Clear template-specific fields

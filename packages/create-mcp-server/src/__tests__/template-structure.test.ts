@@ -58,6 +58,9 @@ describe("template structure", () => {
     if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
       pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = "^17.0.0";
     }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = "^17.0.0";
+    }
 
     expect(JSON.stringify(pkg, null, 2)).toMatchSnapshot();
   });

@@ -20,6 +20,7 @@ exports[`template structure should match the expected file listing 1`] = `
   "scripts/tunnels.sh",
   "src/auth/auth-policies.ts",
   "src/auth/index.ts",
+  "src/collections.ts",
   "src/config/__tests__/server-config.test.ts",
   "src/config/index.ts",
   "src/config/mcp-servers.ts",
@@ -234,6 +235,10 @@ exports[`template structure should produce expected package.json for sample proj
   "type": "module",
   "description": "MCP server for My-Commerce-MCP",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./collections": "./dist/collections.js"
+  },
   "bin": {
     "my-commerce-mcp": "./dist/index.js"
   },
@@ -245,9 +250,9 @@ exports[`template structure should produce expected package.json for sample proj
     "generate": "orval --config orval.config.ts",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
-    "test:evals": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
+    "test:evals": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
     "dev:worker": "npx wrangler dev",
     "deploy:worker": "npx wrangler deploy"
   },
@@ -268,7 +273,7 @@ exports[`template structure should produce expected package.json for sample proj
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@cloudflare/workers-oauth-provider": "^0.2.3",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
+    "@umbraco-cms/mcp-hosted": "^17.0.0",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0",
     "agents": "^0.6.0",
     "axios": "^1.8.4",
