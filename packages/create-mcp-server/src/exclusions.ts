@@ -11,6 +11,7 @@ export const SCAFFOLD_EXCLUSIONS = [
   // Always excluded (build artifacts, local config)
   "node_modules/",
   "dist/",
+  "test-results/",
   ".env",
 
   // Add files to remove from scaffolded projects here:

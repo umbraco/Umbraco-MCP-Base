@@ -67,7 +67,6 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/umbraco-api/tools/umbraco-server/get/get-server-info.ts",
   "src/umbraco-api/tools/umbraco-server/index.ts",
   "src/worker.ts",
-  "test-results/.last-run.json",
   "tests/evals/example-crud.test.ts",
   "tests/evals/helpers/e2e-setup.ts",
   "tests/evals/jest.config.ts",
