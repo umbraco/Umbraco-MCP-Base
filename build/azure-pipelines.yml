@@ -158,6 +158,15 @@ stages:
 
             echo "Publishing ${name}@${version} with tag ${tag}"
             npm publish "${tgz[0]}" --tag "$tag" --access public
+
+            # Also set latest if no stable version exists yet
+            if [[ "$tag" != "latest" ]]; then
+              latest=$(npm view "$name" dist-tags.latest 2>/dev/null || echo "")
+              if [[ -z "$latest" || "$latest" == *"-"* ]]; then
+                echo "No stable release found (latest=${latest:-none}), also tagging as latest"
+                npm dist-tag add "${name}@${version}" latest
+              fi
+            fi
           displayName: Publish SDK to npm
           workingDirectory: $(Pipeline.Workspace)/sdk-package
 
@@ -199,5 +208,14 @@ stages:
 
             echo "Publishing ${name}@${version} with tag ${tag}"
             npm publish "${tgz[0]}" --tag "$tag" --access public
+
+            # Also set latest if no stable version exists yet
+            if [[ "$tag" != "latest" ]]; then
+              latest=$(npm view "$name" dist-tags.latest 2>/dev/null || echo "")
+              if [[ -z "$latest" || "$latest" == *"-"* ]]; then
+                echo "No stable release found (latest=${latest:-none}), also tagging as latest"
+                npm dist-tag add "${name}@${version}" latest
+              fi
+            fi
           displayName: Publish CLI to npm
           workingDirectory: $(Pipeline.Workspace)/cli-package

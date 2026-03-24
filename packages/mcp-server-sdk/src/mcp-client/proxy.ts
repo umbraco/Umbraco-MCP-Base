@@ -8,6 +8,12 @@
 import type { McpClientManager } from "./manager.js";
 
 /**
+ * Separator used between server name and tool name in proxied tool names.
+ * Must be MCP-safe (only A-Z, a-z, 0-9, underscore, dash, dot allowed).
+ */
+const PROXY_SEPARATOR = "--";
+
+/**
  * Represents a tool that has been discovered from a chained MCP server
  * and is ready to be proxied to the parent client.
  */
@@ -19,7 +25,7 @@ export interface ProxiedTool {
     inputSchema?: Record<string, unknown>;
   };
 
-  /** Prefixed name for the parent client (e.g., "cms:get-document") */
+  /** Prefixed name for the parent client (e.g., "cms--get-document") */
   prefixedName: string;
 
   /** Server name for routing calls */
@@ -36,7 +42,7 @@ export interface ProxiedTool {
  * @example
  * ```typescript
  * const proxiedTools = await discoverProxiedTools(mcpClientManager);
- * // Returns: [{ prefixedName: "cms:get-document", serverName: "cms", ... }]
+ * // Returns: [{ prefixedName: "cms--get-document", serverName: "cms", ... }]
  * ```
  */
 export async function discoverProxiedTools(
@@ -56,7 +62,7 @@ export async function discoverProxiedTools(
       for (const tool of tools) {
         proxiedTools.push({
           originalTool: tool,
-          prefixedName: `${serverName}:${tool.name}`,
+          prefixedName: `${serverName}${PROXY_SEPARATOR}${tool.name}`,
           serverName,
         });
       }
@@ -73,21 +79,21 @@ export async function discoverProxiedTools(
  * Checks if a tool name is a proxied tool (contains the server prefix).
  *
  * @param toolName - The tool name to check
- * @returns True if the tool name contains a colon (prefix separator)
+ * @returns True if the tool name contains the proxy separator
  */
 export function isProxiedToolName(toolName: string): boolean {
-  return toolName.includes(":");
+  return toolName.includes(PROXY_SEPARATOR);
 }
 
 /**
  * Parses a proxied tool name into server name and original tool name.
  *
- * @param prefixedName - The prefixed tool name (e.g., "cms:get-document")
+ * @param prefixedName - The prefixed tool name (e.g., "cms--get-document")
  * @returns Object with serverName and toolName
  *
  * @example
  * ```typescript
- * parseProxiedToolName("cms:get-document")
+ * parseProxiedToolName("cms--get-document")
  * // Returns: { serverName: "cms", toolName: "get-document" }
  * ```
  */
@@ -95,14 +101,14 @@ export function parseProxiedToolName(prefixedName: string): {
   serverName: string;
   toolName: string;
 } {
-  const colonIndex = prefixedName.indexOf(":");
-  if (colonIndex === -1) {
+  const sepIndex = prefixedName.indexOf(PROXY_SEPARATOR);
+  if (sepIndex === -1) {
     throw new Error(`Invalid proxied tool name: ${prefixedName}`);
   }
 
   return {
-    serverName: prefixedName.substring(0, colonIndex),
-    toolName: prefixedName.substring(colonIndex + 1),
+    serverName: prefixedName.substring(0, sepIndex),
+    toolName: prefixedName.substring(sepIndex + PROXY_SEPARATOR.length),
   };
 }
 

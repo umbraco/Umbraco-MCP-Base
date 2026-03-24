@@ -4,9 +4,12 @@
  */
 const config: import("@jest/types").Config.InitialOptions = {
   projects: [
-    "<rootDir>/packages/toolkit",
+    "<rootDir>/packages/mcp-server-sdk",
+    "<rootDir>/packages/hosted-mcp",
+    "<rootDir>/packages/create-mcp-server",
     "<rootDir>/template",
     "<rootDir>/plugins",
+    "<rootDir>/tests/hosted-mcp-e2e/integration",
   ],
   // Global options (these don't belong in project configs)
   verbose: true,

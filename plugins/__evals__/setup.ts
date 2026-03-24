@@ -57,6 +57,8 @@ export interface SkillTestOptions {
   maxBudget?: number;
   /** Whether to log verbose output */
   verbose?: boolean;
+  /** Number of retries on failure (default: 2, so 3 total attempts) */
+  maxRetries?: number;
 }
 
 /**
@@ -178,135 +180,22 @@ export function cleanupTestDirectory(dir: string): void {
   }
 }
 
-/**
- * Run an agent test with a skill loaded via the SDK's native skill loading
- *
- * @param prompt - The task prompt to send
- * @param skillSourcePath - Relative path to skill (e.g., "skills/mcp-patterns")
- * @param options - Test options
- */
-export async function runSkillTest(
-  prompt: string,
-  skillSourcePath: string,
-  options: SkillTestOptions = {}
-): Promise<SkillTestResult> {
-  const toolCalls: Array<{ name: string; input: unknown }> = [];
-  let result: SDKResultMessage | undefined;
-
-  // Create temp directory with skill
-  const testDir = setupSkillTestDirectory(skillSourcePath);
-
-  // Create AbortController for proper cleanup
-  const abortController = new AbortController();
-
-  try {
-    const allowedTools = options.allowedTools ?? ["Skill", "Read", "Glob", "Grep"];
-    const maxTurns = options.maxTurns ?? 5;
-    const maxBudget = options.maxBudget ?? 0.10;
-
-    if (options.verbose) {
-      console.log(`Test directory: ${testDir}`);
-      console.log(`Skill path: ${join(testDir, ".claude", "skills")}`);
-    }
-
-    // Collect assistant text responses
-    let assistantText = "";
-
-    for await (const message of query({
-      prompt,
-      options: {
-        model: "haiku",
-        cwd: testDir,
-        settingSources: ["project"],  // Load skills from .claude/skills/
-        allowedTools,
-        permissionMode: "bypassPermissions",
-        maxTurns,
-        maxBudgetUsd: maxBudget,
-        abortController
-      }
-    })) {
-      // Log init message to see available skills
-      if (message.type === "system" && message.subtype === "init") {
-        if (options.verbose) {
-          const initMsg = message as any;
-          console.log("Available tools:", initMsg.tools?.length || 0);
-          console.log("Slash commands:", initMsg.slash_commands || []);
-        }
-      }
-      // Track tool calls and collect text
-      if (message.type === "assistant" && message.message.content) {
-        for (const block of message.message.content) {
-          if (block.type === "tool_use") {
-            toolCalls.push({
-              name: block.name,
-              input: block.input
-            });
-            if (options.verbose) {
-              console.log(`Tool call: ${block.name}`);
-            }
-          } else if (block.type === "text") {
-            assistantText += block.text + "\n";
-            if (options.verbose) {
-              console.log(`Assistant: ${block.text.substring(0, 200)}...`);
-            }
-          }
-        }
-      }
-
-      // Capture final result
-      if (message.type === "result") {
-        result = message;
-      }
-    }
-
-    // Handle different result types
-    const isSuccess = result?.subtype === "success";
-    const isMaxTurns = result?.subtype === "error_max_turns";
-
-    // For max_turns, we still have useful content from assistant messages
-    if (isMaxTurns && options.verbose) {
-      console.log(`Max turns reached after ${(result as any)?.num_turns || 0} turns`);
-    }
-
-    // Use the official result if success, otherwise use collected assistant text
-    const finalText = isSuccess ? result.result : assistantText.trim();
-
-    return {
-      finalResult: finalText,
-      success: isSuccess || (isMaxTurns && assistantText.length > 0), // Treat max_turns with content as success
-      toolCalls,
-      cost: (result as any)?.total_cost_usd || 0,
-      turns: (result as any)?.num_turns || 0
-    };
-  } finally {
-    // Abort any lingering processes
-    abortController.abort();
-    // Clean up temp directory
-    cleanupTestDirectory(testDir);
-  }
-}
+// ============================================================================
+// Core query execution (single attempt)
+// ============================================================================
 
 /**
- * Run an agent test with agent/skill content injected directly
- * (for testing agents that aren't proper SKILL.md files)
- *
- * @param prompt - The task prompt to send
- * @param agentContent - The agent markdown content
- * @param options - Test options
+ * Executes a single SDK query attempt and collects results.
  */
-export async function runAgentContentTest(
+async function executeQuery(
   prompt: string,
-  agentContent: string,
-  options: SkillTestOptions = {}
+  testDir: string,
+  options: SkillTestOptions
 ): Promise<SkillTestResult> {
   const toolCalls: Array<{ name: string; input: unknown }> = [];
   let result: SDKResultMessage | undefined;
   let assistantText = "";
 
-  // Create temp directory with agent content as a skill
-  const testDir = setupSkillTestDirectoryFromContent("test-agent", agentContent);
-
-  // Create AbortController for proper cleanup
   const abortController = new AbortController();
 
   try {
@@ -324,9 +213,18 @@ export async function runAgentContentTest(
         permissionMode: "bypassPermissions",
         maxTurns,
         maxBudgetUsd: maxBudget,
-        abortController
+        abortController,
+        // Allow running inside a parent Claude Code session
+        env: { ...process.env, CLAUDECODE: "" },
       }
     })) {
+      if (message.type === "system" && message.subtype === "init") {
+        if (options.verbose) {
+          const initMsg = message as any;
+          console.log("Available tools:", initMsg.tools?.length || 0);
+          console.log("Slash commands:", initMsg.slash_commands || []);
+        }
+      }
       if (message.type === "assistant" && message.message.content) {
         for (const block of message.message.content) {
           if (block.type === "tool_use") {
@@ -342,7 +240,6 @@ export async function runAgentContentTest(
           }
         }
       }
-
       if (message.type === "result") {
         result = message;
       }
@@ -350,6 +247,11 @@ export async function runAgentContentTest(
 
     const isSuccess = result?.subtype === "success";
     const isMaxTurns = result?.subtype === "error_max_turns";
+
+    if (isMaxTurns && options.verbose) {
+      console.log(`Max turns reached after ${(result as any)?.num_turns || 0} turns`);
+    }
+
     const finalText = isSuccess ? result.result : assistantText.trim();
 
     return {
@@ -360,8 +262,87 @@ export async function runAgentContentTest(
       turns: (result as any)?.num_turns || 0
     };
   } finally {
-    // Abort any lingering processes
     abortController.abort();
+  }
+}
+
+/**
+ * Retries a query function until it succeeds or retries are exhausted.
+ */
+async function withRetry(
+  fn: () => Promise<SkillTestResult>,
+  maxRetries: number,
+  verbose?: boolean
+): Promise<SkillTestResult> {
+  let lastResult: SkillTestResult | undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    lastResult = await fn();
+    if (lastResult.success) return lastResult;
+    if (attempt < maxRetries && verbose) {
+      console.log(`Attempt ${attempt + 1} failed, retrying...`);
+    }
+  }
+  return lastResult!;
+}
+
+// ============================================================================
+// Public test runners
+// ============================================================================
+
+/**
+ * Run an agent test with a skill loaded via the SDK's native skill loading
+ *
+ * @param prompt - The task prompt to send
+ * @param skillSourcePath - Relative path to skill (e.g., "skills/mcp-patterns")
+ * @param options - Test options
+ */
+export async function runSkillTest(
+  prompt: string,
+  skillSourcePath: string,
+  options: SkillTestOptions = {}
+): Promise<SkillTestResult> {
+  const testDir = setupSkillTestDirectory(skillSourcePath);
+  const maxRetries = options.maxRetries ?? 2;
+
+  if (options.verbose) {
+    console.log(`Test directory: ${testDir}`);
+    console.log(`Skill path: ${join(testDir, ".claude", "skills")}`);
+  }
+
+  try {
+    return await withRetry(
+      () => executeQuery(prompt, testDir, options),
+      maxRetries,
+      options.verbose
+    );
+  } finally {
+    cleanupTestDirectory(testDir);
+  }
+}
+
+/**
+ * Run an agent test with agent/skill content injected directly
+ * (for testing agents that aren't proper SKILL.md files)
+ *
+ * @param prompt - The task prompt to send
+ * @param agentContent - The agent markdown content
+ * @param options - Test options
+ */
+export async function runAgentContentTest(
+  prompt: string,
+  agentContent: string,
+  options: SkillTestOptions = {}
+): Promise<SkillTestResult> {
+  const testDir = setupSkillTestDirectoryFromContent("test-agent", agentContent);
+  const maxRetries = options.maxRetries ?? 2;
+
+  try {
+    return await withRetry(
+      () => executeQuery(prompt, testDir, options),
+      maxRetries,
+      options.verbose
+    );
+  } finally {
     cleanupTestDirectory(testDir);
   }
 }
@@ -380,72 +361,20 @@ export async function runCommandTest(
   commandArgs: string = "",
   options: SkillTestOptions = {}
 ): Promise<SkillTestResult> {
-  const toolCalls: Array<{ name: string; input: unknown }> = [];
-  let result: SDKResultMessage | undefined;
-  let assistantText = "";
-
-  // Create temp directory with command
   const testDir = setupCommandTestDirectory(commandName, commandContent);
+  const maxRetries = options.maxRetries ?? 2;
+  const prompt = commandArgs ? `/${commandName} ${commandArgs}` : `/${commandName}`;
 
-  // Create AbortController for proper cleanup
-  const abortController = new AbortController();
+  // Commands default to no Skill tool
+  const commandOptions = { ...options, allowedTools: options.allowedTools ?? ["Read", "Glob", "Grep"] };
 
   try {
-    const allowedTools = options.allowedTools ?? ["Read", "Glob", "Grep"];
-    const maxTurns = options.maxTurns ?? 5;
-    const maxBudget = options.maxBudget ?? 0.10;
-
-    // Invoke the command with optional args
-    const prompt = commandArgs ? `/${commandName} ${commandArgs}` : `/${commandName}`;
-
-    for await (const message of query({
-      prompt,
-      options: {
-        model: "haiku",
-        cwd: testDir,
-        settingSources: ["project"],  // Load commands from .claude/commands/
-        allowedTools,
-        permissionMode: "bypassPermissions",
-        maxTurns,
-        maxBudgetUsd: maxBudget,
-        abortController
-      }
-    })) {
-      if (message.type === "assistant" && message.message.content) {
-        for (const block of message.message.content) {
-          if (block.type === "tool_use") {
-            toolCalls.push({ name: block.name, input: block.input });
-            if (options.verbose) {
-              console.log(`Tool call: ${block.name}`);
-            }
-          } else if (block.type === "text") {
-            assistantText += block.text + "\n";
-            if (options.verbose) {
-              console.log(`Assistant: ${block.text.substring(0, 200)}...`);
-            }
-          }
-        }
-      }
-
-      if (message.type === "result") {
-        result = message;
-      }
-    }
-
-    const isSuccess = result?.subtype === "success";
-    const isMaxTurns = result?.subtype === "error_max_turns";
-    const finalText = isSuccess ? result.result : assistantText.trim();
-
-    return {
-      finalResult: finalText,
-      success: isSuccess || (isMaxTurns && assistantText.length > 0),
-      toolCalls,
-      cost: (result as any)?.total_cost_usd || 0,
-      turns: (result as any)?.num_turns || 0
-    };
+    return await withRetry(
+      () => executeQuery(prompt, testDir, commandOptions),
+      maxRetries,
+      options.verbose
+    );
   } finally {
-    // Abort any lingering processes
-    abortController.abort();
     cleanupTestDirectory(testDir);
   }
 }

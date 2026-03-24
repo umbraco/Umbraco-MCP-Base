@@ -1,26 +1,34 @@
 /**
  * HTTP Utilities
  *
- * Axios client factory and Orval helpers for Umbraco API access.
+ * Fetch-based client and Orval helpers for Umbraco API access.
  */
 
 export {
   // Singleton exports (recommended for most use cases)
-  UmbracoAxios,
-  initializeUmbracoAxios,
-  isUmbracoAxiosInitialized,
-  clearUmbracoAxiosToken,
+  initializeUmbracoFetch,
+  isUmbracoFetchInitialized,
+  clearUmbracoFetchToken,
   UmbracoManagementClient,
+  // Custom transport for specialized environments
+  setCustomTransport,
+  // Factory for advanced use cases
+  createUmbracoFetchClient,
+  // Backwards-compatible aliases
+  initializeUmbracoFetch as initializeUmbracoAxios,
+  isUmbracoFetchInitialized as isUmbracoAxiosInitialized,
+  clearUmbracoFetchToken as clearUmbracoAxiosToken,
   // Types
-  type UmbracoAxiosAuthConfig,
+  type UmbracoFetchAuthConfig,
+  type UmbracoFetchAuthConfig as UmbracoAxiosAuthConfig,
   type UmbracoManagementClientOptions,
-} from "./umbraco-axios-client.js";
+  type CustomTransport,
+  type CreateUmbracoFetchClientOptions,
+  type CreateUmbracoFetchClientOptions as CreateUmbracoAxiosClientOptions,
+  type UmbracoFetchClientResult,
+  type UmbracoFetchClientResult as UmbracoAxiosClientResult,
+} from "./umbraco-fetch-client.js";
 
-// Factory for advanced use cases
-export {
-  createUmbracoAxiosClient,
-  type CreateUmbracoAxiosClientOptions,
-  type UmbracoAxiosClientResult,
-} from "./umbraco-axios-factory.js";
+export { createUmbracoFetchClient as createUmbracoAxiosClient } from "./umbraco-fetch-client.js";
 
 export { orvalImportFixer } from "./orval-import-fixer.js";

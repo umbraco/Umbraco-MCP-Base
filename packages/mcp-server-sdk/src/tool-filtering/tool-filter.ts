@@ -21,6 +21,7 @@ export interface ToolFilterContext {
  * Checks if a tool should be included based on collection configuration.
  *
  * Filtering is applied in this order:
+ * 0. ReadOnly mode (readOnly) - only includes tools with readOnlyHint annotation
  * 1. Tool exclusions (disabledTools) - always excludes
  * 2. Tool inclusions (enabledTools) - if specified, only these tools
  * 3. Slice exclusions (disabledSlices) - excludes tools with these slices
@@ -44,10 +45,16 @@ export interface ToolFilterContext {
  * ```
  */
 export function shouldIncludeTool(
-  tool: Pick<ToolDefinition, "name" | "slices">,
+  tool: Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly">,
   context: ToolFilterContext
 ): boolean {
   const { collectionName, config } = context;
+
+  // 0. ReadOnly mode - only include tools that declare readOnlyHint
+  if (config.readOnly) {
+    const isReadOnly = tool.annotations?.readOnlyHint || tool.isReadOnly;
+    if (!isReadOnly) return false;
+  }
 
   // 1. Tool exclusions - always apply
   if (config.disabledTools.length > 0 && config.disabledTools.includes(tool.name)) {
@@ -101,7 +108,7 @@ export function shouldIncludeTool(
  * @param config - The collection configuration
  * @returns Filtered array of tools
  */
-export function filterTools<T extends Pick<ToolDefinition, "name" | "slices">>(
+export function filterTools<T extends Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly">>(
   tools: T[],
   collectionName: string,
   config: CollectionConfiguration

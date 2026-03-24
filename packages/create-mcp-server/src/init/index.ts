@@ -123,6 +123,7 @@ export async function runInit(dir?: string): Promise<void> {
       const result = await setupInstance({
         packageName,
         instanceDir: instanceLocation.path,
+        projectDir,
         connectionString,
       });
 

@@ -11,10 +11,14 @@ Core npm package providing infrastructure for building Umbraco MCP servers. Publ
 ```bash
 npm run build          # Build with tsup
 npm run compile        # Type-check only
-npm run test           # Run tests
+npm run test           # Run all tests (parallel + stdio)
+npm run test:parallel  # Unit tests (parallel Jest workers)
+npm run test:stdio     # MCP client stdio tests (sequential, --runInBand)
 npm run test:watch     # Watch mode
 npm run clean          # Remove dist/
 ```
+
+`test` runs in two phases: most tests run in parallel, then `manager.test.ts` and `proxy.test.ts` run sequentially because they spawn child processes via `npx tsx` which times out under parallel load.
 
 **Single test:** `NODE_OPTIONS='--experimental-vm-modules' npx jest src/path/__tests__/file.test.ts`
 
