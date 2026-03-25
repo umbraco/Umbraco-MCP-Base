@@ -28,13 +28,17 @@ plugins/
 │   │   └── SKILL.md       # Integration test generator
 │   ├── build-evals/
 │   │   └── SKILL.md       # Eval test generator
-│   └── discuss-mcp/
-│       ├── SKILL.md       # MCP improvement advisor
-│       ├── trace-optimization.md
-│       ├── chained-tools.md
-│       ├── behavioral-analysis.md
+│   ├── discuss-mcp/
+│   │   ├── SKILL.md       # MCP improvement advisor
+│   │   ├── trace-optimization.md
+│   │   ├── chained-tools.md
+│   │   ├── behavioral-analysis.md
+│   │   └── scripts/
+│   │       └── analyze-traces.ts
+│   └── discover-mcp-server/
+│       ├── SKILL.md       # Tool discovery for agents
 │       └── scripts/
-│           └── analyze-traces.ts
+│           └── discover-tools.ts
 ├── agents/
 │   ├── mcp-tool-creator.md
 │   ├── mcp-tool-description-writer.md
@@ -61,6 +65,7 @@ Knowledge skills loaded via slash commands:
 | build-tools-tests | `/build-tools-tests` | Generate integration tests for tool collections |
 | build-evals | `/build-evals` | Generate LLM eval tests for tool collections |
 | discuss-mcp | `/discuss-mcp` | Advisory skill for improving MCP tools (traces, chaining, coverage) |
+| discover-mcp-server | `/discover-mcp-server` | Discover and inspect tools in any SDK-based MCP server |
 
 ## Agents
 
