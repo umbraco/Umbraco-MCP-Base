@@ -12,6 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
+    "types": ["@cloudflare/workers-types"],
     "paths": {
       "@/*": ["./*"]
     }

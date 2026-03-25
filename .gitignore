@@ -4,10 +4,13 @@ build/*
 !build/azure-pipelines.yml
 coverage/
 .env
+.dev.vars
+!tests/hosted-mcp-e2e/.dev.vars
 *.log
 junit.xml
 .DS_Store
 settings.local.json
+.claude/projects/
 .worktrees/
 **/.wrangler/
 **/.dev.vars

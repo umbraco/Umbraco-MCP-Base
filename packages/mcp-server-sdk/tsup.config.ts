@@ -18,6 +18,7 @@ export default defineConfig({
   treeshake: true,
   external: [
     "@anthropic-ai/claude-agent-sdk",
+    "@modelcontextprotocol/sdk",
     "@jest/globals",
     "dotenv",
     "yargs",

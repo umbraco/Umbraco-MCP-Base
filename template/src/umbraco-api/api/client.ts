@@ -1,24 +1,23 @@
 /**
  * API Client Configuration
  *
- * This file sets up the Axios instance used by generated API code.
+ * This file sets up the HTTP client used by generated API code.
  *
  * Features:
+ * - Delegates to the SDK's UmbracoManagementClient for real API calls
  * - Mock mode for eval tests (set USE_MOCK_API=true)
- * - OAuth authentication for real API calls
  * - Full response support for API helpers (returnFullResponse option)
  *
  * For unit tests, MSW intercepts requests. See src/mocks/ for setup.
  * For eval tests, USE_MOCK_API=true uses the built-in mock store.
  */
 
-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
 import { v4 as uuid } from "uuid";
+import {
+  UmbracoManagementClient,
+  type HttpResponse,
+} from "@umbraco-cms/mcp-server-sdk";
 
-// Configuration from environment (read at runtime)
-const getBaseUrl = () => process.env.UMBRACO_BASE_URL || "http://localhost:44391";
-const getClientId = () => process.env.UMBRACO_CLIENT_ID || "";
-const getClientSecret = () => process.env.UMBRACO_CLIENT_SECRET || "";
 const isMockMode = () => process.env.USE_MOCK_API === "true";
 
 // ============================================================================
@@ -52,7 +51,16 @@ function initializeMockData() {
   }
 }
 
-function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
+interface RequestConfig {
+  method?: string;
+  url?: string;
+  data?: unknown;
+  params?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+function handleMockRequest<T>(config: RequestConfig): HttpResponse<T> {
   initializeMockData();
 
   const { method: rawMethod, url, data } = config;
@@ -61,7 +69,7 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
 
   // GET /item - List all items
   if (method === "get" && path === "/item") {
-    const params = config.params || {};
+    const params = (config.params || {}) as Record<string, string>;
     const skip = parseInt(params.skip) || 0;
     const take = parseInt(params.take) || 100;
     const items = Array.from(mockItems.values()).slice(skip, skip + take);
@@ -70,7 +78,7 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
 
   // GET /item/search - Search items
   if (method === "get" && path === "/item/search") {
-    const params = config.params || {};
+    const params = (config.params || {}) as Record<string, string>;
     const query = (params.query || "").toLowerCase();
     const skip = parseInt(params.skip) || 0;
     const take = parseInt(params.take) || 100;
@@ -93,12 +101,12 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
 
   // POST /item - Create item
   if (method === "post" && path === "/item") {
-    const body = typeof data === "string" ? JSON.parse(data) : data;
+    const body = typeof data === "string" ? JSON.parse(data) : data as any;
     const id = uuid();
     const now = new Date().toISOString();
     const newItem: MockItem = { id, name: body.name, description: body.description || null, isActive: body.isActive ?? true, createdAt: now, updatedAt: now };
     mockItems.set(id, newItem);
-    return createMockResponse(201, undefined as T, { Location: `/item/${id}` });
+    return createMockResponse(201, undefined as T, { location: `/item/${id}` });
   }
 
   // PUT /item/:id - Update item
@@ -109,7 +117,7 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
     if (!item) {
       return createMockResponse(404, { type: "https://tools.ietf.org/html/rfc7231#section-6.5.4", title: "Not Found", status: 404, detail: `Item with id '${id}' not found` } as T);
     }
-    const body = typeof data === "string" ? JSON.parse(data) : data;
+    const body = typeof data === "string" ? JSON.parse(data) : data as any;
     const updatedItem: MockItem = { ...item, name: body.name, description: body.description ?? item.description, isActive: body.isActive ?? item.isActive, updatedAt: new Date().toISOString() };
     mockItems.set(id, updatedItem);
     return createMockResponse(200, undefined as T);
@@ -129,46 +137,8 @@ function handleMockRequest<T>(config: AxiosRequestConfig): AxiosResponse<T> {
   return createMockResponse(404, { type: "https://tools.ietf.org/html/rfc7231#section-6.5.4", title: "Not Found", status: 404, detail: `Endpoint not found: ${method?.toUpperCase()} ${path}` } as T);
 }
 
-function createMockResponse<T>(status: number, data: T, headers: Record<string, string> = {}): AxiosResponse<T> {
-  return { data, status, statusText: status === 200 ? "OK" : status === 201 ? "Created" : "Error", headers, config: {} as any };
-}
-
-// ============================================================================
-// OAuth Authentication
-// ============================================================================
-
-let accessToken: string | null = null;
-let tokenExpiry: number = 0;
-
-/**
- * Gets an OAuth access token from Umbraco.
- */
-async function getAccessToken(): Promise<string> {
-  // Return cached token if still valid (with 30 second buffer)
-  if (accessToken && Date.now() < tokenExpiry - 30000) {
-    return accessToken;
-  }
-
-  const tokenUrl = `${getBaseUrl()}/umbraco/management/api/v1/security/back-office/token`;
-
-  const response = await axios.post(
-    tokenUrl,
-    new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: getClientId(),
-      client_secret: getClientSecret(),
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
-  );
-
-  accessToken = response.data.access_token;
-  tokenExpiry = Date.now() + response.data.expires_in * 1000;
-
-  return accessToken!;
+function createMockResponse<T>(status: number, data: T, headers: Record<string, string> = {}): HttpResponse<T> {
+  return { data, status, statusText: status === 200 ? "OK" : status === 201 ? "Created" : "Error", headers };
 }
 
 // ============================================================================
@@ -176,16 +146,17 @@ async function getAccessToken(): Promise<string> {
 // ============================================================================
 
 /**
- * Custom Axios instance for API calls.
+ * Custom fetch-based instance for API calls.
  * Used by Orval-generated code.
  *
  * - Unit tests: MSW intercepts requests
  * - Eval tests: USE_MOCK_API=true uses built-in mock store
+ * - Real mode: Delegates to SDK's UmbracoManagementClient
  */
 export const customInstance = async <T>(
-  config: AxiosRequestConfig,
-  options?: AxiosRequestConfig
-): Promise<AxiosResponse<T>> => {
+  config: RequestConfig,
+  options?: RequestConfig
+): Promise<HttpResponse<T> | T> => {
   const mergedConfig = { ...config, ...options };
   const returnFullResponse = (mergedConfig as any).returnFullResponse === true;
 
@@ -201,29 +172,8 @@ export const customInstance = async <T>(
     return returnFullResponse ? response : (response.data as any);
   }
 
-  // Real API mode
-  const token = await getAccessToken();
-
-  const instance = axios.create({
-    baseURL: getBaseUrl(),
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (returnFullResponse && !mergedConfig.validateStatus) {
-    mergedConfig.validateStatus = () => true;
-  }
-
-  const response = await instance.request<T>({
-    ...mergedConfig,
-  });
-
-  if (returnFullResponse) {
-    return response;
-  }
-
-  return response.data as any;
+  // Real API mode — delegate to the SDK's UmbracoManagementClient
+  return UmbracoManagementClient<T>(mergedConfig as any, mergedConfig as any);
 };
 
 export default customInstance;

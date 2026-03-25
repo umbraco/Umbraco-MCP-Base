@@ -9,6 +9,7 @@ exports[`scaffoldProject should snapshot transformed package.json 1`] = `
   },
   "description": "MCP server for My-Commerce-MCP",
   "dependencies": {
+    "@umbraco-cms/mcp-hosted": "^17.0.0",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0"
   },
   "devDependencies": {

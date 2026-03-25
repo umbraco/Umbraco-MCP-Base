@@ -1,17 +1,19 @@
 /**
  * MCP Client Manager
  *
- * Manages connections to external MCP servers for chaining.
- * Supports both internal delegation (tools calling other MCP tools)
- * and tool proxying (exposing chained tools to the parent client).
+ * Manages connections to MCP servers for chaining.
+ * Supports both stdio (child process) and in-process transports.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { McpServerConfig, McpClientOptions, FilterConfig } from "./types.js";
+import type {
+  McpServerConfig,
+  McpClientOptions,
+  FilterConfig,
+  McpConnection,
+} from "./types.js";
 
 /**
- * Manages connections to external MCP servers.
+ * Manages connections to MCP servers.
  *
  * @example
  * ```typescript
@@ -19,6 +21,7 @@ import type { McpServerConfig, McpClientOptions, FilterConfig } from "./types.js
  *   filterConfig: { slices: ["read", "list"] }
  * });
  *
+ * // Stdio transport (spawns child process)
  * manager.registerServer({
  *   name: "cms",
  *   command: "npx",
@@ -26,15 +29,20 @@ import type { McpServerConfig, McpClientOptions, FilterConfig } from "./types.js
  *   env: { UMBRACO_BASE_URL: "http://localhost:44391" }
  * });
  *
- * // Internal delegation
- * const result = await manager.callTool("cms", "get-document", { id: "..." });
+ * // In-process transport (direct handler calls)
+ * manager.registerServer({
+ *   transport: "in-process",
+ *   name: "dev",
+ *   collections: devCollections,
+ * });
  *
- * // List tools for proxying
- * const { tools } = await manager.listTools("cms");
+ * // Same API regardless of transport
+ * const result = await manager.callTool("cms", "get-document", { id: "..." });
+ * const { tools } = await manager.listTools("dev");
  * ```
  */
 export class McpClientManager {
-  private clients: Map<string, Client> = new Map();
+  private connections: Map<string, McpConnection> = new Map();
   private configs: Map<string, McpServerConfig> = new Map();
   private filterConfig: FilterConfig | undefined;
 
@@ -51,37 +59,12 @@ export class McpClientManager {
   }
 
   /**
-   * Build command arguments with filter passthrough.
-   * Appends --tools, --slices, etc. to pass filters to the chained server.
-   */
-  private buildArgs(config: McpServerConfig): string[] {
-    const args = [...(config.args || [])];
-
-    // Pass through filters to chained server
-    if (this.filterConfig?.tools?.length) {
-      args.push("--tools", this.filterConfig.tools.join(","));
-    }
-    if (this.filterConfig?.toolCollections?.length) {
-      args.push("--tool-collections", this.filterConfig.toolCollections.join(","));
-    }
-    if (this.filterConfig?.slices?.length) {
-      args.push("--slices", this.filterConfig.slices.join(","));
-    }
-    if (this.filterConfig?.modes?.length) {
-      args.push("--modes", this.filterConfig.modes.join(","));
-    }
-
-    return args;
-  }
-
-  /**
    * Connect to an MCP server.
    * Returns existing connection if already connected.
    */
-  async connect(serverName: string): Promise<Client> {
-    // Return existing connection
-    if (this.clients.has(serverName)) {
-      return this.clients.get(serverName)!;
+  async connect(serverName: string): Promise<McpConnection> {
+    if (this.connections.has(serverName)) {
+      return this.connections.get(serverName)!;
     }
 
     const config = this.configs.get(serverName);
@@ -89,49 +72,42 @@ export class McpClientManager {
       throw new Error(`Unknown MCP server: ${serverName}`);
     }
 
-    const client = new Client(
-      { name: "mcp-client", version: "1.0.0" },
-      { capabilities: {} }
-    );
+    let connection: McpConnection;
 
-    const transport = new StdioClientTransport({
-      command: config.command,
-      args: this.buildArgs(config),
-      env: { ...process.env, ...config.env } as Record<string, string>,
-    });
+    if (config.transport === "in-process") {
+      const { InProcessConnection } = await import("./in-process-connection.js");
+      connection = new InProcessConnection(config, this.filterConfig);
+    } else {
+      const { StdioConnection } = await import("./stdio-connection.js");
+      const stdioConn = new StdioConnection(config, this.filterConfig);
+      await stdioConn.connect();
+      connection = stdioConn;
+    }
 
-    await client.connect(transport);
-    this.clients.set(serverName, client);
-    return client;
+    this.connections.set(serverName, connection);
+    return connection;
   }
 
   /**
    * Call a tool on a chained MCP server.
-   * Used for internal delegation from local tools.
    *
    * @returns Tool result with optional structuredContent (when tool has outputSchema)
    */
   async callTool(
     serverName: string,
     toolName: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
   ): Promise<{
     content: Array<{ type: string; text?: string }>;
     structuredContent?: unknown;
     isError?: boolean;
   }> {
-    const client = await this.connect(serverName);
-    const result = await client.callTool({ name: toolName, arguments: args });
-    return result as {
-      content: Array<{ type: string; text?: string }>;
-      structuredContent?: unknown;
-      isError?: boolean;
-    };
+    const connection = await this.connect(serverName);
+    return connection.callTool(toolName, args);
   }
 
   /**
    * List tools available on a chained MCP server.
-   * Used for tool discovery and proxying.
    */
   async listTools(serverName: string): Promise<{
     tools: Array<{
@@ -140,20 +116,12 @@ export class McpClientManager {
       inputSchema?: Record<string, unknown>;
     }>;
   }> {
-    const client = await this.connect(serverName);
-    const result = await client.listTools();
-    return result as {
-      tools: Array<{
-        name: string;
-        description?: string;
-        inputSchema?: Record<string, unknown>;
-      }>;
-    };
+    const connection = await this.connect(serverName);
+    return connection.listTools();
   }
 
   /**
    * Get all registered server configurations.
-   * Used by the proxy module to discover which servers to proxy.
    */
   getConfigs(): Map<string, McpServerConfig> {
     return this.configs;
@@ -170,17 +138,17 @@ export class McpClientManager {
    * Check if connected to a server.
    */
   isConnected(serverName: string): boolean {
-    return this.clients.has(serverName);
+    return this.connections.has(serverName);
   }
 
   /**
    * Disconnect from a specific server.
    */
   async disconnect(serverName: string): Promise<void> {
-    const client = this.clients.get(serverName);
-    if (client) {
-      await client.close();
-      this.clients.delete(serverName);
+    const connection = this.connections.get(serverName);
+    if (connection) {
+      await connection.close();
+      this.connections.delete(serverName);
     }
   }
 
@@ -190,7 +158,7 @@ export class McpClientManager {
    */
   async disconnectAll(): Promise<void> {
     const disconnectPromises: Promise<void>[] = [];
-    for (const [name] of this.clients) {
+    for (const [name] of this.connections) {
       disconnectPromises.push(this.disconnect(name));
     }
     await Promise.all(disconnectPromises);
@@ -203,6 +171,8 @@ export class McpClientManager {
  * @param options - Configuration options including filter passthrough
  * @returns A new McpClientManager instance
  */
-export function createMcpClientManager(options?: McpClientOptions): McpClientManager {
+export function createMcpClientManager(
+  options?: McpClientOptions,
+): McpClientManager {
   return new McpClientManager(options);
 }

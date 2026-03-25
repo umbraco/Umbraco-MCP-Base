@@ -22,8 +22,8 @@
  * - Complex request building
  *
  * ## CRITICAL: Always pass CAPTURE_RAW_HTTP_RESPONSE
- * Without it, Axios throws on 400+ errors instead of returning them.
- * The helpers expect AxiosResponse, not direct data/void.
+ * Without it, the client may throw on 400+ errors instead of returning them.
+ * The helpers expect HttpResponse, not direct data/void.
  *
  * ## Configuration
  * Before using the helpers, configure the API client provider:
@@ -33,11 +33,25 @@
  * ```
  */
 
-import { AxiosResponse } from "axios";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
 import { pickFields, omitFields } from "./response-trimmer.js";
+
+/**
+ * Transport-agnostic HTTP response interface.
+ * Compatible with AxiosResponse, native fetch Response wrappers,
+ * and any other HTTP client that provides status, statusText, and data.
+ *
+ * Use this type when building transport-independent code (e.g., hosted MCP
+ * servers using fetch instead of Axios).
+ */
+export interface HttpResponse<T = unknown> {
+  status: number;
+  statusText: string;
+  data: T;
+  headers?: Record<string, string>;
+}
 
 /**
  * Custom error class for API errors.
@@ -91,22 +105,22 @@ export function getApiClient<TClient>(): TClient {
 }
 
 /**
- * Function signature for API calls that return an AxiosResponse.
+ * Function signature for API calls that return an HttpResponse.
  * Use with CAPTURE_RAW_HTTP_RESPONSE to get the full response object.
  */
-export type ApiCallFn<T = unknown, TClient = any> = (client: TClient) => Promise<AxiosResponse<T>>;
+export type ApiCallFn<T = unknown, TClient = any> = (client: TClient) => Promise<HttpResponse<T>>;
 
 /**
- * Options that configure Axios to return the raw HTTP response object instead of just the data.
+ * Options that configure the HTTP client to return the raw response object instead of just the data.
  *
  * ## What This Does
- * - `returnFullResponse: true` - Makes Axios return `AxiosResponse` instead of `response.data`
- * - `validateStatus: () => true` - Prevents Axios from throwing on 400/500 status codes
+ * - `returnFullResponse: true` - Returns `HttpResponse` instead of `response.data`
+ * - `validateStatus: () => true` - Prevents throwing on 400/500 status codes
  *
  * ## Why This Is Required
  * The helper functions (`executeVoidApiCall`, `executeGetApiCall`) need the full response
  * to check status codes and extract ProblemDetails on errors. Without these options:
- * - Axios throws on 400+ errors (breaking our status code handling)
+ * - The client may throw on 400+ errors (breaking our status code handling)
  * - We only get the response body, not the status code
  *
  * ## IMPORTANT
@@ -115,7 +129,7 @@ export type ApiCallFn<T = unknown, TClient = any> = (client: TClient) => Promise
  *
  * @example
  * ```typescript
- * // Correct - helpers receive AxiosResponse with status code
+ * // Correct - helpers receive HttpResponse with status code
  * client.deleteDataTypeById(id, CAPTURE_RAW_HTTP_RESPONSE)
  *
  * // WRONG - helpers receive undefined/void, status checking fails
@@ -148,13 +162,13 @@ export interface ApiCallOptions<T = unknown> {
 }
 
 /**
- * Validates the API response and returns it as an AxiosResponse.
- * Logs warnings if the response doesn't look like an AxiosResponse.
+ * Validates the API response and returns it as an HttpResponse.
+ * Logs warnings if the response doesn't look like an HttpResponse.
  * @internal
  */
 function validateApiResponse<T>(
   result: unknown
-): { valid: true; response: AxiosResponse<T | ProblemDetails> } | { valid: false; fallback: T | undefined } {
+): { valid: true; response: HttpResponse<T | ProblemDetails> } | { valid: false; fallback: T | undefined } {
   if (result === undefined || result === null) {
     console.warn(
       '[MCP Tool Warning] API call returned undefined/null. ' +
@@ -165,14 +179,14 @@ function validateApiResponse<T>(
 
   if (typeof result !== 'object' || !('status' in result)) {
     console.warn(
-      '[MCP Tool Warning] API call did not return an AxiosResponse. ' +
+      '[MCP Tool Warning] API call did not return an HttpResponse. ' +
       `Expected { status, data, ... } but got: ${typeof result}. ` +
       'Did you forget to pass CAPTURE_RAW_HTTP_RESPONSE to the API method?'
     );
     return { valid: false, fallback: result as T };
   }
 
-  return { valid: true, response: result as AxiosResponse<T | ProblemDetails> };
+  return { valid: true, response: result as HttpResponse<T | ProblemDetails> };
 }
 
 /**
@@ -191,7 +205,7 @@ function isSuccessStatus(status: number, acceptedStatusCodes?: number[]): boolea
  * @internal
  */
 async function executeApiCallInternal<T = unknown, TClient = any>(
-  apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>,
+  apiCall: (client: TClient) => Promise<HttpResponse<T | ProblemDetails> | unknown>,
   options?: ApiCallOptions<T>
 ): Promise<CallToolResult> {
   const client = getApiClient<TClient>();
@@ -260,12 +274,12 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
  * This is an internal helper used by `executeVoidApiCall`. You typically don't
  * call this directly unless building custom handlers.
  *
- * @param response - The AxiosResponse from the API call (requires CAPTURE_RAW_HTTP_RESPONSE)
+ * @param response - The HttpResponse from the API call (requires CAPTURE_RAW_HTTP_RESPONSE)
  * @returns Tool result with success (empty)
  * @throws UmbracoApiError on non-2xx status codes
  */
 export function processVoidResponse(
-  response: AxiosResponse<ProblemDetails | void>
+  response: HttpResponse<ProblemDetails | void>
 ): CallToolResult {
   // Success status codes (200-299)
   if (response.status >= 200 && response.status < 300) {
@@ -304,7 +318,7 @@ export function processVoidResponse(
  * ```
  */
 export function executeVoidApiCall<TClient = any>(
-  apiCall: (client: TClient) => Promise<AxiosResponse<ProblemDetails | void> | unknown>
+  apiCall: (client: TClient) => Promise<HttpResponse<ProblemDetails | void> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<void, TClient>(apiCall, { void: true });
 }
@@ -335,7 +349,7 @@ export function executeVoidApiCall<TClient = any>(
  * ```
  */
 export function executeGetApiCall<T = unknown, TClient = any>(
-  apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>
+  apiCall: (client: TClient) => Promise<HttpResponse<T | ProblemDetails> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<T, TClient>(apiCall);
 }
@@ -381,7 +395,7 @@ export type VoidApiCallOptions = Omit<ApiCallOptions, 'void' | 'transformData'>;
  * ```
  */
 export function executeVoidApiCallWithOptions<TClient = any>(
-  apiCall: (client: TClient) => Promise<AxiosResponse<ProblemDetails | void> | unknown>,
+  apiCall: (client: TClient) => Promise<HttpResponse<ProblemDetails | void> | unknown>,
   options?: VoidApiCallOptions
 ): Promise<CallToolResult> {
   return executeApiCallInternal<void, TClient>(apiCall, { ...options, void: true });
@@ -426,7 +440,7 @@ export function executeVoidApiCallWithOptions<TClient = any>(
  * ```
  */
 export function executeGetItemsApiCall<T = unknown, TClient = any>(
-  apiCall: (client: TClient) => Promise<AxiosResponse<T | ProblemDetails> | unknown>
+  apiCall: (client: TClient) => Promise<HttpResponse<T | ProblemDetails> | unknown>
 ): Promise<CallToolResult> {
   return executeApiCallInternal<T, TClient>(apiCall, {
     transformData: (data) => ({ items: data })

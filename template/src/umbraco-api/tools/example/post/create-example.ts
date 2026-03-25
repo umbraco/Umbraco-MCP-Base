@@ -22,6 +22,7 @@ import {
   getApiClient,
   ToolDefinition,
   ToolValidationError,
+  type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
 import type { getExampleUmbracoAddOnAPI } from "../../../api/generated/exampleApi.js";
 import { z } from "zod";
@@ -72,7 +73,7 @@ const createExampleTool: ToolDefinition<typeof inputSchema, typeof outputSchema>
     const response = await client.createItem(
       { name, description, isActive },
       CAPTURE_RAW_HTTP_RESPONSE
-    );
+    ) as HttpResponse;
 
     // Check for success (201 Created)
     if (response.status !== 201) {

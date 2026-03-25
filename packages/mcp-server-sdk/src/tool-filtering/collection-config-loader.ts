@@ -28,6 +28,8 @@ export interface ServerConfigForCollections {
   includeTools?: string[];
   /** Individual tools to exclude */
   excludeTools?: string[];
+  /** When true, only include tools with readOnlyHint annotation */
+  readOnly?: boolean;
 }
 
 /**
@@ -67,7 +69,9 @@ export function createCollectionConfigLoader(options: CollectionConfigLoaderOpti
       let enabledCollections = config.includeToolCollections ?? [];
 
       // Expand modes to collections and merge
+      let modesWereSpecified = false;
       if (config.toolModes && config.toolModes.length > 0) {
+        modesWereSpecified = true;
         // Validate mode names and warn about invalid ones
         const { validModes, invalidModes } = validateModeNames(config.toolModes, allModeNames);
 
@@ -83,6 +87,8 @@ export function createCollectionConfigLoader(options: CollectionConfigLoaderOpti
           const allEnabled = new Set([...enabledCollections, ...collectionsFromModes]);
           enabledCollections = Array.from(allEnabled);
         }
+        // If modes were specified but none were valid and no direct includes exist,
+        // enabledCollections stays empty — this is intentional (block all collections)
       }
 
       // Handle slice configuration
@@ -106,12 +112,17 @@ export function createCollectionConfigLoader(options: CollectionConfigLoaderOpti
       }
 
       return {
-        enabledCollections: enabledCollections.length > 0 ? enabledCollections : DEFAULT_COLLECTION_CONFIG.enabledCollections,
+        enabledCollections: enabledCollections.length > 0
+          ? enabledCollections
+          : modesWereSpecified
+            ? ["__none__"]  // Modes specified but none valid — block all collections
+            : DEFAULT_COLLECTION_CONFIG.enabledCollections,
         disabledCollections: config.excludeToolCollections ?? DEFAULT_COLLECTION_CONFIG.disabledCollections,
         enabledSlices,
         disabledSlices,
         enabledTools: config.includeTools ?? DEFAULT_COLLECTION_CONFIG.enabledTools,
         disabledTools: config.excludeTools ?? DEFAULT_COLLECTION_CONFIG.disabledTools,
+        readOnly: config.readOnly ?? false,
       };
     }
   };

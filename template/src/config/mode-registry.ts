@@ -37,10 +37,10 @@ export const toolModes: ToolModeDefinition[] = [
     collections: ['example-2']
   },
   {
-    name: 'all-examples',
-    displayName: 'All Example Tools',
-    description: 'Both example collections combined',
-    collections: ['example', 'example-2']
+    name: 'umbraco-server',
+    displayName: 'Umbraco Server',
+    description: 'Server information and status from the Umbraco Management API',
+    collections: ['umbraco-server']
   },
   // Add your modes here as you build out your MCP server
   // {

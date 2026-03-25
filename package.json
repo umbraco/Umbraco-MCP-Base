@@ -1,6 +1,6 @@
 {
   "name": "umbraco-mcp-server-sdk-monorepo",
-  "version": "17.0.0-beta.4",
+  "version": "17.0.0-beta.5",
   "private": true,
   "description": "Umbraco MCP Server SDK monorepo",
   "workspaces": [
@@ -11,10 +11,15 @@
   "scripts": {
     "build": "npm run build -w packages/mcp-server-sdk",
     "build:create": "npm run build -w packages/create-mcp-server",
-    "build:all": "npm run build && npm run build:create",
+    "build:hosted": "npm run build -w packages/hosted-mcp",
+    "build:all": "npm run build && npm run build:hosted && npm run build:create",
     "clean": "npm run clean -w packages/mcp-server-sdk",
     "compile": "npm run compile -w packages/mcp-server-sdk",
-    "test": "npm run test -w packages/mcp-server-sdk"
+    "test": "npm run test -w packages/mcp-server-sdk",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
+    "test:integration:chained": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-chained-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
+    "test:e2e": "npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts",
+    "test:e2e:chained": "npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts"
   },
   "engines": {
     "node": ">=22.0.0"

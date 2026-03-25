@@ -19,10 +19,10 @@ const templateSrc = path.resolve(monorepoRoot, "template");
 const templateDest = path.resolve(packageRoot, "dist/template");
 
 // Directories to always exclude when copying
-const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".git"]);
+const EXCLUDED_DIRS = new Set(["node_modules", "dist", "test-results", ".git", ".wrangler"]);
 
 // Files to always exclude
-const EXCLUDED_FILES = new Set([".env", ".env.local"]);
+const EXCLUDED_FILES = new Set([".env", ".env.local", ".dev.vars"]);
 
 /**
  * Copy a directory recursively, excluding certain paths.

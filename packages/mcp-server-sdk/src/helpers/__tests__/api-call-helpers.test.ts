@@ -13,8 +13,8 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
-import type { AxiosResponse } from "axios";
 import type { ProblemDetails } from "../problem-details.js";
+import type { HttpResponse } from "../api-call-helpers.js";
 
 // Store original console.warn
 const originalConsoleWarn = console.warn;
@@ -25,61 +25,59 @@ async function getApiHelpersModule() {
   return await import("../api-call-helpers.js");
 }
 
-// Helper to create mock AxiosResponse
-function createMockAxiosResponse<T>(
+// Helper to create mock HttpResponse
+function createMockHttpResponse<T>(
   status: number,
   data: T,
   statusText: string = "OK"
-): AxiosResponse<T> {
+): HttpResponse<T> {
   return {
     status,
     statusText,
     data,
-    headers: {},
-    config: {} as any,
   };
 }
 
 // Mock client for testing
 class MockApiClient {
-  async successVoid(): Promise<AxiosResponse<void>> {
-    return createMockAxiosResponse(200, undefined as void, "OK");
+  async successVoid(): Promise<HttpResponse<void>> {
+    return createMockHttpResponse(200, undefined as void, "OK");
   }
 
-  async successData<T>(data: T): Promise<AxiosResponse<T>> {
-    return createMockAxiosResponse(200, data, "OK");
+  async successData<T>(data: T): Promise<HttpResponse<T>> {
+    return createMockHttpResponse(200, data, "OK");
   }
 
-  async notFound(): Promise<AxiosResponse<ProblemDetails>> {
-    return createMockAxiosResponse(404, {
+  async notFound(): Promise<HttpResponse<ProblemDetails>> {
+    return createMockHttpResponse(404, {
       status: 404,
       title: "Not Found",
       detail: "The requested resource was not found"
     }, "Not Found");
   }
 
-  async badRequest(detail: string): Promise<AxiosResponse<ProblemDetails>> {
-    return createMockAxiosResponse(400, {
+  async badRequest(detail: string): Promise<HttpResponse<ProblemDetails>> {
+    return createMockHttpResponse(400, {
       status: 400,
       title: "Bad Request",
       detail
     }, "Bad Request");
   }
 
-  async serverError(): Promise<AxiosResponse<ProblemDetails>> {
-    return createMockAxiosResponse(500, {
+  async serverError(): Promise<HttpResponse<ProblemDetails>> {
+    return createMockHttpResponse(500, {
       status: 500,
       title: "Internal Server Error",
       detail: "Something went wrong"
     }, "Internal Server Error");
   }
 
-  async accepted(): Promise<AxiosResponse<void>> {
-    return createMockAxiosResponse(202, undefined as void, "Accepted");
+  async accepted(): Promise<HttpResponse<void>> {
+    return createMockHttpResponse(202, undefined as void, "Accepted");
   }
 
-  async noContent(): Promise<AxiosResponse<void>> {
-    return createMockAxiosResponse(204, undefined as void, "No Content");
+  async noContent(): Promise<HttpResponse<void>> {
+    return createMockHttpResponse(204, undefined as void, "No Content");
   }
 
   // Methods that simulate forgetting CAPTURE_RAW_HTTP_RESPONSE
@@ -215,7 +213,7 @@ describe("API Call Helpers", () => {
     it("should return success result for 200 status", async () => {
       const { processVoidResponse } = await getApiHelpersModule();
 
-      const response = createMockAxiosResponse(200, undefined as void);
+      const response = createMockHttpResponse(200, undefined as void);
       const result = processVoidResponse(response);
 
       expect(result).toBeDefined();
@@ -225,7 +223,7 @@ describe("API Call Helpers", () => {
     it("should return success result for 204 No Content", async () => {
       const { processVoidResponse } = await getApiHelpersModule();
 
-      const response = createMockAxiosResponse(204, undefined as void);
+      const response = createMockHttpResponse(204, undefined as void);
       const result = processVoidResponse(response);
 
       expect(result).toBeDefined();
@@ -239,7 +237,7 @@ describe("API Call Helpers", () => {
         status: 400,
         detail: "Validation failed"
       };
-      const response = createMockAxiosResponse(400, problemDetails);
+      const response = createMockHttpResponse(400, problemDetails);
 
       expect(() => processVoidResponse(response)).toThrow(UmbracoApiError);
     });
@@ -251,7 +249,7 @@ describe("API Call Helpers", () => {
         status: 404,
         detail: "Not found"
       };
-      const response = createMockAxiosResponse(404, problemDetails);
+      const response = createMockHttpResponse(404, problemDetails);
 
       expect(() => processVoidResponse(response)).toThrow(UmbracoApiError);
     });
@@ -263,7 +261,7 @@ describe("API Call Helpers", () => {
         status: 500,
         detail: "Server error"
       };
-      const response = createMockAxiosResponse(500, problemDetails);
+      const response = createMockHttpResponse(500, problemDetails);
 
       expect(() => processVoidResponse(response)).toThrow(UmbracoApiError);
     });
@@ -271,7 +269,7 @@ describe("API Call Helpers", () => {
     it("should use statusText when response data is empty", async () => {
       const { processVoidResponse, UmbracoApiError } = await getApiHelpersModule();
 
-      const response = createMockAxiosResponse(404, null as any, "Not Found");
+      const response = createMockHttpResponse(404, null as any, "Not Found");
 
       try {
         processVoidResponse(response);
@@ -620,7 +618,7 @@ describe("API Call Helpers", () => {
       );
 
       expect(consoleWarnings.some(w =>
-        w.includes("AxiosResponse")
+        w.includes("HttpResponse")
       )).toBe(true);
     });
 
@@ -643,7 +641,7 @@ describe("API Call Helpers", () => {
       const { configureApiClient, executeGetApiCall } = await getApiHelpersModule();
 
       const mockClient = {
-        status200: async () => createMockAxiosResponse(200, { ok: true })
+        status200: async () => createMockHttpResponse(200, { ok: true })
       };
       configureApiClient(() => mockClient);
 
@@ -655,7 +653,7 @@ describe("API Call Helpers", () => {
       const { configureApiClient, executeGetApiCall } = await getApiHelpersModule();
 
       const mockClient = {
-        status201: async () => createMockAxiosResponse(201, { created: true })
+        status201: async () => createMockHttpResponse(201, { created: true })
       };
       configureApiClient(() => mockClient);
 
@@ -667,7 +665,7 @@ describe("API Call Helpers", () => {
       const { configureApiClient, executeGetApiCall } = await getApiHelpersModule();
 
       const mockClient = {
-        status299: async () => createMockAxiosResponse(299, { edge: true })
+        status299: async () => createMockHttpResponse(299, { edge: true })
       };
       configureApiClient(() => mockClient);
 
@@ -679,7 +677,7 @@ describe("API Call Helpers", () => {
       const { configureApiClient, executeGetApiCall, UmbracoApiError } = await getApiHelpersModule();
 
       const mockClient = {
-        status300: async () => createMockAxiosResponse(300, { status: 300 })
+        status300: async () => createMockHttpResponse(300, { status: 300 })
       };
       configureApiClient(() => mockClient);
 
@@ -692,7 +690,7 @@ describe("API Call Helpers", () => {
       const { configureApiClient, executeGetApiCall, UmbracoApiError } = await getApiHelpersModule();
 
       const mockClient = {
-        status199: async () => createMockAxiosResponse(199, { status: 199 })
+        status199: async () => createMockHttpResponse(199, { status: 199 })
       };
       configureApiClient(() => mockClient);
 

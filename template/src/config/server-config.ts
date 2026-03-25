@@ -118,12 +118,12 @@ let cachedConfig: ServerConfig | null = null;
  * }
  * ```
  */
-export function loadServerConfig(isStdioMode: boolean): ServerConfig {
+export async function loadServerConfig(isStdioMode: boolean): Promise<ServerConfig> {
   if (cachedConfig) {
     return cachedConfig;
   }
 
-  const { config, custom, cliFlags } = getServerConfig(isStdioMode, {
+  const { config, custom, cliFlags } = await getServerConfig(isStdioMode, {
     additionalFields: customFields,
   });
 

@@ -55,6 +55,10 @@ npm run inspect
 │   │       ├── post/
 │   │       └── index.ts
 │   └── index.ts                # Server entry point
+├── scripts/
+│   └── tunnels.sh              # Cloudflare tunnels for remote MCP client testing
+├── umbraco/
+│   └── McpOAuthComposer.cs     # OAuth client registration (copy into your Umbraco project)
 ├── __tests__/
 │   └── example/                # Example tests
 ├── package.json
