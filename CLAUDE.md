@@ -11,7 +11,9 @@ Monorepo for the Umbraco MCP (Model Context Protocol) Server SDK - infrastructur
 | Workspace | Description | Published |
 |-----------|-------------|-----------|
 | `packages/mcp-server-sdk/` | Core npm package `@umbraco-cms/mcp-server-sdk` | Yes |
-| `template/` | Starter kit for new MCP server projects | No |
+| `packages/hosted-mcp/` | Hosted MCP on Cloudflare Workers `@umbraco-cms/mcp-hosted` | Yes |
+| `packages/create-mcp-server/` | CLI scaffolding tool `@umbraco-cms/create-umbraco-mcp-server` | Yes |
+| `template/` | Starter kit for new MCP server projects (copied by create-mcp-server) | No |
 | `plugins/` | Claude Code plugins for Umbraco development | No |
 
 Each workspace has its own CLAUDE.md with detailed guidance.
@@ -76,6 +78,35 @@ The local Umbraco instance uses HTTPS with self-signed certs. TLS rejection must
 - Environment variable: `NODE_TLS_REJECT_UNAUTHORIZED=0`
 - Jest setup file: `https.globalAgent.options.rejectUnauthorized = false` (env var alone is insufficient in Jest VM context)
 - Playwright config: `ignoreHTTPSErrors: true`
+
+## Releases
+
+All packages are versioned together and published from the `main` branch via Azure Pipelines.
+
+### Release process
+
+1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.5`)
+2. Bump the version in **all** package.json files and `marketplace.json`:
+   - `package.json` (root)
+   - `packages/mcp-server-sdk/package.json`
+   - `packages/hosted-mcp/package.json`
+   - `packages/create-mcp-server/package.json`
+   - `template/package.json`
+   - `plugins/package.json`
+   - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+3. Run `npm install --package-lock-only` to update `package-lock.json`
+4. Commit, push, and create a PR from the release branch into `main`
+5. The CI pipeline publishes packages when the PR is merged to `main`
+6. Manually create a GitHub Release tagged `v<version>` from the merge commit
+
+### Version scheme
+
+- Prerelease: `17.0.0-beta.N` (published with `--tag beta` dist-tag)
+- Stable: `17.0.0` (published with `--tag latest` dist-tag)
+
+### Template `file:` references
+
+The template's `package.json` uses `file:` references to `mcp-server-sdk` and `mcp-hosted` for monorepo development. The `create-mcp-server` scaffold tool (`src/scaffold.ts`) rewrites these to published npm versions when users create new projects.
 
 ## Requirements
 

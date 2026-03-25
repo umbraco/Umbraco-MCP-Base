@@ -24,6 +24,16 @@ const config: JestConfigWithTsJest = {
   testMatch: ["**/__tests__/**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/", "/dist/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
+  reporters: [
+    "default",
+    [
+      "jest-junit",
+      {
+        outputDirectory: ".",
+        outputName: "junit.xml",
+      },
+    ],
+  ],
 };
 
 export default config;
