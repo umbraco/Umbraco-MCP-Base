@@ -42,9 +42,7 @@ const getServerInfoTool: ToolDefinition = {
       CAPTURE_RAW_HTTP_RESPONSE,
     ) as unknown as HttpResponse<ServerInfo>;
 
-    return createToolResult(response.data, true, [
-      { type: "text", text: JSON.stringify(response.data, null, 2) },
-    ]);
+    return createToolResult(response.data);
   },
 };
 
