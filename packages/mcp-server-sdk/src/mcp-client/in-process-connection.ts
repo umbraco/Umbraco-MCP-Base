@@ -155,7 +155,7 @@ export class InProcessConnection implements McpConnection {
         includeSlices: this.filterConfig?.slices,
         excludeSlices: this.filterConfig?.excludeSlices,
         toolModes: this.filterConfig?.modes,
-        readOnly: this.filterConfig?.readOnly,
+        readonly: this.filterConfig?.readOnly,
       });
     }
 

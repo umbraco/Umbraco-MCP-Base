@@ -364,14 +364,19 @@ export async function getServerConfig(
     custom[field.name] = result.value;
   }
 
-  // Validate required fields (both base and additional)
-  for (const field of allFields.filter(f => f.required)) {
-    const result = resolvedValues[field.name];
-    if (!result?.value) {
-      console.error(
-        `${field.envVar} is required (via CLI argument --${field.cliFlag} or .env file)`
-      );
-      process.exit(1);
+  // Check if an introspection-only CLI flag is set (no server needed)
+  const isIntrospectionOnly = !!(argv["list-tools"]) || !!(argv["describe-tool"]) || !!(argv["generate-context"]);
+
+  // Validate required fields (both base and additional) — skip for introspection commands
+  if (!isIntrospectionOnly) {
+    for (const field of allFields.filter(f => f.required)) {
+      const result = resolvedValues[field.name];
+      if (!result?.value) {
+        console.error(
+          `${field.envVar} is required (via CLI argument --${field.cliFlag} or .env file)`
+        );
+        process.exit(1);
+      }
     }
   }
 

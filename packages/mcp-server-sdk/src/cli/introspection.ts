@@ -6,7 +6,7 @@
  * for command-line use (--list-tools, --describe-tool).
  */
 
-import { ZodRawShape, ZodType, ZodObject, ZodString, ZodNumber, ZodBoolean, ZodOptional, ZodDefault, ZodEnum, ZodArray } from "zod";
+import { ZodRawShape, ZodType, ZodObject, ZodString, ZodNumber, ZodBoolean, ZodOptional, ZodDefault, ZodEnum, ZodArray, ZodUUID, ZodNullable, ZodLiteral } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 
 /**
@@ -53,13 +53,16 @@ function zodFieldToJsonSchema(field: ZodType): { schema: Record<string, unknown>
   let isRequired = true;
   let current: ZodType = field;
 
-  // Unwrap optional/default wrappers
+  // Unwrap optional/default/nullable wrappers
   if (current instanceof ZodOptional) {
     isRequired = false;
     current = (current as any)._def.innerType;
   }
   if (current instanceof ZodDefault) {
     isRequired = false;
+    current = (current as any)._def.innerType;
+  }
+  if (current instanceof ZodNullable) {
     current = (current as any)._def.innerType;
   }
 
@@ -69,12 +72,17 @@ function zodFieldToJsonSchema(field: ZodType): { schema: Record<string, unknown>
 
   if (current instanceof ZodString) {
     schema = { type: "string" };
+  } else if (current instanceof ZodUUID) {
+    schema = { type: "string", format: "uuid" };
   } else if (current instanceof ZodNumber) {
     schema = { type: "number" };
   } else if (current instanceof ZodBoolean) {
     schema = { type: "boolean" };
   } else if (current instanceof ZodEnum) {
     schema = { type: "string", enum: (current as any)._def.values };
+  } else if (current instanceof ZodLiteral) {
+    const value = (current as any)._def.value;
+    schema = { type: typeof value, const: value };
   } else if (current instanceof ZodArray) {
     const itemSchema = zodFieldToJsonSchema((current as any)._def.type);
     schema = { type: "array", items: itemSchema.schema };
