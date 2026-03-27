@@ -15,6 +15,7 @@
     "copy-template": "node scripts/copy-template.js",
     "compile": "tsc --noEmit",
     "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand",
+    "test:e2e": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/e2e/jest.config.ts --runInBand --forceExit",
     "prepublishOnly": "npm run build"
   },
   "engines": {
@@ -46,9 +47,11 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^22.14.1",
     "@types/prompts": "^2.4.9",
+    "@types/tedious": "^4.0.14",
     "jest": "^29.7.0",
     "jest-junit": "^16.0.0",
     "rimraf": "^6.0.1",
+    "tedious": "^19.2.1",
     "ts-jest": "^29.3.2",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3"

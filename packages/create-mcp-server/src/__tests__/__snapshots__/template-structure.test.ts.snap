@@ -6,6 +6,7 @@ exports[`template structure should match the expected file listing 1`] = `
   ".dev.vars.example",
   ".discover.json",
   ".env.example",
+  ".gitignore",
   "CLAUDE.md",
   "README.md",
   "demo-site/.gitkeep",
