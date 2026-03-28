@@ -556,6 +556,85 @@ describeOrSkip("CLI full E2E", () => {
     console.log("[E2E] Step 10 passed: unit tests pass");
   }, 180_000);
 
+  // ── Step 10b: Integration test against real Umbraco ─────────────────────
+  test("Step 10b: integration test works against real Umbraco (no MSW)", () => {
+    // Write a simple integration test that calls the real Umbraco API.
+    // This verifies:
+    // 1. MSW doesn't intercept (USE_MOCK_API is not set)
+    // 2. Self-signed cert handling works (undici override in jest.setup.ts)
+    // 3. setupTestEnvironment() + real fetch works end-to-end
+    const testDir = path.join(projectDir, "src/__tests__");
+    fs.mkdirSync(testDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(testDir, "real-api.test.ts"),
+      `import { setupTestEnvironment } from "@umbraco-cms/mcp-server-sdk/testing";
+
+describe("real API integration", () => {
+  setupTestEnvironment();
+
+  it("should fetch server info from real Umbraco", async () => {
+    const baseUrl = process.env.UMBRACO_BASE_URL;
+    expect(baseUrl).toBeDefined();
+
+    // Get a token via client_credentials
+    const tokenResp = await fetch(
+      \`\${baseUrl}/umbraco/management/api/v1/security/back-office/token\`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: process.env.UMBRACO_CLIENT_ID!,
+          client_secret: process.env.UMBRACO_CLIENT_SECRET!,
+        }),
+      },
+    );
+    expect(tokenResp.ok).toBe(true);
+    const { access_token } = await tokenResp.json() as { access_token: string };
+
+    // Call the server info endpoint
+    const infoResp = await fetch(
+      \`\${baseUrl}/umbraco/management/api/v1/server/information\`,
+      { headers: { Authorization: \`Bearer \${access_token}\` } },
+    );
+    expect(infoResp.ok).toBe(true);
+    const info = await infoResp.json() as { version: string };
+    expect(info.version).toBeDefined();
+  });
+});
+`,
+    );
+
+    console.log("[E2E] Running integration test against real Umbraco...");
+    try {
+      execFileSync(
+        "node",
+        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPattern=src/__tests__/real-api", "--runInBand"],
+        {
+          cwd: projectDir,
+          encoding: "utf-8",
+          timeout: 30_000,
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            UMBRACO_BASE_URL: baseUrl,
+            UMBRACO_CLIENT_ID: "umbraco-back-office-mcp",
+            UMBRACO_CLIENT_SECRET: "1234567890",
+            NODE_TLS_REJECT_UNAUTHORIZED: "0",
+          },
+        },
+      );
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string };
+      if (e.stdout) console.log("[test stdout]", e.stdout.slice(-3000));
+      if (e.stderr) console.log("[test stderr]", e.stderr.slice(-3000));
+      throw err;
+    }
+
+    console.log("[E2E] Step 10b passed: integration test works against real Umbraco");
+  }, 60_000);
+
   // ── Step 11: Real API call with generated client against running Umbraco ─
   test("Step 11: real Management API call succeeds", async () => {
     // Call the server information endpoint — this proves:
