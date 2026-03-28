@@ -555,4 +555,50 @@ describeOrSkip("CLI full E2E", () => {
 
     console.log("[E2E] Step 10 passed: unit tests pass");
   }, 180_000);
+
+  // ── Step 11: Real API call with generated client against running Umbraco ─
+  test("Step 11: real Management API call succeeds", async () => {
+    // Call the server information endpoint — this proves:
+    // 1. The Umbraco instance is running and accessible
+    // 2. The API user token works for Management API calls
+    // 3. The API returns valid data
+    const serverInfoUrl = `${baseUrl}/umbraco/management/api/v1/server/information`;
+
+    const response = await fetch(serverInfoUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    expect(response.ok).toBe(true);
+
+    const info = (await response.json()) as {
+      version?: string;
+      assemblyVersion?: string;
+    };
+
+    expect(info.version).toBeDefined();
+    expect(typeof info.version).toBe("string");
+    console.log(`[E2E] Server version: ${info.version}`);
+
+    // Also call a list endpoint to verify full API access with data
+    const languageUrl = `${baseUrl}/umbraco/management/api/v1/language?skip=0&take=10`;
+
+    const languageResponse = await fetch(languageUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    expect(languageResponse.ok).toBe(true);
+
+    const languages = (await languageResponse.json()) as {
+      total?: number;
+      items?: unknown[];
+    };
+
+    expect(languages.total).toBeDefined();
+    expect(languages.total).toBeGreaterThan(0); // At least the default language
+    console.log(`[E2E] Languages: ${languages.total}`);
+
+    console.log("[E2E] Step 11 passed: real API calls succeed");
+  }, 15_000);
 });
