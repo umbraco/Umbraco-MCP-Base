@@ -199,7 +199,7 @@ describeOrSkip("CLI full E2E", () => {
     instanceDir = path.join(projectDir, "demo-site");
 
     const result = await setupInstance({
-      packageName: "Umbraco.Templates",
+      packageName: "Umbraco.Forms",
       instanceDir,
       projectDir,
       connectionString: buildConnectionString(DB_NAME),
@@ -428,9 +428,18 @@ describeOrSkip("CLI full E2E", () => {
     expect(endpoints.length).toBeGreaterThan(0);
     console.log(`[E2E] Found ${endpoints.length} API(s): ${endpoints.map((e) => e.name).join(", ")}`);
 
-    // Pick the management API (core Umbraco API)
+    // Verify Forms API was discovered (we installed Umbraco.Forms)
+    const formsApi = endpoints.find((e) =>
+      e.name.toLowerCase().includes("forms"),
+    );
+    expect(formsApi).toBeDefined();
+    console.log(`[E2E] Forms API found: ${formsApi!.name}`);
+
+    // Pick the core Umbraco Management API (not Forms/Commerce management APIs)
     const managementApi = endpoints.find((e) =>
-      e.name.toLowerCase().includes("management"),
+      e.name === "Umbraco Management API",
+    ) ?? endpoints.find((e) =>
+      e.name.toLowerCase() === "umbraco management api",
     ) ?? endpoints[0];
 
     // Analyze the API
