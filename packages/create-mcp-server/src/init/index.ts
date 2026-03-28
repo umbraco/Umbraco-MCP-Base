@@ -12,13 +12,13 @@ import { detectPsw, installPsw, PSW_VERSION } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
 import {
   promptUmbracoSetup,
+  promptToolMode,
   promptFeatureChoices,
   promptPackageSelection,
   getInstanceLocation,
   promptSwaggerUrl,
   promptConnectionString,
   promptInstallPsw,
-  promptContainerNeedsInstance,
 } from "./prompts.js";
 
 export async function runInit(dir?: string): Promise<void> {
@@ -67,15 +67,8 @@ export async function runInit(dir?: string): Promise<void> {
   // Step 2: Umbraco instance setup
   let umbracoChoice = await promptUmbracoSetup();
 
-  // Container mode: optionally create instance for OAuth
-  let containerNeedsInstance = false;
-  if (umbracoChoice === "container") {
-    containerNeedsInstance = await promptContainerNeedsInstance();
-  }
-
-  // Step 3: If creating (or container with instance), ensure PSW CLI is available
-  const needsPsw = umbracoChoice === "create" || (umbracoChoice === "container" && containerNeedsInstance);
-  if (needsPsw) {
+  // Step 3: If creating, ensure PSW CLI is available and up to date
+  if (umbracoChoice === "create") {
     const psw = detectPsw();
     const needsInstall = !psw.installed || psw.version !== PSW_VERSION;
     if (needsInstall) {
@@ -93,30 +86,22 @@ export async function runInit(dir?: string): Promise<void> {
             )
           );
           console.log(pc.dim("Skipping instance creation.\n"));
-          if (umbracoChoice === "container") {
-            containerNeedsInstance = false;
-          } else {
-            umbracoChoice = "skip";
-          }
+          umbracoChoice = "skip";
         }
       } else {
         console.log(pc.dim("\nSkipping instance creation.\n"));
-        if (umbracoChoice === "container") {
-          containerNeedsInstance = false;
-        } else {
-          umbracoChoice = "skip";
-        }
+        umbracoChoice = "skip";
       }
     }
   }
 
-  // Step 4: If creating/existing, gather instance details
+  // Step 4: Gather instance details
   let packageName: string | undefined;
   let instanceLocation: { path: string; label: string } | undefined;
   let swaggerUrl: string | undefined;
   let connectionString: string | undefined;
 
-  if (umbracoChoice === "create" || (umbracoChoice === "container" && containerNeedsInstance)) {
+  if (umbracoChoice === "create") {
     connectionString = await promptConnectionString();
     packageName = await promptPackageSelection();
     instanceLocation = getInstanceLocation(projectDir);
@@ -124,20 +109,21 @@ export async function runInit(dir?: string): Promise<void> {
     swaggerUrl = await promptSwaggerUrl();
   }
 
-  // Step 5: Feature questions (container mode skips chaining — always kept)
+  // Step 5: Tool mode — API tools or container?
+  const toolMode = await promptToolMode();
+  const isContainerMode = toolMode === "container";
+
+  // Step 6: Feature questions (container mode skips chaining — always kept)
   console.log();
-  const featureChoices = umbracoChoice === "container"
+  const featureChoices = isContainerMode
     ? { removeMocks: false, removeChaining: false, removeExamples: true, removeEvals: false }
     : await promptFeatureChoices(features);
 
   console.log(); // blank line before actions
 
-  // Step 6: Execute - build instance
+  // Step 7: Execute - build instance
   let instanceCreated = false;
-  const shouldCreateInstance =
-    (umbracoChoice === "create" || (umbracoChoice === "container" && containerNeedsInstance))
-    && packageName && instanceLocation;
-  if (shouldCreateInstance) {
+  if (umbracoChoice === "create" && packageName && instanceLocation) {
     console.log(
       pc.dim(`\nCreating Umbraco instance with ${packageName}...\n`)
     );
@@ -179,15 +165,15 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 7: Apply OpenAPI configuration
-  if (swaggerUrl) {
+  // Step 8: Apply OpenAPI configuration (skip for container mode)
+  if (swaggerUrl && !isContainerMode) {
     const updated = configureOpenApi(projectDir, swaggerUrl);
     if (updated) {
       console.log(pc.green(`  OpenAPI target: ${swaggerUrl}`));
     }
   }
 
-  // Step 8: Apply feature removals
+  // Step 9: Apply feature removals
   if (featureChoices.removeMocks) {
     removeMocks(projectDir);
   }
@@ -202,15 +188,15 @@ export async function runInit(dir?: string): Promise<void> {
   }
 
   // Container mode: remove API tools (orval, generated client, server-info tool)
-  if (umbracoChoice === "container") {
+  if (isContainerMode) {
     removeApiTools(projectDir);
     console.log(pc.green("  [x] Removed API tools and code generation (container mode)"));
   }
 
-  // Step 9: Summary
+  // Step 10: Summary
   console.log(pc.bold(pc.green("\nConfiguration complete:")));
 
-  if (umbracoChoice === "container") {
+  if (isContainerMode) {
     console.log(pc.green("  [x] Container mode — wrapping other MCP servers"));
   }
 
@@ -218,9 +204,9 @@ export async function runInit(dir?: string): Promise<void> {
     console.log(pc.green("  [x] Umbraco instance created in demo-site/"));
   }
 
-  if (swaggerUrl) {
+  if (swaggerUrl && !isContainerMode) {
     console.log(pc.green(`  [x] OpenAPI target: ${swaggerUrl}`));
-  } else if (!instanceCreated && umbracoChoice !== "container") {
+  } else if (!instanceCreated && !isContainerMode) {
     console.log(pc.dim("  [ ] OpenAPI target: not configured"));
   }
 
@@ -255,7 +241,7 @@ export async function runInit(dir?: string): Promise<void> {
 
   console.log(pc.dim("\nNext steps:"));
   let step = 1;
-  if (umbracoChoice === "container") {
+  if (isContainerMode) {
     console.log(pc.dim(`  ${step++}. Configure child MCP servers in src/config/mcp-servers.ts`));
     if (instanceCreated) {
       console.log(pc.dim(`  ${step++}. Start the Umbraco instance: npm run start:umbraco`));
