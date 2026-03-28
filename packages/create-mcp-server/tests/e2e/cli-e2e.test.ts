@@ -601,4 +601,81 @@ describeOrSkip("CLI full E2E", () => {
 
     console.log("[E2E] Step 11 passed: real API calls succeed");
   }, 15_000);
+
+  // ── Step 12: Hosted worker starts and responds ──────────────────────────
+  test("Step 12: hosted worker builds, starts and responds", async () => {
+    // Write .dev.vars next to the e2e wrangler config (wrangler resolves it relative to config dir)
+    fs.writeFileSync(
+      path.join(projectDir, "tests/hosted-e2e/.dev.vars"),
+      [
+        `UMBRACO_BASE_URL=${baseUrl}`,
+        `UMBRACO_SERVER_URL=${baseUrl}`,
+        `UMBRACO_OAUTH_CLIENT_ID=umbraco-back-office-mcp`,
+        `COOKIE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
+        `ENABLE_INFO_ENDPOINT=true`,
+      ].join("\n"),
+    );
+
+    // Start worker using unstable_dev (wrangler builds src/worker.ts automatically)
+    // Use absolute paths since CWD is the monorepo, not the scaffolded project
+    const { unstable_dev } = await import("wrangler");
+    const worker = await unstable_dev(
+      path.join(projectDir, "src/worker.ts"),
+      {
+        config: path.join(projectDir, "tests/hosted-e2e/wrangler.e2e.toml"),
+        experimental: { disableExperimentalWarning: true },
+        vars: {
+          UMBRACO_BASE_URL: baseUrl,
+          UMBRACO_SERVER_URL: baseUrl,
+          UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+          COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          ENABLE_INFO_ENDPOINT: "true",
+        },
+        logLevel: "error",
+      },
+    );
+
+    try {
+      const workerUrl = `http://${worker.address}:${worker.port}`;
+      console.log(`[E2E] Worker started at ${workerUrl}`);
+
+      // Verify landing page loads
+      const landing = await fetch(workerUrl, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      expect(landing.ok).toBe(true);
+      const html = await landing.text();
+      expect(html.toLowerCase()).toContain("html");
+      console.log("[E2E] Landing page OK");
+
+      // Verify OAuth discovery endpoint
+      const discovery = await fetch(
+        `${workerUrl}/.well-known/oauth-authorization-server`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      expect(discovery.ok).toBe(true);
+      const oauthMeta = (await discovery.json()) as {
+        issuer?: string;
+        authorization_endpoint?: string;
+        token_endpoint?: string;
+      };
+      expect(oauthMeta.issuer).toBeDefined();
+      expect(oauthMeta.authorization_endpoint).toBeDefined();
+      expect(oauthMeta.token_endpoint).toBeDefined();
+      console.log("[E2E] OAuth discovery OK");
+
+      // Verify info endpoint returns server metadata
+      const info = await fetch(`${workerUrl}/info`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      expect(info.ok).toBe(true);
+      const infoData = (await info.json()) as Record<string, unknown>;
+      expect(infoData).toBeDefined();
+      console.log("[E2E] Info endpoint OK");
+
+      console.log("[E2E] Step 12 passed: hosted worker responds correctly");
+    } finally {
+      await worker.stop();
+    }
+  }, 60_000);
 });
