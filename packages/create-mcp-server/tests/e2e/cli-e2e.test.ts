@@ -679,3 +679,184 @@ describeOrSkip("CLI full E2E", () => {
     }
   }, 60_000);
 });
+
+// =============================================================================
+// Container Mode E2E
+// =============================================================================
+
+describeOrSkip("CLI container mode E2E", () => {
+  let tempDir: string;
+  let projectDir: string;
+
+  beforeAll(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-container-e2e-"));
+    projectDir = path.join(tempDir, "container-project");
+    console.log(`[Container E2E] Temp dir: ${tempDir}`);
+  }, 30_000);
+
+  afterAll(() => {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      console.log("[Container E2E] Temp dir cleaned up");
+    } catch {
+      // Ignore cleanup errors
+    }
+  }, 15_000);
+
+  // ── Step 1: Scaffold ────────────────────────────────────────────────────
+  test("Step 1: scaffold project", () => {
+    const cliBin = path.resolve(__dirname, "../../dist/index.js");
+    execFileSync("node", [cliBin, "container-project"], {
+      cwd: tempDir,
+      encoding: "utf-8",
+      timeout: 30_000,
+      stdio: "inherit",
+    });
+
+    expect(fs.existsSync(path.join(projectDir, "package.json"))).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, "src/index.ts"))).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, "src/config/mcp-servers.ts"))).toBe(true);
+    console.log("[Container E2E] Step 1 passed: project scaffolded");
+  });
+
+  // ── Step 2: Run container mode init (no instance) ───────────────────────
+  test("Step 2: container init removes API tools, keeps chaining", async () => {
+    const { removeApiTools } = await import("../../src/init/remove-api-tools.js");
+    const { removeExamples } = await import("../../src/init/remove-examples.js");
+
+    // Simulate what container mode init does (without prompts)
+    removeExamples(projectDir);
+    removeApiTools(projectDir);
+
+    // Verify API tools removed
+    expect(fs.existsSync(path.join(projectDir, "orval.config.ts"))).toBe(false);
+    expect(
+      fs.existsSync(path.join(projectDir, "src/umbraco-api/api/generated")),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(projectDir, "src/umbraco-api/tools/umbraco-server")),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(projectDir, "src/umbraco-api/tools/example")),
+    ).toBe(false);
+
+    // Verify chaining infrastructure kept
+    expect(
+      fs.existsSync(path.join(projectDir, "src/config/mcp-servers.ts")),
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(projectDir, "src/umbraco-api/mcp-client.ts")),
+    ).toBe(true);
+
+    // Verify mocks kept
+    expect(fs.existsSync(path.join(projectDir, "src/mocks"))).toBe(true);
+
+    // Verify worker.ts kept
+    expect(fs.existsSync(path.join(projectDir, "src/worker.ts"))).toBe(true);
+
+    // Verify generate script removed from package.json
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"),
+    );
+    expect(pkg.scripts.generate).toBeUndefined();
+
+    // Verify index.ts doesn't reference API client
+    const indexTs = fs.readFileSync(
+      path.join(projectDir, "src/index.ts"),
+      "utf-8",
+    );
+    expect(indexTs).not.toContain("configureApiClient");
+    expect(indexTs).not.toContain("getExampleUmbracoAddOnAPI");
+    // But still has chaining
+    expect(indexTs).toContain("mcpClientManager");
+    expect(indexTs).toContain("discoverProxiedTools");
+
+    console.log("[Container E2E] Step 2 passed: API tools removed, chaining intact");
+  });
+
+  // ── Step 3: npm install + TypeScript compile ────────────────────────────
+  test("Step 3: container project compiles cleanly", () => {
+    console.log("[Container E2E] Installing dependencies...");
+    execFileSync("npm", ["install"], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      timeout: 120_000,
+      stdio: "inherit",
+    });
+
+    console.log("[Container E2E] Running TypeScript compile...");
+    execFileSync("npm", ["run", "compile"], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      timeout: 60_000,
+      stdio: "inherit",
+    });
+
+    console.log("[Container E2E] Step 3 passed: TypeScript compiles cleanly");
+  }, 180_000);
+
+  // ── Step 4: npm run build succeeds ──────────────────────────────────────
+  test("Step 4: container project builds", () => {
+    console.log("[Container E2E] Building...");
+    execFileSync("npm", ["run", "build"], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      timeout: 60_000,
+      stdio: "inherit",
+    });
+
+    expect(fs.existsSync(path.join(projectDir, "dist/index.js"))).toBe(true);
+    console.log("[Container E2E] Step 4 passed: build succeeds");
+  }, 120_000);
+
+  // ── Step 5: Hosted worker starts ────────────────────────────────────────
+  test("Step 5: container worker starts and responds", async () => {
+    // Write .dev.vars for the worker (no real Umbraco needed for landing page)
+    fs.writeFileSync(
+      path.join(projectDir, "tests/hosted-e2e/.dev.vars"),
+      [
+        "UMBRACO_BASE_URL=http://localhost:9999",
+        "UMBRACO_SERVER_URL=http://localhost:9999",
+        "UMBRACO_OAUTH_CLIENT_ID=umbraco-back-office-mcp",
+        "COOKIE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "ENABLE_INFO_ENDPOINT=true",
+      ].join("\n"),
+    );
+
+    const { unstable_dev } = await import("wrangler");
+    const worker = await unstable_dev(
+      path.join(projectDir, "src/worker.ts"),
+      {
+        config: path.join(projectDir, "tests/hosted-e2e/wrangler.e2e.toml"),
+        experimental: { disableExperimentalWarning: true },
+        vars: {
+          UMBRACO_BASE_URL: "http://localhost:9999",
+          UMBRACO_SERVER_URL: "http://localhost:9999",
+          UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+          COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          ENABLE_INFO_ENDPOINT: "true",
+        },
+        logLevel: "error",
+      },
+    );
+
+    try {
+      const workerUrl = `http://${worker.address}:${worker.port}`;
+
+      // Landing page
+      const landing = await fetch(workerUrl, { signal: AbortSignal.timeout(10_000) });
+      expect(landing.ok).toBe(true);
+
+      // OAuth discovery
+      const discovery = await fetch(
+        `${workerUrl}/.well-known/oauth-authorization-server`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      expect(discovery.ok).toBe(true);
+
+      console.log(`[Container E2E] Step 5 passed: worker running at ${workerUrl}`);
+    } finally {
+      await worker.stop();
+    }
+  }, 60_000);
+});

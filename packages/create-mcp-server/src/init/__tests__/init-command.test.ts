@@ -74,6 +74,7 @@ const mockGetInstanceLocation = jest.fn<() => { path: string; label: string }>()
 const mockPromptSwaggerUrl = jest.fn<() => Promise<string>>();
 const mockPromptConnectionString = jest.fn<() => Promise<string>>();
 const mockPromptInstallPsw = jest.fn<() => Promise<boolean>>();
+const mockPromptContainerNeedsInstance = jest.fn<() => Promise<boolean>>();
 
 jest.unstable_mockModule("../prompts.js", () => ({
   promptUmbracoSetup: mockPromptUmbracoSetup,
@@ -83,6 +84,7 @@ jest.unstable_mockModule("../prompts.js", () => ({
   promptSwaggerUrl: mockPromptSwaggerUrl,
   promptConnectionString: mockPromptConnectionString,
   promptInstallPsw: mockPromptInstallPsw,
+  promptContainerNeedsInstance: mockPromptContainerNeedsInstance,
 }));
 
 // Mock discover/index.js exports used by init

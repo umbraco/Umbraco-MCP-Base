@@ -4,7 +4,7 @@ import type { ProjectFeatures } from "./detect-features.js";
 import type { Package } from "./list-packages.js";
 import { listPackages } from "./list-packages.js";
 
-export type UmbracoSetupChoice = "create" | "existing" | "skip";
+export type UmbracoSetupChoice = "create" | "existing" | "skip" | "container";
 
 export interface FeatureChoices {
   removeMocks: boolean;
@@ -34,6 +34,12 @@ export async function promptUmbracoSetup(): Promise<UmbracoSetupChoice> {
           description:
             "Use PSW CLI to create an Umbraco instance with your package",
           value: "create",
+        },
+        {
+          title: "Container mode",
+          description:
+            "Wrap other MCP servers — no direct API tools",
+          value: "container",
         },
         {
           title: "Use existing instance",
@@ -273,6 +279,21 @@ export async function promptConnectionString(): Promise<string> {
   );
 
   return connectionString;
+}
+
+export async function promptContainerNeedsInstance(): Promise<boolean> {
+  const { needs } = await prompts(
+    {
+      type: "confirm",
+      name: "needs",
+      message:
+        "Create an Umbraco instance? (needed for OAuth in hosted mode)",
+      initial: true,
+    },
+    { onCancel }
+  );
+
+  return needs;
 }
 
 export async function promptInstallPsw(): Promise<boolean> {
