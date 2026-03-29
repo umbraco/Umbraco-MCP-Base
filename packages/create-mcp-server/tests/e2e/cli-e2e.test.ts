@@ -941,12 +941,11 @@ describeOrSkip("CLI container mode E2E", () => {
 });
 
 // =============================================================================
-// Build Tools Skill E2E (requires ANTHROPIC_API_KEY)
+// Build Tools Skill E2E (requires Claude Code subscription or ANTHROPIC_API_KEY)
 // =============================================================================
 
-const SKIP_SKILLS =
-  SKIP ||
-  (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_SUBSCRIPTION);
+// Opt-in: set RUN_SKILL_TESTS=true to run (costs money via Agent SDK)
+const SKIP_SKILLS = SKIP || process.env.RUN_SKILL_TESTS !== "true";
 
 const describeSkillsOrSkip = SKIP_SKILLS ? describe.skip : describe;
 
