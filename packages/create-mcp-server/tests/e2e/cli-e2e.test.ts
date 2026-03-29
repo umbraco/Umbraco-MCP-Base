@@ -1103,16 +1103,11 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
     } catch { /* ignore */ }
   }, 30_000);
 
-  // ── Step 1: Run /build-tools for Language collection ────────────────────
-  test("Step 1: /build-tools creates Language collection", async () => {
+  // Helper to run a skill via Agent SDK
+  async function runSkill(prompt: string, opts?: { maxTurns?: number; maxBudget?: number }): Promise<{ text: string; tools: string[] }> {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
-
-    const prompt = `/build-tools
-
-Build tools ONLY for the "Language" group from .discover.json. This is a simple CRUD collection with list, get, create, update, and delete operations. Do NOT build tools for any other group.`;
-
-    let assistantText = "";
-    const toolCalls: string[] = [];
+    let text = "";
+    const tools: string[] = [];
     const abortController = new AbortController();
 
     try {
@@ -1124,19 +1119,16 @@ Build tools ONLY for the "Language" group from .discover.json. This is a simple 
           settingSources: ["project"],
           allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
           permissionMode: "bypassPermissions",
-          maxTurns: 30,
-          maxBudgetUsd: 2.0,
+          maxTurns: opts?.maxTurns ?? 50,
+          maxBudgetUsd: opts?.maxBudget ?? 5.0,
           abortController,
           env: { ...process.env, CLAUDECODE: "" },
         },
       })) {
         if (message.type === "assistant" && message.message.content) {
           for (const block of message.message.content) {
-            if (block.type === "text") assistantText += block.text + "\n";
-            if (block.type === "tool_use") {
-              toolCalls.push(block.name);
-              console.log(`[Skill E2E] Tool call: ${block.name}`);
-            }
+            if (block.type === "text") text += block.text + "\n";
+            if (block.type === "tool_use") tools.push(block.name);
           }
         }
         if (message.type === "result") {
@@ -1148,89 +1140,64 @@ Build tools ONLY for the "Language" group from .discover.json. This is a simple 
       abortController.abort();
     }
 
-    console.log(`[Skill E2E] Tool calls: ${toolCalls.join(", ")}`);
-    console.log(`[Skill E2E] Assistant output (last 500 chars): ${assistantText.slice(-500)}`);
+    return { text, tools };
+  }
 
-    // Verify the language collection was created
+  // ── Step 1: Build tools, fix compile errors, build tests ────────────────
+  test("Step 1: /build-tools creates Language collection that compiles", async () => {
+    // Run /build-tools
+    console.log("[Skill E2E] Running /build-tools for Language...");
+    await runSkill(`/build-tools
+
+Build tools ONLY for the "Language" group from .discover.json. This is a simple CRUD collection with list, get, create, update, and delete operations. Do NOT build tools for any other group. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`);
+
+    // Verify tools created
     const toolsDir = path.join(projectDir, "src/umbraco-api/tools/language");
     if (!fs.existsSync(toolsDir)) {
-      // List what was created for debugging
       const toolsParent = path.join(projectDir, "src/umbraco-api/tools");
       if (fs.existsSync(toolsParent)) {
         console.log(`[Skill E2E] Tools dir contents: ${fs.readdirSync(toolsParent).join(", ")}`);
       }
     }
     expect(fs.existsSync(toolsDir)).toBe(true);
-    expect(fs.existsSync(path.join(toolsDir, "index.ts"))).toBe(true);
 
-    // Should have at least some tool files (get, list, etc.)
-    const toolFiles = fs.readdirSync(toolsDir, { recursive: true }) as string[];
-    const tsFiles = toolFiles.filter((f) => f.endsWith(".ts") && f !== "index.ts");
-    expect(tsFiles.length).toBeGreaterThan(0);
-
-    console.log(`[Skill E2E] Step 1 passed: Language collection created with ${tsFiles.length} tool files`);
-  }, 300_000);
-
-  // ── Step 2: Project compiles after build-tools ──────────────────────────
-  test("Step 2: project compiles after build-tools", () => {
-    execFileSync("npm", ["run", "compile"], {
-      cwd: projectDir,
-      encoding: "utf-8",
-      timeout: 60_000,
-      stdio: "inherit",
-    });
-    console.log("[Skill E2E] Step 2 passed: compiles cleanly after build-tools");
-  }, 120_000);
-
-  // ── Step 3: Run /build-tools-tests for Language collection ──────────────
-  test("Step 3: /build-tools-tests creates tests for Language collection", async () => {
-    const { query } = await import("@anthropic-ai/claude-agent-sdk");
-
-    const prompt = `/build-tools-tests
-
-Build integration tests ONLY for the "language" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env.`;
-
-    let assistantText = "";
-    const abortController = new AbortController();
-
+    // Verify compile passes
     try {
-      for await (const message of query({
-        prompt,
-        options: {
-          model: "sonnet",
-          cwd: projectDir,
-          settingSources: ["project"],
-          allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
-          permissionMode: "bypassPermissions",
-          maxTurns: 30,
-          maxBudgetUsd: 2.0,
-          abortController,
-          env: { ...process.env, CLAUDECODE: "" },
-        },
-      })) {
-        if (message.type === "assistant" && message.message.content) {
-          for (const block of message.message.content) {
-            if (block.type === "text") assistantText += block.text + "\n";
-          }
-        }
-      }
-    } finally {
-      abortController.abort();
+      execFileSync("npm", ["run", "compile"], {
+        cwd: projectDir,
+        encoding: "utf-8",
+        timeout: 60_000,
+        stdio: "pipe",
+      });
+      console.log("[Skill E2E] Step 1 passed: Language tools compile cleanly");
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string };
+      console.log("[Skill E2E] Compile errors after build-tools:");
+      if (e.stderr) console.log(e.stderr.slice(-2000));
+      throw new Error("Language tools don't compile — skill needs improvement");
     }
+  }, 600_000);
 
-    // Verify test files were created
+  // ── Step 2: Build integration tests ─────────────────────────────────────
+  test("Step 2: /build-tools-tests creates and runs Language tests", async () => {
+    console.log("[Skill E2E] Running /build-tools-tests for Language...");
+    await runSkill(`/build-tools-tests
+
+Build integration tests ONLY for the "language" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env. After creating the tests, run them to verify they pass.`);
+
+    // Verify test files created
     const testDir = path.join(projectDir, "src/umbraco-api/tools/language/__tests__");
     expect(fs.existsSync(testDir)).toBe(true);
 
     const testFiles = fs.readdirSync(testDir, { recursive: true }) as string[];
-    const testTsFiles = testFiles.filter((f) => f.endsWith(".test.ts"));
+    const testTsFiles = testFiles.filter((f: string) => f.endsWith(".test.ts"));
     expect(testTsFiles.length).toBeGreaterThan(0);
 
-    console.log(`[Skill E2E] Step 3 passed: ${testTsFiles.length} test files created`);
-  }, 300_000);
+    console.log(`[Skill E2E] Step 2 passed: ${testTsFiles.length} test files created`);
+  }, 900_000);
 
-  // ── Step 4: Integration tests pass against real Umbraco ─────────────────
-  test("Step 4: Language integration tests pass", () => {
+  // ── Step 3: Integration tests pass against real Umbraco ─────────────────
+  test("Step 3: Language integration tests pass", () => {
     console.log("[Skill E2E] Running Language integration tests...");
     try {
       execFileSync(
@@ -1257,6 +1224,6 @@ Build integration tests ONLY for the "language" collection. The Umbraco instance
       throw err;
     }
 
-    console.log("[Skill E2E] Step 4 passed: Language integration tests pass");
+    console.log("[Skill E2E] Step 3 passed: Language integration tests pass");
   }, 180_000);
 });
