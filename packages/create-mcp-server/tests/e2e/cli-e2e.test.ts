@@ -939,3 +939,290 @@ describeOrSkip("CLI container mode E2E", () => {
     }
   }, 60_000);
 });
+
+// =============================================================================
+// Build Tools Skill E2E (requires ANTHROPIC_API_KEY)
+// =============================================================================
+
+const SKIP_SKILLS =
+  SKIP ||
+  (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_SUBSCRIPTION);
+
+const describeSkillsOrSkip = SKIP_SKILLS ? describe.skip : describe;
+
+describeSkillsOrSkip("CLI build-tools skill E2E", () => {
+  let tempDir: string;
+  let projectDir: string;
+  let instanceDir: string;
+  let umbracoProcess: ChildProcess | undefined;
+  let baseUrl: string;
+
+  // ── Setup: scaffold, init, start Umbraco, discover, generate ─────────
+  beforeAll(async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-skill-e2e-"));
+    projectDir = path.join(tempDir, "skill-test");
+
+    console.log(`[Skill E2E] Temp dir: ${tempDir}`);
+    console.log(`[Skill E2E] DB name: ${DB_NAME}`);
+
+    // Scaffold
+    const cliBin = path.resolve(__dirname, "../../dist/index.js");
+    execFileSync("node", [cliBin, "skill-test"], {
+      cwd: tempDir,
+      encoding: "utf-8",
+      timeout: 30_000,
+      stdio: "inherit",
+    });
+
+    // Create DB for this test suite
+    const skillDbName = `umbraco_skill_e2e_${randomUUID().slice(0, 8)}`;
+    await execSql(buildConnectionString(), `CREATE DATABASE [${skillDbName}]`);
+
+    // Setup instance
+    instanceDir = path.join(projectDir, "demo-site");
+    const { setupInstance } = await import("../../src/init/setup-instance.js");
+    await setupInstance({
+      packageName: "Umbraco.Forms",
+      instanceDir,
+      projectDir,
+      connectionString: buildConnectionString(skillDbName),
+    });
+
+    // Start Umbraco
+    let detectedUrl: string | undefined;
+    umbracoProcess = spawn("dotnet", ["run", "--no-build"], {
+      cwd: instanceDir,
+      env: { ...process.env, ASPNETCORE_ENVIRONMENT: "Development" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    umbracoProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      const match = line.match(/Now listening on: (http:\/\/localhost:\d+)/);
+      if (match && !detectedUrl) detectedUrl = match[1];
+    });
+    umbracoProcess.stderr?.on("data", () => {});
+
+    // Wait for healthy
+    const start = Date.now();
+    while (Date.now() - start < 240_000) {
+      if (detectedUrl) {
+        try {
+          const resp = await fetch(`${detectedUrl}/umbraco/swagger/`, {
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (resp.ok) {
+            baseUrl = detectedUrl;
+            break;
+          }
+        } catch { /* not ready */ }
+      }
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
+    expect(baseUrl).toBeDefined();
+
+    // Create API user
+    const { checkApiUser } = await import("../../src/discover/check-api-user.js");
+    await checkApiUser(baseUrl);
+
+    // Discover + generate
+    const { discoverSwaggerEndpoints } = await import("../../src/discover/discover-swagger.js");
+    const { analyzeApi } = await import("../../src/discover/analyze-api.js");
+    const { groupsToCollectionNames } = await import("../../src/discover/suggest-modes.js");
+    const { updateEnvBaseUrl, updateEnvVar } = await import("../../src/discover/index.js");
+    const { configureOpenApi } = await import("../../src/init/configure-openapi.js");
+    const { generateClient } = await import("../../src/discover/generate-client.js");
+
+    const endpoints = await discoverSwaggerEndpoints(baseUrl);
+    const managementApi = endpoints.find((e) => e.name === "Umbraco Management API") ?? endpoints[0];
+
+    const analysis = await analyzeApi(managementApi.url);
+    updateEnvBaseUrl(projectDir, baseUrl);
+    updateEnvVar(projectDir, "UMBRACO_CLIENT_ID", "umbraco-back-office-mcp");
+    updateEnvVar(projectDir, "UMBRACO_CLIENT_SECRET", "1234567890");
+
+    const manifest = {
+      apiName: analysis.title,
+      swaggerUrl: managementApi.url,
+      baseUrl,
+      collections: groupsToCollectionNames(analysis.groups),
+    };
+    fs.writeFileSync(path.join(projectDir, ".discover.json"), JSON.stringify(manifest, null, 2) + "\n");
+
+    configureOpenApi(projectDir, managementApi.url, managementApi.name);
+    generateClient(projectDir);
+
+    // Remove examples (as init would)
+    const { removeExamples } = await import("../../src/init/remove-examples.js");
+    removeExamples(projectDir);
+
+    // Copy skills into the project's .claude/skills/
+    const skillsDir = path.join(projectDir, ".claude", "skills");
+    const pluginsDir = path.resolve(__dirname, "../../../../plugins/skills");
+    for (const skill of ["build-tools", "build-tools-tests", "mcp-patterns", "mcp-testing"]) {
+      const src = path.join(pluginsDir, skill);
+      const dest = path.join(skillsDir, skill);
+      if (fs.existsSync(src)) {
+        fs.cpSync(src, dest, { recursive: true });
+      }
+    }
+
+    // Also copy agents
+    const agentsDir = path.join(projectDir, ".claude", "agents");
+    const pluginAgentsDir = path.resolve(__dirname, "../../../../plugins/agents");
+    if (fs.existsSync(pluginAgentsDir)) {
+      fs.cpSync(pluginAgentsDir, agentsDir, { recursive: true });
+    }
+
+    console.log(`[Skill E2E] Setup complete — Umbraco at ${baseUrl}`);
+  }, 600_000);
+
+  afterAll(async () => {
+    if (umbracoProcess) {
+      umbracoProcess.kill("SIGTERM");
+      await new Promise((r) => setTimeout(r, 3000));
+      if (!umbracoProcess.killed) umbracoProcess.kill("SIGKILL");
+    }
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  }, 30_000);
+
+  // ── Step 1: Run /build-tools for Language collection ────────────────────
+  test("Step 1: /build-tools creates Language collection", async () => {
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+    const prompt = `/build-tools
+
+Build tools ONLY for the "Language" group from .discover.json. This is a simple CRUD collection with list, get, create, update, and delete operations. Do NOT build tools for any other group.`;
+
+    let assistantText = "";
+    const abortController = new AbortController();
+
+    try {
+      for await (const message of query({
+        prompt,
+        options: {
+          model: "sonnet",
+          cwd: projectDir,
+          settingSources: ["project"],
+          allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+          permissionMode: "bypassPermissions",
+          maxTurns: 30,
+          maxBudgetUsd: 2.0,
+          abortController,
+          env: { ...process.env, CLAUDECODE: "" },
+        },
+      })) {
+        if (message.type === "assistant" && message.message.content) {
+          for (const block of message.message.content) {
+            if (block.type === "text") assistantText += block.text + "\n";
+          }
+        }
+      }
+    } finally {
+      abortController.abort();
+    }
+
+    // Verify the language collection was created
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools/language");
+    expect(fs.existsSync(toolsDir)).toBe(true);
+    expect(fs.existsSync(path.join(toolsDir, "index.ts"))).toBe(true);
+
+    // Should have at least some tool files (get, list, etc.)
+    const toolFiles = fs.readdirSync(toolsDir, { recursive: true }) as string[];
+    const tsFiles = toolFiles.filter((f) => f.endsWith(".ts") && f !== "index.ts");
+    expect(tsFiles.length).toBeGreaterThan(0);
+
+    console.log(`[Skill E2E] Step 1 passed: Language collection created with ${tsFiles.length} tool files`);
+  }, 300_000);
+
+  // ── Step 2: Project compiles after build-tools ──────────────────────────
+  test("Step 2: project compiles after build-tools", () => {
+    execFileSync("npm", ["run", "compile"], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      timeout: 60_000,
+      stdio: "inherit",
+    });
+    console.log("[Skill E2E] Step 2 passed: compiles cleanly after build-tools");
+  }, 120_000);
+
+  // ── Step 3: Run /build-tools-tests for Language collection ──────────────
+  test("Step 3: /build-tools-tests creates tests for Language collection", async () => {
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+
+    const prompt = `/build-tools-tests
+
+Build integration tests ONLY for the "language" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env.`;
+
+    let assistantText = "";
+    const abortController = new AbortController();
+
+    try {
+      for await (const message of query({
+        prompt,
+        options: {
+          model: "sonnet",
+          cwd: projectDir,
+          settingSources: ["project"],
+          allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+          permissionMode: "bypassPermissions",
+          maxTurns: 30,
+          maxBudgetUsd: 2.0,
+          abortController,
+          env: { ...process.env, CLAUDECODE: "" },
+        },
+      })) {
+        if (message.type === "assistant" && message.message.content) {
+          for (const block of message.message.content) {
+            if (block.type === "text") assistantText += block.text + "\n";
+          }
+        }
+      }
+    } finally {
+      abortController.abort();
+    }
+
+    // Verify test files were created
+    const testDir = path.join(projectDir, "src/umbraco-api/tools/language/__tests__");
+    expect(fs.existsSync(testDir)).toBe(true);
+
+    const testFiles = fs.readdirSync(testDir, { recursive: true }) as string[];
+    const testTsFiles = testFiles.filter((f) => f.endsWith(".test.ts"));
+    expect(testTsFiles.length).toBeGreaterThan(0);
+
+    console.log(`[Skill E2E] Step 3 passed: ${testTsFiles.length} test files created`);
+  }, 300_000);
+
+  // ── Step 4: Integration tests pass against real Umbraco ─────────────────
+  test("Step 4: Language integration tests pass", () => {
+    console.log("[Skill E2E] Running Language integration tests...");
+    try {
+      execFileSync(
+        "node",
+        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPattern=language/__tests__", "--runInBand"],
+        {
+          cwd: projectDir,
+          encoding: "utf-8",
+          timeout: 120_000,
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            UMBRACO_BASE_URL: baseUrl,
+            UMBRACO_CLIENT_ID: "umbraco-back-office-mcp",
+            UMBRACO_CLIENT_SECRET: "1234567890",
+            NODE_TLS_REJECT_UNAUTHORIZED: "0",
+          },
+        },
+      );
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string };
+      if (e.stdout) console.log("[test stdout]", e.stdout.slice(-3000));
+      if (e.stderr) console.log("[test stderr]", e.stderr.slice(-3000));
+      throw err;
+    }
+
+    console.log("[Skill E2E] Step 4 passed: Language integration tests pass");
+  }, 180_000);
+});
