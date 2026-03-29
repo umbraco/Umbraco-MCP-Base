@@ -186,6 +186,10 @@ Add the collection import and registration to `src/index.ts`:
    const collections = [existingCollection, {collection}Collection];
    ```
 
+3. If `configureApiClient` still references the example/template API client, update it to use the correct generated client getter (e.g. `getUmbracoEngageManagementAPI`). Check the import from `./umbraco-api/api/generated/` and ensure it matches.
+
+4. Do the same for `src/collections.ts` — add the collection import and add it to the exported array.
+
 #### 3e. Compile
 
 ```bash

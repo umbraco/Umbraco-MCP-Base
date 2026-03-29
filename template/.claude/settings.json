@@ -16,5 +16,8 @@
       "Bash(dotnet build *)",
       "Bash(dotnet run *)"
     ]
-  }
+  },
+  "plugins": [
+    "umbraco-mcp-skills@umbraco/Umbraco-MCP-Base"
+  ]
 }

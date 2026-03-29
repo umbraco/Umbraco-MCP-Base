@@ -102,10 +102,17 @@ import {
   createMockRequestHandlerExtra,
   createSnapshotResult,
 } from "@umbraco-cms/mcp-server-sdk/testing";
-import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
+import { configureApiClient, initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
 import { getYourAPI } from "../../../../api/generated/yourApi.js";
 import { EntityBuilder } from "./helpers/{entity}-builder.js";
 import { EntityTestHelper } from "./helpers/{entity}-test-helper.js";
+
+// Initialize fetch with credentials — required for integration tests hitting the real API
+initializeUmbracoFetch({
+  baseUrl: process.env.UMBRACO_BASE_URL!,
+  clientId: process.env.UMBRACO_CLIENT_ID!,
+  clientSecret: process.env.UMBRACO_CLIENT_SECRET!,
+});
 
 configureApiClient(() => getYourAPI());
 
@@ -120,11 +127,14 @@ export {
 
 **Key rules:**
 - Import the correct API client getter from `src/umbraco-api/api/generated/`
+- `initializeUmbracoFetch` MUST be called before `configureApiClient` — it sets up the authenticated fetch layer
 - Do NOT set `USE_MOCK_API` — these tests run against the real Umbraco instance
 - Export `createSnapshotResult` for snapshot testing
 - Re-export builders and helpers so test files have a single import
 
 **Compile after creating:** `npm run compile`. Fix errors before continuing.
+
+**Read-only collections:** If the collection has no create or delete operations (e.g. analytics — only GET/query tools), skip steps 4-6 (builder, helper, builder tests). These steps create test data lifecycle management which isn't needed for read-only collections. Proceed directly to step 7 (integration tests).
 
 ### Step 4: Per Collection — Create Test Builder
 

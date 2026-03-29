@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import glob from 'glob';
+import { globSync } from 'node:fs';
 import {
   type DiscoverManifest,
   loadDiscoverManifest,
@@ -77,11 +77,10 @@ function countTools(toolsDirPath: string): { collections: CollectionCount[]; tot
     const collectionDir = path.join(toolsDir, dirName);
 
     // Find all TypeScript files in this collection
-    const tsFiles: string[] = glob.sync('**/*.ts', {
+    const tsFiles: string[] = globSync('**/*.ts', {
       cwd: collectionDir,
-      absolute: true,
-      ignore: ['**/index.ts', '**/__tests__/**']
-    });
+      exclude: (p: string) => p.includes('index.ts') || p.includes('__tests__'),
+    }).map((f: string) => path.resolve(collectionDir, f));
 
     // Only count files that define actual MCP tools (ToolDefinition + withStandardDecorators)
     const tools: ToolInfo[] = [];
@@ -154,12 +153,12 @@ function analyzeGaps(
 
     // Check for integration tests
     const testGlob = path.join(toolsDir, collectionName, '__tests__', '*.test.ts');
-    const testFiles: string[] = glob.sync(testGlob);
+    const testFiles: string[] = globSync(testGlob);
     const hasTests = testFiles.length > 0;
 
     // Check for eval tests
     const evalGlob = path.join(evalsDir, `*${collectionName}*.test.ts`);
-    const evalFiles: string[] = glob.sync(evalGlob);
+    const evalFiles: string[] = globSync(evalGlob);
     const hasEvals = evalFiles.length > 0;
 
     // Determine status
