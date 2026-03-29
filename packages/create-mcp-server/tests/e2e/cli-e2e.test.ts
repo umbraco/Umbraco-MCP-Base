@@ -955,6 +955,7 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
   let instanceDir: string;
   let umbracoProcess: ChildProcess | undefined;
   let baseUrl: string;
+  let skillDbName: string;
 
   // ── Setup: scaffold, init, start Umbraco, discover, generate ─────────
   beforeAll(async () => {
@@ -974,7 +975,7 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
     });
 
     // Create DB for this test suite
-    const skillDbName = `umbraco_skill_e2e_${randomUUID().slice(0, 8)}`;
+    skillDbName = `umbraco_skill_e2e_${randomUUID().slice(0, 8)}`;
     await execSql(buildConnectionString(), `CREATE DATABASE [${skillDbName}]`);
 
     // Setup instance
@@ -985,6 +986,14 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
       instanceDir,
       projectDir,
       connectionString: buildConnectionString(skillDbName),
+    });
+
+    // Build the instance first
+    execFileSync("dotnet", ["build"], {
+      cwd: instanceDir,
+      encoding: "utf-8",
+      timeout: 180_000,
+      stdio: "inherit",
     });
 
     // Start Umbraco
@@ -1083,6 +1092,13 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
       if (!umbracoProcess.killed) umbracoProcess.kill("SIGKILL");
     }
     try {
+      await execSql(
+        buildConnectionString(),
+        `ALTER DATABASE [${skillDbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [${skillDbName}]`,
+      );
+      console.log(`[Skill E2E] Database dropped: ${skillDbName}`);
+    } catch { /* ignore */ }
+    try {
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch { /* ignore */ }
   }, 30_000);
@@ -1096,6 +1112,7 @@ describeSkillsOrSkip("CLI build-tools skill E2E", () => {
 Build tools ONLY for the "Language" group from .discover.json. This is a simple CRUD collection with list, get, create, update, and delete operations. Do NOT build tools for any other group.`;
 
     let assistantText = "";
+    const toolCalls: string[] = [];
     const abortController = new AbortController();
 
     try {
@@ -1116,15 +1133,33 @@ Build tools ONLY for the "Language" group from .discover.json. This is a simple 
         if (message.type === "assistant" && message.message.content) {
           for (const block of message.message.content) {
             if (block.type === "text") assistantText += block.text + "\n";
+            if (block.type === "tool_use") {
+              toolCalls.push(block.name);
+              console.log(`[Skill E2E] Tool call: ${block.name}`);
+            }
           }
+        }
+        if (message.type === "result") {
+          const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
+          console.log(`[Skill E2E] Result: ${r.subtype}, turns: ${r.num_turns}, cost: $${r.total_cost_usd?.toFixed(3)}`);
         }
       }
     } finally {
       abortController.abort();
     }
 
+    console.log(`[Skill E2E] Tool calls: ${toolCalls.join(", ")}`);
+    console.log(`[Skill E2E] Assistant output (last 500 chars): ${assistantText.slice(-500)}`);
+
     // Verify the language collection was created
     const toolsDir = path.join(projectDir, "src/umbraco-api/tools/language");
+    if (!fs.existsSync(toolsDir)) {
+      // List what was created for debugging
+      const toolsParent = path.join(projectDir, "src/umbraco-api/tools");
+      if (fs.existsSync(toolsParent)) {
+        console.log(`[Skill E2E] Tools dir contents: ${fs.readdirSync(toolsParent).join(", ")}`);
+      }
+    }
     expect(fs.existsSync(toolsDir)).toBe(true);
     expect(fs.existsSync(path.join(toolsDir, "index.ts"))).toBe(true);
 
