@@ -138,6 +138,17 @@ describeOrSkip("CLI full E2E", () => {
   // Set KEEP_E2E_ASSETS=true to preserve the project for skill E2E reuse
   afterAll(async () => {
     if (process.env.KEEP_E2E_ASSETS === "true" && baseUrl) {
+      // Save snapshots of key files for revert
+      const snapshotDir = path.join(projectDir, ".e2e-snapshots");
+      fs.mkdirSync(snapshotDir, { recursive: true });
+      for (const file of ["src/index.ts", "src/collections.ts"]) {
+        const src = path.join(projectDir, file);
+        const dest = path.join(snapshotDir, file.replace(/\//g, "_"));
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, dest);
+        }
+      }
+
       // Write manifest so skill-e2e.test.ts can reuse this project
       const manifestPath = path.join(os.tmpdir(), "mcp-e2e-manifest.json");
       fs.writeFileSync(manifestPath, JSON.stringify({

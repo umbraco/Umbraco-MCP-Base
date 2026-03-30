@@ -58,18 +58,32 @@ async function main() {
 
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf-8"));
 
-  // --revert: just remove skill-generated files so skills can be re-run
+  // --revert: remove skill-generated files so skills can be re-run
   if (revertOnly) {
-    const toolsDir = path.join(manifest.projectDir, "src/umbraco-api/tools");
+    const projectDir = manifest.projectDir;
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools");
+
+    // Remove tool directories (keep chained)
     if (fs.existsSync(toolsDir)) {
       for (const entry of fs.readdirSync(toolsDir)) {
-        // Remove anything that's not chained (the only collection that should survive)
         if (entry !== "chained") {
           fs.rmSync(path.join(toolsDir, entry), { recursive: true, force: true });
-          console.log(`Removed: ${entry}`);
+          console.log(`Removed: tools/${entry}`);
         }
       }
     }
+
+    // Restore index.ts and collections.ts from snapshots (saved by CLI E2E)
+    const snapshotDir = path.join(projectDir, ".e2e-snapshots");
+    for (const file of ["src/index.ts", "src/collections.ts"]) {
+      const snapshotPath = path.join(snapshotDir, file.replace(/\//g, "_"));
+      const targetPath = path.join(projectDir, file);
+      if (fs.existsSync(snapshotPath)) {
+        fs.copyFileSync(snapshotPath, targetPath);
+        console.log(`Restored: ${file}`);
+      }
+    }
+
     console.log("Reverted skill output. Ready for re-run.");
     return;
   }

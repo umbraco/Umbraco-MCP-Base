@@ -157,6 +157,7 @@ Build tools ONLY for the "Language" group from .discover.json. This is a simple 
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string };
       console.log("[Skill E2E] Compile errors after build-tools:");
+      if (e.stdout) console.log(e.stdout.slice(-2000));
       if (e.stderr) console.log(e.stderr.slice(-2000));
       throw new Error("Language tools don't compile — skill needs improvement");
     }

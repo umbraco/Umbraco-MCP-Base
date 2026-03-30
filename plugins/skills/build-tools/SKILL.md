@@ -95,7 +95,9 @@ src/umbraco-api/tools/{collection}/
 
 Not every directory is needed — only create subdirectories for HTTP methods that have operations.
 
-#### 3b. Create tool files
+#### 3b. Create tool files (one at a time, compile after each)
+
+**CRITICAL: Create ONE tool file, then immediately compile. Fix any errors before creating the next tool. This prevents errors from cascading across files.**
 
 Create one file per operation. Map operations to files:
 
@@ -151,6 +153,11 @@ export default withStandardDecorators(tool);
 - Never require UUIDs from the LLM — generate them server-side
 - Keep input schemas to 3-5 fields max — hide complexity
 - Write descriptions as mini-prompts: what it does, key constraints, when to use
+
+**After creating EACH tool file, run `npm run compile`. Fix any TypeScript errors in that file before creating the next one.** Common issues:
+- Wrong import path for the Zod schema (check the generated `*.zod.ts` file for the exact export name)
+- Type mismatch between Zod shape and the API client method signature
+- Missing `CAPTURE_RAW_HTTP_RESPONSE` parameter
 
 #### 3c. Create collection index.ts
 

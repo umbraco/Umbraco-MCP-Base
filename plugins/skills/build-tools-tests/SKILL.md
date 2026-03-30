@@ -143,11 +143,14 @@ Use the `test-builder-helper-creator` agent.
 Create `src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.ts`:
 
 ```typescript
+import { getYourAPI } from "../../../../api/generated/yourApi.js";
+import { CAPTURE_RAW_HTTP_RESPONSE } from "@umbraco-cms/mcp-server-sdk";
+
 const TEST_ENTITY_NAME = "_Test Entity";
 
 interface EntityModel {
   name: string;
-  // ... fields matching the create tool's input schema
+  // ... fields matching the POST body schema from the generated *.zod.ts
 }
 
 export class EntityBuilder {
@@ -167,8 +170,34 @@ export class EntityBuilder {
   }
 
   async create(): Promise<this> {
-    // Call the create tool's handler or API client directly
+    const client = getYourAPI();
+    // Call the API client's POST method directly (NOT the tool handler)
+    const response: any = await client.postEntity(
+      this.model as any,
+      CAPTURE_RAW_HTTP_RESPONSE,
+    );
+
+    if (response.status !== 201) {
+      const errorBody = await response.data?.detail || `HTTP ${response.status}`;
+      throw new Error(`Failed to create entity: ${errorBody}`);
+    }
+
+    // Extract ID from Location header (Umbraco convention: /api/v1/entity/{id})
+    const location = response.headers?.get?.("location") || response.headers?.location;
+    this.createdId = location?.split("/").pop();
+
     return this;
+  }
+
+  async delete(): Promise<void> {
+    if (!this.createdId) return;
+    const client = getYourAPI();
+    try {
+      await client.deleteEntityById(this.createdId, CAPTURE_RAW_HTTP_RESPONSE);
+    } catch {
+      // Ignore delete failures in cleanup
+    }
+    this.createdId = undefined;
   }
 
   getId(): string {
@@ -246,7 +275,11 @@ const TEST_NAME = "_Test Builder Entity";
 describe("EntityBuilder", () => {
   setupTestEnvironment();
 
+  let builder: EntityBuilder;
+
   afterEach(async () => {
+    // Always clean up created entities to prevent conflicts with other test files
+    if (builder) await builder.delete();
     await EntityTestHelper.cleanup(TEST_NAME);
   });
 
@@ -289,10 +322,17 @@ import getEntityTool from "../get/get-entity.js";
 describe("get-entity", () => {
   setupTestEnvironment();
 
+  let builder: EntityBuilder;
+
+  afterEach(async () => {
+    // Clean up test data after each test to prevent conflicts
+    if (builder) await builder.delete();
+  });
+
   it("should return entity by ID", async () => {
     const context = createMockRequestHandlerExtra();
-    const builder = await new EntityBuilder()
-      .withName("Test Entity")
+    builder = await new EntityBuilder()
+      .withName("_Test Get Entity")
       .create();
 
     const result = await getEntityTool.handler(
