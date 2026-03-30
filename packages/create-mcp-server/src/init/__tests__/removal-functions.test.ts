@@ -346,12 +346,11 @@ describe("combined removals", () => {
 // ── detectFeatures validation edge cases ─────────────────────────────────────
 
 describe("detectFeatures validation", () => {
-  it("should reject project missing orval.config.ts", () => {
+  it("should accept project without orval.config.ts (container mode)", () => {
     mockFs.files.delete(path.resolve(PROJECT_DIR, "orval.config.ts"));
 
     const result = detectFeatures(PROJECT_DIR);
-    expect(result.valid).toBe(false);
-    expect(result.missing).toContain("orval.config.ts");
+    expect(result.valid).toBe(true);
   });
 
   it("should reject project missing src/index.ts", () => {
@@ -409,10 +408,9 @@ describe("detectFeatures validation", () => {
   it("should report multiple missing files", () => {
     mockFs.files.delete(path.resolve(PROJECT_DIR, "package.json"));
     mockFs.files.delete(path.resolve(PROJECT_DIR, "src/index.ts"));
-    mockFs.files.delete(path.resolve(PROJECT_DIR, "orval.config.ts"));
 
     const result = detectFeatures(PROJECT_DIR);
     expect(result.valid).toBe(false);
-    expect(result.missing).toHaveLength(3);
+    expect(result.missing).toHaveLength(2);
   });
 });

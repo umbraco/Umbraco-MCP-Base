@@ -6,11 +6,13 @@ import { removeMocks } from "./remove-mocks.js";
 import { removeExamples } from "./remove-examples.js";
 import { removeChaining } from "./remove-chaining.js";
 import { removeEvals } from "./remove-evals.js";
+import { removeApiTools } from "./remove-api-tools.js";
 import { setupInstance } from "./setup-instance.js";
 import { detectPsw, installPsw, PSW_VERSION } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
 import {
   promptUmbracoSetup,
+  promptToolMode,
   promptFeatureChoices,
   promptPackageSelection,
   getInstanceLocation,
@@ -93,7 +95,7 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 4: If creating/existing, gather instance details
+  // Step 4: Gather instance details
   let packageName: string | undefined;
   let instanceLocation: { path: string; label: string } | undefined;
   let swaggerUrl: string | undefined;
@@ -107,13 +109,19 @@ export async function runInit(dir?: string): Promise<void> {
     swaggerUrl = await promptSwaggerUrl();
   }
 
-  // Step 5: Feature questions
+  // Step 5: Tool mode — API tools or container?
+  const toolMode = await promptToolMode();
+  const isContainerMode = toolMode === "container";
+
+  // Step 6: Feature questions (container mode skips chaining — always kept)
   console.log();
-  const featureChoices = await promptFeatureChoices(features);
+  const featureChoices = isContainerMode
+    ? { removeMocks: false, removeChaining: false, removeExamples: true, removeEvals: false }
+    : await promptFeatureChoices(features);
 
   console.log(); // blank line before actions
 
-  // Step 6: Execute - build instance
+  // Step 7: Execute - build instance
   let instanceCreated = false;
   if (umbracoChoice === "create" && packageName && instanceLocation) {
     console.log(
@@ -157,15 +165,15 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 7: Apply OpenAPI configuration
-  if (swaggerUrl) {
+  // Step 8: Apply OpenAPI configuration (skip for container mode)
+  if (swaggerUrl && !isContainerMode) {
     const updated = configureOpenApi(projectDir, swaggerUrl);
     if (updated) {
       console.log(pc.green(`  OpenAPI target: ${swaggerUrl}`));
     }
   }
 
-  // Step 8: Apply feature removals
+  // Step 9: Apply feature removals
   if (featureChoices.removeMocks) {
     removeMocks(projectDir);
   }
@@ -179,16 +187,26 @@ export async function runInit(dir?: string): Promise<void> {
     removeEvals(projectDir);
   }
 
-  // Step 9: Summary
+  // Container mode: remove API tools (orval, generated client, server-info tool)
+  if (isContainerMode) {
+    removeApiTools(projectDir);
+    console.log(pc.green("  [x] Removed API tools and code generation (container mode)"));
+  }
+
+  // Step 10: Summary
   console.log(pc.bold(pc.green("\nConfiguration complete:")));
+
+  if (isContainerMode) {
+    console.log(pc.green("  [x] Container mode — wrapping other MCP servers"));
+  }
 
   if (instanceCreated) {
     console.log(pc.green("  [x] Umbraco instance created in demo-site/"));
   }
 
-  if (swaggerUrl) {
+  if (swaggerUrl && !isContainerMode) {
     console.log(pc.green(`  [x] OpenAPI target: ${swaggerUrl}`));
-  } else if (!instanceCreated) {
+  } else if (!instanceCreated && !isContainerMode) {
     console.log(pc.dim("  [ ] OpenAPI target: not configured"));
   }
 
@@ -223,7 +241,13 @@ export async function runInit(dir?: string): Promise<void> {
 
   console.log(pc.dim("\nNext steps:"));
   let step = 1;
-  if (instanceCreated) {
+  if (isContainerMode) {
+    console.log(pc.dim(`  ${step++}. Configure child MCP servers in src/config/mcp-servers.ts`));
+    if (instanceCreated) {
+      console.log(pc.dim(`  ${step++}. Start the Umbraco instance: npm run start:umbraco`));
+    }
+    console.log(pc.dim(`  ${step++}. npm run build && node dist/index.js`));
+  } else if (instanceCreated) {
     console.log(pc.dim(`  ${step++}. Start the Umbraco instance: npm run start:umbraco`));
     console.log(pc.dim(`  ${step++}. (in a separate terminal) npx @umbraco-cms/create-umbraco-mcp-server discover`));
   } else if (swaggerUrl) {

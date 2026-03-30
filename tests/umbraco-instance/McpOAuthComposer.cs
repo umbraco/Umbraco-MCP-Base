@@ -36,6 +36,20 @@ public class RegisterMcpClientHandler
         UmbracoApplicationStartingNotification notification,
         CancellationToken cancellationToken)
     {
+        try
+        {
+            await RegisterClient(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // During first startup the database may not exist yet (e.g. unattended install).
+            // The client will be registered on the next restart after the DB is ready.
+            Console.WriteLine($"[McpOAuthComposer] Skipped — {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private async Task RegisterClient(CancellationToken cancellationToken)
+    {
         const string clientId = "umbraco-back-office-mcp";
 
         var existing = await _applicationManager.FindByClientIdAsync(clientId, cancellationToken);
