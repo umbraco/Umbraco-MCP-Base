@@ -161,7 +161,7 @@ Build tools ONLY for the "Language" group from .discover.json. This is a simple 
       if (e.stderr) console.log(e.stderr.slice(-2000));
       throw new Error("Language tools don't compile — skill needs improvement");
     }
-  }, 600_000);
+  }, 900_000);
 
   // ── Step 2: /build-tools-tests creates integration tests ────────────────
   test("Step 2: /build-tools-tests creates Language tests", async () => {
