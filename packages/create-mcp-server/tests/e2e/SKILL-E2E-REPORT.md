@@ -8,8 +8,12 @@
 | 2 | 46 turns ✓ | ✓ | timed out (900s) | N/A | ~$3.00 |
 | 3 | 51 turns ✗ | ✗ | N/A | N/A | ~$1.50 |
 | 4 | 46 turns ✓ | ✗ | 60 turns ✓ | ✓ (all) | ~$4.60 |
+| 5 | 55 turns ✓ | ✗ (dirty state) | 60 turns ✓ | ✓ (all) | ~$4.90 |
+| 6* | 46 turns ✓ | ✓ | 73 turns ✓ | ✗ pattern error | ~$4.10 |
 
-**Success rate:** build-tools compiles 50%, build-tools-tests works when given time, integration tests pass when both succeed.
+\* After skill improvements (compile-per-file, better builder template, snapshot revert)
+
+**Current state:** build-tools reliably compiles from clean state. build-tools-tests creates correct structure but tests have consistent `result.content[0].text` access pattern error.
 
 ---
 
@@ -67,7 +71,23 @@
 
 ---
 
-## Issue 4: Skill output is non-deterministic
+## Issue 4: Generated tests access tool results incorrectly
+
+**Severity:** High — causes all tests to fail with the same error
+
+**What happens:** The generated tests access `result.content[0].text` directly, but tool handlers return structured results where `content` may be undefined or structured differently depending on the SDK's output mode.
+
+**Root cause:** The build-tools-tests skill.md shows a snapshot pattern with `createSnapshotResult(result, id)` but the skill generates raw property access instead. The skill is not following its own instructions.
+
+**Fix:** Strengthen the skill.md integration test pattern to explicitly say:
+- NEVER access `result.content[0].text` directly
+- ALWAYS use `createSnapshotResult(result, id)` + `toMatchSnapshot()` for success cases
+- For error cases, only check `result.isError`
+- Add a negative example showing what NOT to do
+
+---
+
+## Issue 5: Skill output is non-deterministic
 
 **Severity:** Expected — inherent to LLM-based code generation
 

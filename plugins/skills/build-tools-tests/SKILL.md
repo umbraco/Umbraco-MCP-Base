@@ -359,11 +359,26 @@ describe("get-entity", () => {
 ```
 
 **Key rules:**
-- Use `createSnapshotResult(result, id)` for success responses — it normalizes IDs, dates, and dynamic values
+- **ALWAYS** use `createSnapshotResult(result, id)` for success responses — it normalizes IDs, dates, and dynamic values
 - Pass the created entity's ID as second argument to `createSnapshotResult` so it gets normalized
 - Use `toMatchSnapshot()` — not `toMatchInlineSnapshot()`
 - Only use assertion testing (`expect(x).toBe(y)`) for error cases
 - Use builders to create test data when the test needs existing entities
+
+**NEVER access result properties directly.** The following patterns are WRONG and will fail:
+```typescript
+// WRONG — result.content may be undefined
+const data = JSON.parse(result.content[0].text);
+
+// WRONG — result structure varies by output mode
+expect(result.content).toContain("something");
+```
+
+Always use the snapshot helper:
+```typescript
+// CORRECT — handles all output modes
+expect(createSnapshotResult(result, builder.getId())).toMatchSnapshot();
+```
 
 #### File naming — one file per tool
 
