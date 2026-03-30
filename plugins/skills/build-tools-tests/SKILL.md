@@ -102,10 +102,17 @@ import {
   createMockRequestHandlerExtra,
   createSnapshotResult,
 } from "@umbraco-cms/mcp-server-sdk/testing";
-import { configureApiClient } from "@umbraco-cms/mcp-server-sdk";
+import { configureApiClient, initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
 import { getYourAPI } from "../../../../api/generated/yourApi.js";
 import { EntityBuilder } from "./helpers/{entity}-builder.js";
 import { EntityTestHelper } from "./helpers/{entity}-test-helper.js";
+
+// Initialize fetch with credentials — required for integration tests hitting the real API
+initializeUmbracoFetch({
+  baseUrl: process.env.UMBRACO_BASE_URL!,
+  clientId: process.env.UMBRACO_CLIENT_ID!,
+  clientSecret: process.env.UMBRACO_CLIENT_SECRET!,
+});
 
 configureApiClient(() => getYourAPI());
 
@@ -120,11 +127,14 @@ export {
 
 **Key rules:**
 - Import the correct API client getter from `src/umbraco-api/api/generated/`
+- `initializeUmbracoFetch` MUST be called before `configureApiClient` — it sets up the authenticated fetch layer
 - Do NOT set `USE_MOCK_API` — these tests run against the real Umbraco instance
 - Export `createSnapshotResult` for snapshot testing
 - Re-export builders and helpers so test files have a single import
 
 **Compile after creating:** `npm run compile`. Fix errors before continuing.
+
+**Read-only collections:** If the collection has no create or delete operations (e.g. analytics — only GET/query tools), skip steps 4-6 (builder, helper, builder tests). These steps create test data lifecycle management which isn't needed for read-only collections. Proceed directly to step 7 (integration tests).
 
 ### Step 4: Per Collection — Create Test Builder
 
@@ -133,11 +143,14 @@ Use the `test-builder-helper-creator` agent.
 Create `src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.ts`:
 
 ```typescript
+import { getYourAPI } from "../../../../api/generated/yourApi.js";
+import { CAPTURE_RAW_HTTP_RESPONSE } from "@umbraco-cms/mcp-server-sdk";
+
 const TEST_ENTITY_NAME = "_Test Entity";
 
 interface EntityModel {
   name: string;
-  // ... fields matching the create tool's input schema
+  // ... fields matching the POST body schema from the generated *.zod.ts
 }
 
 export class EntityBuilder {
@@ -157,8 +170,34 @@ export class EntityBuilder {
   }
 
   async create(): Promise<this> {
-    // Call the create tool's handler or API client directly
+    const client = getYourAPI();
+    // Call the API client's POST method directly (NOT the tool handler)
+    const response: any = await client.postEntity(
+      this.model as any,
+      CAPTURE_RAW_HTTP_RESPONSE,
+    );
+
+    if (response.status !== 201) {
+      const errorBody = await response.data?.detail || `HTTP ${response.status}`;
+      throw new Error(`Failed to create entity: ${errorBody}`);
+    }
+
+    // Extract ID from Location header (Umbraco convention: /api/v1/entity/{id})
+    const location = response.headers?.get?.("location") || response.headers?.location;
+    this.createdId = location?.split("/").pop();
+
     return this;
+  }
+
+  async delete(): Promise<void> {
+    if (!this.createdId) return;
+    const client = getYourAPI();
+    try {
+      await client.deleteEntityById(this.createdId, CAPTURE_RAW_HTTP_RESPONSE);
+    } catch {
+      // Ignore delete failures in cleanup
+    }
+    this.createdId = undefined;
   }
 
   getId(): string {
@@ -236,7 +275,11 @@ const TEST_NAME = "_Test Builder Entity";
 describe("EntityBuilder", () => {
   setupTestEnvironment();
 
+  let builder: EntityBuilder;
+
   afterEach(async () => {
+    // Always clean up created entities to prevent conflicts with other test files
+    if (builder) await builder.delete();
     await EntityTestHelper.cleanup(TEST_NAME);
   });
 
@@ -279,10 +322,17 @@ import getEntityTool from "../get/get-entity.js";
 describe("get-entity", () => {
   setupTestEnvironment();
 
+  let builder: EntityBuilder;
+
+  afterEach(async () => {
+    // Clean up test data after each test to prevent conflicts
+    if (builder) await builder.delete();
+  });
+
   it("should return entity by ID", async () => {
     const context = createMockRequestHandlerExtra();
-    const builder = await new EntityBuilder()
-      .withName("Test Entity")
+    builder = await new EntityBuilder()
+      .withName("_Test Get Entity")
       .create();
 
     const result = await getEntityTool.handler(
@@ -309,11 +359,26 @@ describe("get-entity", () => {
 ```
 
 **Key rules:**
-- Use `createSnapshotResult(result, id)` for success responses — it normalizes IDs, dates, and dynamic values
+- **ALWAYS** use `createSnapshotResult(result, id)` for success responses — it normalizes IDs, dates, and dynamic values
 - Pass the created entity's ID as second argument to `createSnapshotResult` so it gets normalized
 - Use `toMatchSnapshot()` — not `toMatchInlineSnapshot()`
 - Only use assertion testing (`expect(x).toBe(y)`) for error cases
 - Use builders to create test data when the test needs existing entities
+
+**NEVER access result properties directly.** The following patterns are WRONG and will fail:
+```typescript
+// WRONG — result.content may be undefined
+const data = JSON.parse(result.content[0].text);
+
+// WRONG — result structure varies by output mode
+expect(result.content).toContain("something");
+```
+
+Always use the snapshot helper:
+```typescript
+// CORRECT — handles all output modes
+expect(createSnapshotResult(result, builder.getId())).toMatchSnapshot();
+```
 
 #### File naming — one file per tool
 

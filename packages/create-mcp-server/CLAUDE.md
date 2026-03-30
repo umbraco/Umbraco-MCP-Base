@@ -1,0 +1,86 @@
+# CLAUDE.md — create-mcp-server
+
+CLI scaffolding tool for creating Umbraco MCP server projects.
+
+## Commands
+
+```bash
+npm run build           # Build CLI + copy template to dist/
+npm run compile         # Type-check only
+npm test                # Unit tests (121 tests)
+npm run test:e2e        # Full CLI E2E test (requires SQL Server + .NET 10)
+npm run test:e2e:skills # Skill E2E test (requires Claude Code subscription)
+npm run test:e2e:revert # Reset skill output for re-run
+npm run test:e2e:cleanup # Tear down preserved E2E assets
+```
+
+## E2E Testing
+
+### Prerequisites
+- SQL Server (local or Docker)
+- .NET 10 SDK
+- PSW CLI (`dotnet tool install -g PackageScriptWriter.Cli`)
+
+### CLI E2E (deterministic, always passes)
+
+Tests the full CLI pipeline: scaffold → init → start Umbraco → discover → generate → compile → test → API calls → hosted worker.
+
+```bash
+TEST_SQL_CONNECTION_STRING="Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True" \
+npm run test:e2e -w packages/create-mcp-server
+```
+
+### Skill E2E (non-deterministic, uses Claude Agent SDK)
+
+Tests `/build-tools` and `/build-tools-tests` skills against the Language API group.
+
+**Three-step workflow for fast iteration:**
+
+```bash
+# Step 1: Create project + start Umbraco (preserves assets for reuse)
+KEEP_E2E_ASSETS=true \
+TEST_SQL_CONNECTION_STRING="Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True" \
+npm run test:e2e -w packages/create-mcp-server
+
+# Step 2: Run skill tests (reuses project from step 1 — fast!)
+npm run test:e2e:skills -w packages/create-mcp-server
+
+# Step 2b: If skills failed, revert and try again
+npm run test:e2e:revert -w packages/create-mcp-server
+npm run test:e2e:skills -w packages/create-mcp-server
+
+# Step 3: Clean up when done
+npm run test:e2e:cleanup -w packages/create-mcp-server
+```
+
+### Container Mode E2E
+
+Tests the container mode init flow (no API tools, keeps chaining). Runs as part of `npm run test:e2e`.
+
+## CLI Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `create <name>` | Scaffold a new project (default when no subcommand) |
+| `init` | Configure project: Umbraco instance, tool mode, features |
+| `discover` | Discover APIs, create API user, generate client, write .discover.json |
+
+## Init Flow
+
+1. **Umbraco instance** — create (PSW) / existing / skip
+2. **Tool mode** — API tools (default) / Container mode
+3. **Feature questions** — mocks, chaining, evals
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/scaffold.ts` | Project scaffolding from template |
+| `src/init/index.ts` | Init command orchestrator |
+| `src/init/setup-instance.ts` | PSW + appsettings + Program.cs patching |
+| `src/init/remove-api-tools.ts` | Container mode: strips API generation layer |
+| `src/discover/index.ts` | Discover command orchestrator |
+| `src/discover/check-api-user.ts` | Auto-creates API user via OAuth + PKCE |
+| `tests/e2e/cli-e2e.test.ts` | CLI E2E test (19 deterministic steps) |
+| `tests/e2e/skill-e2e.test.ts` | Skill E2E test (3 steps, uses Agent SDK) |
+| `tests/e2e/cleanup-e2e.ts` | Cleanup/revert script for preserved assets |

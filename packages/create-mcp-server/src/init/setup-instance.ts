@@ -62,6 +62,11 @@ export async function setupInstance(
     adminPassword,
   });
 
+  // Write connection string and unattended install config to appsettings
+  if (opts.connectionString) {
+    configureAppsettings(instanceDir, opts.connectionString, adminEmail, adminPassword);
+  }
+
   // Copy McpOAuthComposer.cs into the instance if it exists in the project
   const composerSrc = path.join(opts.projectDir, "umbraco", "McpOAuthComposer.cs");
   if (fs.existsSync(composerSrc)) {
@@ -79,7 +84,58 @@ export async function setupInstance(
   };
 }
 
+/**
+ * Write connection string to appsettings.local.json and unattended install config
+ * to appsettings.Development.json. PSW with --build-only doesn't persist these.
+ *
+ * Connection string goes in appsettings.local.json (gitignored) to keep credentials
+ * out of version control. Program.cs is patched to load this file explicitly since
+ * ASP.NET Core doesn't load it by default.
+ */
+function configureAppsettings(
+  instanceDir: string,
+  connectionString: string,
+  adminEmail: string,
+  adminPassword: string,
+): void {
+  // 1. Write connection string to appsettings.local.json (gitignored)
+  const localPath = path.join(instanceDir, "appsettings.local.json");
+  let localSettings: Record<string, unknown> = {};
+  if (fs.existsSync(localPath)) {
+    localSettings = JSON.parse(fs.readFileSync(localPath, "utf-8"));
+  }
+  localSettings.ConnectionStrings = {
+    umbracoDbDSN: connectionString,
+    umbracoDbDSN_ProviderName: "Microsoft.Data.SqlClient",
+  };
+  fs.writeFileSync(localPath, JSON.stringify(localSettings, null, 2) + "\n");
+
+  // 2. Write unattended install config to appsettings.Development.json
+  const devPath = path.join(instanceDir, "appsettings.Development.json");
+  let devSettings: Record<string, unknown> = {};
+  if (fs.existsSync(devPath)) {
+    devSettings = JSON.parse(fs.readFileSync(devPath, "utf-8"));
+  }
+
+  const umbraco = (devSettings.Umbraco ?? {}) as Record<string, unknown>;
+  const cms = (umbraco.CMS ?? {}) as Record<string, unknown>;
+  cms.Unattended = {
+    InstallUnattended: true,
+    UnattendedUserName: "Administrator",
+    UnattendedUserEmail: adminEmail,
+    UnattendedUserPassword: adminPassword,
+  };
+  umbraco.CMS = cms;
+  devSettings.Umbraco = umbraco;
+
+  fs.writeFileSync(devPath, JSON.stringify(devSettings, null, 2) + "\n");
+}
+
 const OPENIDDICT_SNIPPET = `
+// Load appsettings.local.json for local overrides (connection string, secrets).
+// This file is gitignored so credentials stay out of version control.
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
+
 // Allow HTTP for token endpoint in development (workerd can't verify self-signed certs).
 if (builder.Environment.IsDevelopment())
 {

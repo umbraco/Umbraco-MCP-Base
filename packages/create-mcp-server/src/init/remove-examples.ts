@@ -61,6 +61,37 @@ export function removeExamples(projectDir: string): number {
     }
   }
 
+  // Update src/collections.ts - remove example collection imports
+  const collectionsPath = path.join(projectDir, "src", "collections.ts");
+  if (fs.existsSync(collectionsPath)) {
+    let content = fs.readFileSync(collectionsPath, "utf-8");
+    const original = content;
+
+    // Remove example collection imports
+    content = content.replace(
+      /^import exampleCollection from ["']\.\/umbraco-api\/tools\/example\/index\.js["'];?\s*\n/m,
+      ""
+    );
+    content = content.replace(
+      /^import example2Collection from ["']\.\/umbraco-api\/tools\/example-2\/index\.js["'];?\s*\n/m,
+      ""
+    );
+
+    // Remove from collections array
+    content = content.replace(/\s*exampleCollection,?/g, "");
+    content = content.replace(/\s*example2Collection,?/g, "");
+
+    // Clean up
+    content = content.replace(/,\s*,/g, ",");
+    content = content.replace(/\[\s*,/g, "[");
+    content = content.replace(/,\s*\]/g, "]");
+
+    if (content !== original) {
+      fs.writeFileSync(collectionsPath, content);
+      changes++;
+    }
+  }
+
   // Update src/config/mode-registry.ts - remove example modes
   const modeRegistryPath = path.join(
     projectDir,

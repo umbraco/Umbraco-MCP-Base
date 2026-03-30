@@ -12,7 +12,8 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
 // Mock the toolkit's getServerConfig before importing our module
-const mockGetServerConfig = jest.fn();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockGetServerConfig = jest.fn<(...args: any[]) => any>();
 jest.unstable_mockModule("@umbraco-cms/mcp-server-sdk", () => ({
   getServerConfig: mockGetServerConfig,
 }));
@@ -29,8 +30,8 @@ describe("Server Config", () => {
   });
 
   describe("loadServerConfig", () => {
-    it("should return combined umbraco and custom config", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should return combined umbraco and custom config", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: {
             clientId: "test-client",
@@ -53,7 +54,7 @@ describe("Server Config", () => {
         },
       });
 
-      const { umbraco, custom } = loadServerConfig(true);
+      const { umbraco, custom } = await loadServerConfig(true);
 
       // Verify base config
       expect(umbraco.auth.clientId).toBe("test-client");
@@ -66,8 +67,8 @@ describe("Server Config", () => {
       expect(custom.customEndpoints).toEqual(["ep1", "ep2"]);
     });
 
-    it("should pass isStdioMode to getServerConfig", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should pass isStdioMode to getServerConfig", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: { clientId: "x", clientSecret: "x", baseUrl: "x" },
           configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -75,16 +76,16 @@ describe("Server Config", () => {
         custom: {},
       });
 
-      loadServerConfig(true);
+      await loadServerConfig(true);
       expect(mockGetServerConfig).toHaveBeenCalledWith(true, expect.any(Object));
 
       clearConfigCache();
-      loadServerConfig(false);
+      await loadServerConfig(false);
       expect(mockGetServerConfig).toHaveBeenCalledWith(false, expect.any(Object));
     });
 
-    it("should pass additionalFields to getServerConfig", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should pass additionalFields to getServerConfig", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: { clientId: "x", clientSecret: "x", baseUrl: "x" },
           configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -92,7 +93,7 @@ describe("Server Config", () => {
         custom: {},
       });
 
-      loadServerConfig(true);
+      await loadServerConfig(true);
 
       expect(mockGetServerConfig).toHaveBeenCalledWith(
         true,
@@ -107,8 +108,8 @@ describe("Server Config", () => {
       );
     });
 
-    it("should cache config after first load", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should cache config after first load", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: { clientId: "cached", clientSecret: "x", baseUrl: "x" },
           configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -117,11 +118,11 @@ describe("Server Config", () => {
       });
 
       // First call
-      const first = loadServerConfig(true);
+      const first = await loadServerConfig(true);
       expect(mockGetServerConfig).toHaveBeenCalledTimes(1);
 
       // Second call - should use cache
-      const second = loadServerConfig(true);
+      const second = await loadServerConfig(true);
       expect(mockGetServerConfig).toHaveBeenCalledTimes(1);
 
       // Both should return same data
@@ -131,16 +132,16 @@ describe("Server Config", () => {
       expect(second.custom.externalApiKey).toBe("cached-key");
     });
 
-    it("should reload config after clearConfigCache", () => {
+    it("should reload config after clearConfigCache", async () => {
       mockGetServerConfig
-        .mockReturnValueOnce({
+        .mockResolvedValueOnce({
           config: {
             auth: { clientId: "first", clientSecret: "x", baseUrl: "x" },
             configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
           },
           custom: {},
         })
-        .mockReturnValueOnce({
+        .mockResolvedValueOnce({
           config: {
             auth: { clientId: "second", clientSecret: "x", baseUrl: "x" },
             configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -148,20 +149,20 @@ describe("Server Config", () => {
           custom: {},
         });
 
-      const first = loadServerConfig(true);
+      const first = await loadServerConfig(true);
       expect(first.umbraco.auth.clientId).toBe("first");
 
       clearConfigCache();
 
-      const second = loadServerConfig(true);
+      const second = await loadServerConfig(true);
       expect(second.umbraco.auth.clientId).toBe("second");
       expect(mockGetServerConfig).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("custom config interface", () => {
-    it("should handle undefined custom values", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should handle undefined custom values", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: { clientId: "x", clientSecret: "x", baseUrl: "x" },
           configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -169,7 +170,7 @@ describe("Server Config", () => {
         custom: {},
       });
 
-      const { custom } = loadServerConfig(true);
+      const { custom } = await loadServerConfig(true);
 
       expect(custom.experimentalFeatures).toBeUndefined();
       expect(custom.externalApiKey).toBeUndefined();
@@ -177,8 +178,8 @@ describe("Server Config", () => {
       expect(custom.maxPageSize).toBeUndefined();
     });
 
-    it("should type custom values correctly", () => {
-      mockGetServerConfig.mockReturnValue({
+    it("should type custom values correctly", async () => {
+      mockGetServerConfig.mockResolvedValue({
         config: {
           auth: { clientId: "x", clientSecret: "x", baseUrl: "x" },
           configSources: { clientId: "env", clientSecret: "env", baseUrl: "env", envFile: "default" },
@@ -191,7 +192,7 @@ describe("Server Config", () => {
         },
       });
 
-      const { custom } = loadServerConfig(true);
+      const { custom } = await loadServerConfig(true);
 
       // TypeScript type checks (these verify the interface is correct)
       const boolVal: boolean | undefined = custom.experimentalFeatures;
