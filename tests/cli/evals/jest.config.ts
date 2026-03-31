@@ -1,20 +1,19 @@
 import type { Config } from "jest";
 
 /**
- * Jest configuration for SDK-level eval tests
+ * Jest configuration for CLI eval tests
  *
- * These evals test how an LLM agent interacts with CLI safety features
- * (input sanitization, dry-run mode, error handling). Uses the template
- * as a built test harness.
+ * LLM-driven tests that verify an agent can use the mcp-cli skill
+ * to run and interpret CLI commands.
  *
- * Requires: npm run build && cd template && npx tsup
+ * Requires: npm run build -w packages/mcp-server-sdk && npm run build -w template
  * Requires: ANTHROPIC_API_KEY or Claude Code subscription
  */
 const config: Config = {
   preset: "ts-jest/presets/js-with-ts-esm",
   testEnvironment: "node",
   extensionsToTreatAsEsm: [".ts"],
-  rootDir: ".",
+  rootDir: "..",
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
   },
@@ -27,8 +26,7 @@ const config: Config = {
       },
     ],
   },
-  testMatch: ["<rootDir>/**/*.test.ts"],
-  setupFilesAfterEnv: ["<rootDir>/runtime-setup.ts"],
+  testMatch: ["<rootDir>/evals/**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
 

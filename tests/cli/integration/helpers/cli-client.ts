@@ -42,8 +42,7 @@ export interface CliTestClient {
  * - USE_MOCK_API=true for MSW mock server (no real Umbraco needed)
  */
 export async function createCliTestClient(options?: CliClientOptions): Promise<CliTestClient> {
-  const projectRoot = resolve(__dirname, "../../..");
-  const entryPoint = resolve(projectRoot, "dist/index.js");
+  const entryPoint = resolve(__dirname, "../../../../template/dist/index.js");
 
   const transport = new StdioClientTransport({
     command: "node",

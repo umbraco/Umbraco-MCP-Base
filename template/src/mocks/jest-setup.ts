@@ -10,6 +10,4 @@ import { setupMswServer } from "@umbraco-cms/mcp-server-sdk/testing";
 import { server } from "./server.js";
 import { resetStore } from "./store.js";
 
-if (process.env.USE_MOCK_API === "true") {
-  setupMswServer(server, resetStore);
-}
+setupMswServer(server, resetStore);

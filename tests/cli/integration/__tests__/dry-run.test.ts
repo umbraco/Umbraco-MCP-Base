@@ -4,7 +4,6 @@
  * Tests dry-run mode end-to-end via MCP protocol.
  */
 
-import { describe, it, expect, afterAll, beforeAll } from "@jest/globals";
 import { createCliTestClient, type CliTestClient } from "../helpers/cli-client.js";
 
 describe("Dry-Run Mode (CLI)", () => {

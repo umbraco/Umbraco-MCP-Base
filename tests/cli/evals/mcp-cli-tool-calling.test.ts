@@ -10,8 +10,8 @@
  * These evals require the template to be built (dist/index.js must exist).
  */
 
-import { describe, it, expect } from "@jest/globals";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import {
   runSkillTest,
   verifyOutputContains,
@@ -20,11 +20,13 @@ import {
   TEST_TIMEOUT,
 } from "./setup.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const SKILL_PATH = "skills/mcp-cli";
 const TURNS = 8;
 
-// Absolute path to the built template binary
-const SERVER_BIN = resolve(process.cwd(), "template/dist/index.js");
+// Absolute path to the built template binary (relative to repo root)
+const SERVER_BIN = resolve(__dirname, "../../../template/dist/index.js");
 
 // Common allowed tools — Skill for loading knowledge, Bash for running commands
 const ALLOWED_TOOLS = ["Skill", "Bash", "Read"];
@@ -163,6 +165,55 @@ Look at the output and tell me:
 
       expect(destructiveCheck.passed).toBe(true);
       expect(readOnlyCheck.passed).toBe(true);
+    },
+    TEST_TIMEOUT
+  );
+});
+
+describe("CLI Tool Calling — Filtered List Tools", () => {
+  it(
+    "agent runs --list-tools with UMBRACO_READONLY=true and only sees read-only tools",
+    async () => {
+      const result = await runSkillTest(
+        `Use the mcp-cli skill to learn how introspection and filtering work together, then run the list-tools command against this server binary: ${SERVER_BIN}
+
+Set the UMBRACO_READONLY=true environment variable when running the command. Tell me which tools appear and confirm that no mutation tools (create, update, delete) are listed.`,
+        SKILL_PATH,
+        { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
+      );
+
+      expect(result.success).toBe(true);
+
+      const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
+      expect(bashCalls.length).toBeGreaterThan(0);
+
+      // Should mention read-only tools
+      const readOnlyCheck = verifyOutputContainsAny(result.finalResult, [
+        "get-example",
+        "list-examples",
+        "get-widget",
+      ]);
+
+      // Should confirm mutation tools are absent
+      const noMutationCheck = verifyOutputContainsAny(result.finalResult, [
+        "no mutation",
+        "no create",
+        "no delete",
+        "not listed",
+        "not included",
+        "not present",
+        "excluded",
+        "filtered",
+        "only read",
+        "read-only",
+      ]);
+
+      if (!readOnlyCheck.passed || !noMutationCheck.passed) {
+        logTestResult(result, "filtered list tools");
+      }
+
+      expect(readOnlyCheck.passed).toBe(true);
+      expect(noMutationCheck.passed).toBe(true);
     },
     TEST_TIMEOUT
   );

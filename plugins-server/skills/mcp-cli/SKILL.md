@@ -139,7 +139,11 @@ node dist/index.js
 
 ## Introspection Commands
 
-These flags print output and exit immediately. They do not start the MCP server, do not require a running Umbraco instance, and do not require auth credentials. Use them to understand what a server offers before connecting.
+These flags print output and exit immediately — they do not start the MCP server.
+
+Introspection respects all filtering configuration. If you set `UMBRACO_READONLY=true`, `UMBRACO_INCLUDE_SLICES`, `UMBRACO_INCLUDE_TOOL_COLLECTIONS`, or any other filtering env var / CLI flag, the introspection output only shows tools that pass those filters. This means `--list-tools` shows exactly what the LLM would see at runtime.
+
+If auth credentials and a running Umbraco instance are available, introspection authenticates and fetches the current user so that tool listing also respects authorization policies. Without auth, collections that require a user are skipped and only unrestricted tools are listed.
 
 | Flag | Purpose |
 |------|---------|
@@ -156,7 +160,15 @@ node dist/index.js --describe-tool get-content-by-id
 
 # Generate documentation
 node dist/index.js --generate-context > CONTEXT.md
+
+# See only what the LLM sees with filtering active
+UMBRACO_READONLY=true node dist/index.js --list-tools
+UMBRACO_INCLUDE_SLICES=read,list node dist/index.js --list-tools
 ```
+
+## Local Development Testing
+
+See [local-dev-testing.md](local-dev-testing.md) for SDK contributor guidance on testing CLI commands locally, linking SDK builds, and integrating `handleCliCommands`.
 
 ## Input Sanitization
 

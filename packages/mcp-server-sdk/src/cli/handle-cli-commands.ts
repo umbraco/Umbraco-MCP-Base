@@ -26,9 +26,11 @@
  */
 
 import type { ToolCollectionExport } from "../types/tool-collection.js";
-import type { GetServerConfigResult } from "../config/config.js";
+import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
+import type { CollectionConfiguration } from "../types/collection-configuration.js";
 import { toolToJsonSchema, toolToSummary, formatToolTable } from "./introspection.js";
 import { generateContextFile } from "./context-generator.js";
+import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 
 /**
  * Options for handleCliCommands.
@@ -40,26 +42,76 @@ export interface HandleCliCommandsOptions {
   serverName?: string;
   /** Server version used in context generation */
   serverVersion?: string;
+  /** Optional user object to pass to collection tools() for authorization-aware listing */
+  user?: unknown;
+  /** Optional filter configuration — when provided, CLI output only includes matching tools */
+  filterConfig?: CollectionConfiguration;
+  /** Optional server config — used by --debug-config to show resolved values and sources */
+  serverConfig?: UmbracoServerConfig;
 }
 
 /**
- * Handle CLI introspection commands (--list-tools, --describe-tool, --generate-context).
- *
- * If a CLI flag is active, prints output to stdout and calls `process.exit(0)`.
- * If no CLI flags are active, returns normally so the server can continue starting.
- *
- * @param collections - All tool collections registered in the server
- * @param options - CLI flags and optional server metadata
+ * Get tools from a collection, using the provided user if available.
+ * Falls back to undefined and catches errors from collections that
+ * require a valid user object.
  */
+function getToolsForCli(col: ToolCollectionExport<any>, user?: unknown): ReturnType<ToolCollectionExport<any>["tools"]> {
+  try {
+    return col.tools(user);
+  } catch {
+    return [];
+  }
+}
+
 export function handleCliCommands(
   collections: ToolCollectionExport<any>[],
   options: HandleCliCommandsOptions,
 ): void {
-  const { cliFlags, serverName, serverVersion } = options;
+  const { cliFlags, serverName, serverVersion, user, filterConfig, serverConfig } = options;
+
+  if (cliFlags?.debugConfig) {
+    const debug: Record<string, unknown> = {};
+
+    if (serverConfig) {
+      const { auth, configSources, ...rest } = serverConfig;
+      debug.envFile = { source: configSources.envFile };
+      debug.auth = {
+        baseUrl: { value: auth.baseUrl, source: configSources.baseUrl },
+        clientId: { value: auth.clientId ? "***" : "(not set)", source: configSources.clientId },
+        clientSecret: { value: auth.clientSecret ? "***" : "(not set)", source: configSources.clientSecret },
+      };
+      debug.filtering = {
+        toolModes: { value: rest.toolModes ?? [], source: configSources.toolModes },
+        includeToolCollections: { value: rest.includeToolCollections ?? [], source: configSources.includeToolCollections },
+        excludeToolCollections: { value: rest.excludeToolCollections ?? [], source: configSources.excludeToolCollections },
+        includeSlices: { value: rest.includeSlices ?? [], source: configSources.includeSlices },
+        excludeSlices: { value: rest.excludeSlices ?? [], source: configSources.excludeSlices },
+        includeTools: { value: rest.includeTools ?? [], source: configSources.includeTools },
+        excludeTools: { value: rest.excludeTools ?? [], source: configSources.excludeTools },
+        readonly: { value: rest.readonly ?? false, source: configSources.readonly },
+      };
+      debug.other = {
+        dryRun: { value: rest.dryRun ?? false, source: configSources.dryRun },
+        disableOutputCompatibilityMode: { value: rest.disableOutputCompatibilityMode ?? false, source: configSources.disableOutputCompatibilityMode },
+        allowedMediaPaths: { value: rest.allowedMediaPaths ?? [], source: configSources.allowedMediaPaths },
+      };
+    } else {
+      debug.error = "serverConfig not passed to handleCliCommands — pass it to see resolved values";
+    }
+
+    if (filterConfig) {
+      debug.resolvedFilterConfig = filterConfig;
+    }
+
+    console.log(JSON.stringify(debug, null, 2));
+    process.exit(0);
+  }
 
   if (cliFlags?.listTools) {
     const summaries = collections.flatMap((col) =>
-      col.tools({}).map((tool) => toolToSummary(tool, col.metadata.name)),
+      getToolsForCli(col, user)
+        .filter((tool) => !filterConfig || shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig }))
+        .map((tool) => toolToSummary(tool, col.metadata.name)),
     );
     console.log(formatToolTable(summaries));
     process.exit(0);
@@ -68,8 +120,11 @@ export function handleCliCommands(
   if (cliFlags?.describeTool) {
     const toolName = cliFlags.describeTool;
     for (const col of collections) {
-      const tool = col.tools({}).find((t) => t.name === toolName);
+      const tool = getToolsForCli(col, user).find((t) => t.name === toolName);
       if (tool) {
+        if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
+          break; // Tool exists but is filtered out — fall through to "not found"
+        }
         const schema = toolToJsonSchema(tool);
         console.log(
           JSON.stringify(
@@ -98,6 +153,8 @@ export function handleCliCommands(
     const context = generateContextFile(collections, {
       serverName,
       serverVersion,
+      user,
+      filterConfig,
     });
     console.log(context);
     process.exit(0);

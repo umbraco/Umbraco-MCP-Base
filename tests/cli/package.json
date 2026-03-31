@@ -1,0 +1,5 @@
+{
+  "name": "@umbraco-cms/mcp-cli-tests",
+  "private": true,
+  "type": "module"
+}

@@ -4,7 +4,6 @@
  * Basic end-to-end tool execution via MCP protocol.
  */
 
-import { describe, it, expect, afterAll, beforeAll } from "@jest/globals";
 import { createCliTestClient, type CliTestClient } from "../helpers/cli-client.js";
 
 describe("Tool Execution (CLI)", () => {

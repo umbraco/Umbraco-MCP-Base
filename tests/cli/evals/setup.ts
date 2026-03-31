@@ -25,7 +25,7 @@ const __dirname = dirname(__filename);
 export const TEST_TIMEOUT = 120_000;
 
 // Path to plugins directory (skills live here)
-const PLUGINS_DIR = join(__dirname, "..", "..", "plugins");
+const PLUGINS_DIR = join(__dirname, "..", "..", "..", "plugins-server");
 
 /**
  * Loads a skill, agent, or command markdown file content

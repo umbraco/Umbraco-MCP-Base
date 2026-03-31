@@ -184,6 +184,7 @@ interface CliArgs {
   "list-tools"?: boolean;
   "describe-tool"?: string;
   "generate-context"?: boolean;
+  "debug-config"?: boolean;
   env?: string;
 }
 
@@ -239,6 +240,11 @@ async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> 
           description: "Generate CONTEXT.md to stdout and exit",
           default: false,
         },
+        "debug-config": {
+          type: "boolean",
+          description: "Print resolved configuration (env vars, CLI flags, sources) and exit",
+          default: false,
+        },
       };
 
       for (const field of fields) {
@@ -280,6 +286,7 @@ export interface GetServerConfigResult {
     listTools: boolean;
     describeTool?: string;
     generateContext: boolean;
+    debugConfig: boolean;
   };
 }
 
@@ -365,7 +372,7 @@ export async function getServerConfig(
   }
 
   // Check if an introspection-only CLI flag is set (no server needed)
-  const isIntrospectionOnly = !!(argv["list-tools"]) || !!(argv["describe-tool"]) || !!(argv["generate-context"]);
+  const isIntrospectionOnly = !!(argv["list-tools"]) || !!(argv["describe-tool"]) || !!(argv["generate-context"]) || !!(argv["debug-config"]);
 
   // Validate required fields (both base and additional) — skip for introspection commands
   if (!isIntrospectionOnly) {
@@ -410,6 +417,7 @@ export async function getServerConfig(
       listTools: !!(argv["list-tools"]),
       describeTool: argv["describe-tool"],
       generateContext: !!(argv["generate-context"]),
+      debugConfig: !!(argv["debug-config"]),
     },
   };
 }

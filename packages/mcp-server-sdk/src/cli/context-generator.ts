@@ -7,7 +7,9 @@
 
 import { ToolDefinition } from "../types/tool-definition.js";
 import { ToolCollectionExport } from "../types/tool-collection.js";
+import { CollectionConfiguration } from "../types/collection-configuration.js";
 import { toolToJsonSchema } from "./introspection.js";
+import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 
 /**
  * Options for context generation.
@@ -17,6 +19,10 @@ export interface GenerateContextOptions {
   serverName?: string;
   /** Server version */
   serverVersion?: string;
+  /** Optional user object to pass to collection tools() for authorization-aware listing */
+  user?: unknown;
+  /** Optional filter configuration — when provided, only matching tools are included */
+  filterConfig?: CollectionConfiguration;
 }
 
 /**
@@ -44,14 +50,30 @@ export function generateContextFile(
 
   for (const collection of collections) {
     const meta = collection.metadata;
+
+    let tools: ReturnType<typeof collection.tools>;
+    try {
+      tools = collection.tools(options?.user);
+    } catch {
+      tools = [];
+    }
+
+    // Apply filtering if provided
+    if (options?.filterConfig) {
+      tools = tools.filter((tool) =>
+        shouldIncludeTool(tool, { collectionName: meta.name, config: options.filterConfig! }),
+      );
+    }
+
+    // Skip collections with no tools after filtering
+    if (tools.length === 0) continue;
+
     lines.push(`### ${meta.displayName ?? meta.name}`);
     lines.push("");
     if (meta.description) {
       lines.push(meta.description);
       lines.push("");
     }
-
-    const tools = collection.tools({});
 
     for (const tool of tools) {
       lines.push(`#### \`${tool.name}\``);

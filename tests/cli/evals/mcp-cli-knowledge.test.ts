@@ -11,7 +11,6 @@
  * "WITH" tests assert correctness. "WITHOUT" tests log results for comparison.
  */
 
-import { describe, it, expect } from "@jest/globals";
 import {
   runSkillTest,
   runAgentContentTest,
@@ -360,6 +359,61 @@ describe("MCP CLI — Introspection", () => {
       ]);
 
       logTestResult(result, `WITHOUT skill: introspection (passed: ${check.passed})`);
+    },
+    TEST_TIMEOUT
+  );
+});
+
+// ============================================================================
+// Introspection + Filtering
+// ============================================================================
+
+describe("MCP CLI — Introspection Respects Filtering", () => {
+  it(
+    "WITH skill: should know that --list-tools respects filtering env vars",
+    async () => {
+      const result = await runSkillTest(
+        "Use the mcp-cli skill. If I set UMBRACO_READONLY=true and run --list-tools, will I see all tools or only the read-only ones? What about other filtering env vars like UMBRACO_INCLUDE_SLICES?",
+        SKILL_PATH,
+        { maxTurns: TURNS, verbose: true }
+      );
+
+      expect(result.success).toBe(true);
+
+      // Should explain that introspection respects filtering
+      const filteringCheck = verifyOutputContainsAny(result.finalResult, [
+        "only read",
+        "read-only",
+        "filtered",
+        "respect",
+        "applies",
+        "only show",
+        "what the LLM would see",
+        "exactly what",
+      ]);
+
+      if (!filteringCheck.passed) logTestResult(result, "WITH skill: introspection + filtering");
+      expect(filteringCheck.passed).toBe(true);
+    },
+    TEST_TIMEOUT
+  );
+
+  it(
+    "WITHOUT skill: baseline — introspection + filtering",
+    async () => {
+      const result = await runAgentContentTest(
+        "If I set UMBRACO_READONLY=true and run --list-tools on an Umbraco MCP server, will I see all tools or only the read-only ones?",
+        BASELINE_SKILL,
+        { maxTurns: 3 }
+      );
+
+      const check = verifyOutputContainsAny(result.finalResult, [
+        "read-only",
+        "filtered",
+        "only",
+      ]);
+
+      logTestResult(result, `WITHOUT skill: introspection + filtering (passed: ${check.passed})`);
     },
     TEST_TIMEOUT
   );
