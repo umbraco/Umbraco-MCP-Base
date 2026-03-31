@@ -58,11 +58,11 @@ Run all tests before merging. Tests are grouped by what they cover and what infr
 | `npm run test:e2e` | Hosted MCP Playwright E2E — OAuth flow, tool selection, readOnly filtering via MCP Inspector | ~15 |
 | `npm run test:e2e:chained` | Chained MCP Playwright E2E — chained tool discovery, consent screen, filtering | ~12 |
 
-### Requires build + running Umbraco + MSW (automatic)
+### Requires `npm run build` (MSW mocks API calls automatically)
 
 | Command | What it tests | Tests |
 |---------|--------------|-------|
-| `npm test -w template` | Template tool handler unit tests (MSW mocks API calls) | ~24 |
+| `npm test -w template` | Template tool handler unit tests — no Umbraco needed, MSW intercepts all API calls | ~24 |
 
 ### Requires `ANTHROPIC_API_KEY` or Claude Code subscription
 
