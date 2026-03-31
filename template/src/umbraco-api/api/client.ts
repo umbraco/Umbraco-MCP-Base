@@ -5,11 +5,11 @@
  *
  * Features:
  * - Delegates to the SDK's UmbracoManagementClient for real API calls
- * - Mock mode for eval tests (set USE_MOCK_API=true)
+ * - Inline mock mode for eval tests (set USE_INLINE_MOCKS=true)
  * - Full response support for API helpers (returnFullResponse option)
  *
- * For unit tests, MSW intercepts requests. See src/mocks/ for setup.
- * For eval tests, USE_MOCK_API=true uses the built-in mock store.
+ * For unit tests, MSW intercepts requests (USE_MOCK_API=true). See src/mocks/ for setup.
+ * For eval tests, USE_INLINE_MOCKS=true uses the built-in mock store (no MSW in subprocess).
  */
 
 import { v4 as uuid } from "uuid";
@@ -18,7 +18,7 @@ import {
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
 
-const isMockMode = () => process.env.USE_MOCK_API === "true";
+const isMockMode = () => process.env.USE_INLINE_MOCKS === "true";
 
 // ============================================================================
 // Mock Data Store (for eval tests running in subprocess)

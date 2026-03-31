@@ -17,11 +17,11 @@ configureEvals({
   mcpServerName: "my-umbraco-mcp",
 
   // Environment variables for the MCP server
-  // USE_MOCK_API=true uses the in-memory mock client for testing
+  // USE_INLINE_MOCKS=true uses the in-memory mock client (eval subprocess can't use MSW)
   // Auth credentials are required even for mock mode (server validates config at startup)
   // DISABLE_MCP_CHAINING=true prevents attempting to connect to chained MCP servers
   serverEnv: {
-    USE_MOCK_API: "true",
+    USE_INLINE_MOCKS: "true",
     DISABLE_MCP_CHAINING: "true",
     UMBRACO_CLIENT_ID: "test-client",
     UMBRACO_CLIENT_SECRET: "test-secret",

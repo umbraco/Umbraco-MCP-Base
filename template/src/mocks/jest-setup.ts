@@ -2,12 +2,15 @@
  * Jest Global Setup for MSW
  *
  * This file is loaded by Jest's setupFilesAfterEnv configuration.
- * MSW intercepts all HTTP requests so unit tests don't need a running
- * Umbraco instance. The mock store is reset between tests.
+ * MSW is only started when USE_MOCK_API=true. This is set in this repo's
+ * monorepo jest setup but NOT in scaffolded projects — scaffolded sites
+ * run tests against a real Umbraco instance by default.
  */
 
 import { setupMswServer } from "@umbraco-cms/mcp-server-sdk/testing";
 import { server } from "./server.js";
 import { resetStore } from "./store.js";
 
-setupMswServer(server, resetStore);
+if (process.env.USE_MOCK_API === "true") {
+  setupMswServer(server, resetStore);
+}

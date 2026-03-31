@@ -30,7 +30,7 @@ import {
 const CHAINING_ENV = {
   // Use mock MCP server for chaining
   USE_MOCK_MCP_CHAIN: "true",
-  USE_MOCK_API: "true",
+  USE_INLINE_MOCKS: "true",
   // Enable MCP chaining (override the default setup which disables it)
   DISABLE_MCP_CHAINING: "false",
   // Dummy credentials (required by server config validation)
