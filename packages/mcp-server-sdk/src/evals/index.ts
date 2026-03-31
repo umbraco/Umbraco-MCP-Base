@@ -34,6 +34,7 @@ export {
   getDefaultMaxBudgetUsd,
   getDefaultTimeoutMs,
   getDefaultVerbosity,
+  getDefaultOnElicitation,
   getToolsString,
   getVerbosity,
   type VerbosityLevel,
