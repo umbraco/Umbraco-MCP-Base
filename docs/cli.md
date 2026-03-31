@@ -1,6 +1,6 @@
 # Umbraco MCP Server CLI Reference
 
-Umbraco MCP servers built with `@umbraco-cms/mcp-server-sdk` run as CLI tools over stdio. The CLI is the interface between your AI agent (Claude Code, Cursor, etc.) and your Umbraco instance — the agent connects via MCP protocol and calls tools in an authenticated context.
+Umbraco MCP servers built with `@umbraco-cms/mcp-server-sdk` run as CLI tools over stdio. The CLI handles authentication and configuration, then exposes tools that talk directly to the Umbraco Management API. Your AI agent (Claude Code, Cursor, etc.) calls these tools to read and manage content in your Umbraco instance.
 
 > **Note:** The CLI is designed to be consumed by AI agents, not operated directly by humans. You configure it with environment variables or flags, then your AI agent connects and interacts with Umbraco through the exposed tools. The introspection commands (`--list-tools`, `--debug-config`, etc.) are the human-facing part — use them to understand and verify what your agent will see.
 
