@@ -12,7 +12,8 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 
 // Mock the toolkit's getServerConfig before importing our module
-const mockGetServerConfig = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockGetServerConfig = jest.fn<(...args: any[]) => any>();
 jest.unstable_mockModule("@umbraco-cms/mcp-server-sdk", () => ({
   getServerConfig: mockGetServerConfig,
 }));

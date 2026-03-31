@@ -5,6 +5,7 @@ import type { Package } from "./list-packages.js";
 import { listPackages } from "./list-packages.js";
 
 export type UmbracoSetupChoice = "create" | "existing" | "skip";
+export type ToolModeChoice = "api-tools" | "container";
 
 export interface FeatureChoices {
   removeMocks: boolean;
@@ -273,6 +274,33 @@ export async function promptConnectionString(): Promise<string> {
   );
 
   return connectionString;
+}
+
+export async function promptToolMode(): Promise<ToolModeChoice> {
+  const { choice } = await prompts(
+    {
+      type: "select",
+      name: "choice",
+      message: "How do you want to expose tools?",
+      choices: [
+        {
+          title: "API tools (Recommended)",
+          description:
+            "Generate client from OpenAPI spec and build tool collections",
+          value: "api-tools",
+        },
+        {
+          title: "Container mode",
+          description:
+            "Wrap other MCP servers via chaining — no direct API tools",
+          value: "container",
+        },
+      ],
+    },
+    { onCancel }
+  );
+
+  return choice;
 }
 
 export async function promptInstallPsw(): Promise<boolean> {

@@ -23,8 +23,8 @@ export function detectFeatures(projectDir: string): DetectResult {
     valid: false,
   };
 
-  // Verify project structure
-  const requiredFiles = ["package.json", "src/index.ts", "orval.config.ts"];
+  // Verify project structure (orval.config.ts is optional — container mode removes it)
+  const requiredFiles = ["package.json", "src/index.ts"];
   const missing: string[] = [];
 
   for (const file of requiredFiles) {
