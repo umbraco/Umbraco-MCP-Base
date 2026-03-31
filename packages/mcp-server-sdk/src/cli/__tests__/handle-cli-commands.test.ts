@@ -267,11 +267,34 @@ describe("handleCliCommands", () => {
 
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(consoleOutput.trim());
-      expect(parsed.auth.clientId.value).toBe("***");
+      expect(parsed.auth.clientId.value).toBe("(set)");
+      expect(parsed.auth.clientSecret.value).toBe("(set)");
       expect(parsed.auth.baseUrl.value).toBe("http://localhost");
       expect(parsed.filtering.readonly.value).toBe(true);
       expect(parsed.filtering.readonly.source).toBe("env");
       expect(parsed.resolvedFilterConfig.readOnly).toBe(true);
+    });
+
+    it("does not leak secrets in output", () => {
+      const mockConfig = {
+        auth: { clientId: "my-secret-id", clientSecret: "my-secret-password", baseUrl: "http://localhost" },
+        configSources: {
+          clientId: "env" as const,
+          clientSecret: "env" as const,
+          baseUrl: "env" as const,
+          envFile: "default" as const,
+        },
+      };
+
+      expect(() =>
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: true },
+          serverConfig: mockConfig as any,
+        }),
+      ).toThrow("process.exit(0)");
+
+      expect(consoleOutput).not.toContain("my-secret-id");
+      expect(consoleOutput).not.toContain("my-secret-password");
     });
 
     it("prints error when serverConfig not provided", () => {

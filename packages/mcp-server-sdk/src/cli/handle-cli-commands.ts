@@ -77,8 +77,8 @@ export function handleCliCommands(
       debug.envFile = { source: configSources.envFile };
       debug.auth = {
         baseUrl: { value: auth.baseUrl, source: configSources.baseUrl },
-        clientId: { value: auth.clientId ? "***" : "(not set)", source: configSources.clientId },
-        clientSecret: { value: auth.clientSecret ? "***" : "(not set)", source: configSources.clientSecret },
+        clientId: { value: auth.clientId ? "(set)" : "(not set)", source: configSources.clientId },
+        clientSecret: { value: auth.clientSecret ? "(set)" : "(not set)", source: configSources.clientSecret },
       };
       debug.filtering = {
         toolModes: { value: rest.toolModes ?? [], source: configSources.toolModes },
