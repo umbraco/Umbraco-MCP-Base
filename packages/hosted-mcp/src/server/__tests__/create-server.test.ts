@@ -127,7 +127,7 @@ describe("mergeConsentChoices", () => {
       readOnly: true,
     };
     const result = mergeConsentChoices(envConfig, choices);
-    expect(result.readOnly).toBe(true);
+    expect(result.readonly).toBe(true);
   });
 
   it("read-only does not set excludeSlices (uses annotation-based filtering)", () => {
@@ -137,7 +137,7 @@ describe("mergeConsentChoices", () => {
     };
     const result = mergeConsentChoices(envConfig, choices);
     expect(result.excludeSlices).toBeUndefined();
-    expect(result.readOnly).toBe(true);
+    expect(result.readonly).toBe(true);
   });
 
   it("read-only preserves existing excludeSlices", () => {
@@ -149,7 +149,7 @@ describe("mergeConsentChoices", () => {
     };
     const result = mergeConsentChoices(envConfig, choices);
     expect(result.excludeSlices).toEqual(["delete"]);
-    expect(result.readOnly).toBe(true);
+    expect(result.readonly).toBe(true);
   });
 
   it("does not modify original env config object", () => {
@@ -173,7 +173,7 @@ describe("mergeConsentChoices", () => {
     };
     const result = mergeConsentChoices(envConfig, choices);
     expect(result.toolModes).toEqual(["content"]);
-    expect(result.readOnly).toBe(true);
+    expect(result.readonly).toBe(true);
   });
 
   it("preserves non-affected config properties", () => {
@@ -378,7 +378,7 @@ describe("mergeConsentChoices with selectedCollections", () => {
     const result = mergeConsentChoices(envConfig, choices, modeRegistry);
     expect(result.toolModes).toEqual(["content"]);
     expect(result.excludeToolCollections).toEqual(["media"]);
-    expect(result.readOnly).toBe(true);
+    expect(result.readonly).toBe(true);
   });
 });
 

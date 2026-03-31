@@ -90,7 +90,7 @@ export async function registerChainedTools(
       slices: workerConfig.includeSlices,
       excludeSlices: workerConfig.excludeSlices,
       modes: workerConfig.toolModes,
-      readOnly: workerConfig.readOnly,
+      readOnly: workerConfig.readonly,
     };
 
     // Apply user consent mode/collection selections for this chained server

@@ -19,6 +19,7 @@ import {
   parseProxiedToolName,
   createCollectionConfigLoader,
   shouldIncludeTool,
+  handleCliCommands,
   type CollectionConfiguration,
 } from "@umbraco-cms/mcp-server-sdk";
 
@@ -83,10 +84,26 @@ const configLoader = createCollectionConfigLoader({
 const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(serverConfig.umbraco);
 
 // ============================================================================
-// Register Tools with Filtering
+// CLI Introspection (runs before server start, exits immediately)
 // ============================================================================
 
 const collections = [exampleCollection, example2Collection, chainedCollection];
+
+// handleCliCommands checks --list-tools, --describe-tool, --generate-context.
+// If any flag is set it prints output and calls process.exit(0).
+// Otherwise it returns and the server continues to start.
+handleCliCommands(collections, {
+  cliFlags: serverConfig.cliFlags,
+  serverName: "my-umbraco-mcp",
+  serverVersion: packageJson.version,
+  filterConfig,
+  serverConfig: serverConfig.umbraco,
+});
+
+// ============================================================================
+// Register Tools with Filtering
+// ============================================================================
+
 let registeredToolCount = 0;
 
 for (const collection of collections) {
