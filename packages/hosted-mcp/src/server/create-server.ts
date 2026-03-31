@@ -173,7 +173,7 @@ export function mergeConsentChoices(
 
   // Merge read-only: user can turn it ON but not OFF
   if (choices.readOnly) {
-    merged.readOnly = true;
+    merged.readonly = true;
   }
 
   return merged;
