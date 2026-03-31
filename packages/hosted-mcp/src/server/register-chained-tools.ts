@@ -157,6 +157,10 @@ export async function registerChainedTools(
         {
           description: `[Proxied from ${pt.serverName}] ${pt.originalTool.description || "No description"}`,
           inputSchema: z.object({}).passthrough(),
+          // Note: outputSchema from chained tools is raw JSON Schema (not Zod),
+          // which registerTool doesn't accept. Structured content passthrough
+          // requires the MCP SDK to support raw JSON Schema for outputSchema,
+          // or tools to define Zod outputSchema directly.
         },
         handler as any,
       );
