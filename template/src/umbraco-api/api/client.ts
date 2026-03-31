@@ -5,11 +5,11 @@
  *
  * Features:
  * - Delegates to the SDK's UmbracoManagementClient for real API calls
- * - Inline mock mode for eval tests (set USE_INLINE_MOCKS=true)
+ * - Mock mode for eval subprocess (set USE_MOCK_API=true)
  * - Full response support for API helpers (returnFullResponse option)
  *
- * For unit tests, MSW intercepts requests (USE_MOCK_API=true). See src/mocks/ for setup.
- * For eval tests, USE_INLINE_MOCKS=true uses the built-in mock store (no MSW in subprocess).
+ * For unit tests, MSW intercepts requests. See src/mocks/ for setup.
+ * For eval tests, USE_MOCK_API=true uses the built-in mock store (eval subprocess, no MSW).
  */
 
 import { v4 as uuid } from "uuid";
@@ -18,7 +18,9 @@ import {
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
 
-const isMockMode = () => process.env.USE_INLINE_MOCKS === "true";
+// Inline mock store is for eval subprocesses where MSW isn't available.
+// When jest is running (JEST_WORKER_ID is set), MSW handles mocking instead.
+const isMockMode = () => process.env.USE_MOCK_API === "true" && !process.env.JEST_WORKER_ID;
 
 // ============================================================================
 // Mock Data Store (for eval tests running in subprocess)

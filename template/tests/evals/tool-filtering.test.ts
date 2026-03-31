@@ -26,7 +26,7 @@ import {
  * DISABLE_MCP_CHAINING prevents attempting to connect to chained MCP servers.
  */
 const BASE_ENV = {
-  USE_INLINE_MOCKS: "true",
+  USE_MOCK_API: "true",
   DISABLE_MCP_CHAINING: "true",
   UMBRACO_CLIENT_ID: "test-client",
   UMBRACO_CLIENT_SECRET: "test-secret",
