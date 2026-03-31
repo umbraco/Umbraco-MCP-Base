@@ -122,7 +122,7 @@ node dist/index.js --umbraco-readonly
 # or: UMBRACO_READONLY=true
 ```
 
-Mutation tools are completely removed from the server — the LLM cannot see or call them. Only tools annotated with `readOnlyHint: true` are registered. Use this when you want zero risk of data modification.
+Mutation tools are completely removed from the server — the agent cannot see or call them. Only tools with `readOnlyHint: true` are registered. Use this when you want zero risk of data modification.
 
 ### Dry-Run Mode
 
@@ -132,7 +132,18 @@ node dist/index.js --umbraco-dry-run
 ```
 
 - Read-only tools execute normally and return real data
-- Mutation tools return a preview of what would happen without calling the Umbraco API
+- Mutation tools return a structured preview without calling the Umbraco API:
+
+```json
+{
+  "dryRun": true,
+  "toolName": "delete-example",
+  "wouldExecute": true,
+  "inputReceived": { "id": "550e8400-e29b-41d4-a716-446655440000" },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true }
+}
+```
+
 - Input validation still runs, so the LLM gets validation feedback
 - Use this for safe exploration — the LLM can try mutation tools without risk
 
@@ -154,9 +165,39 @@ Introspection respects all filtering configuration. If you set `UMBRACO_READONLY
 | Flag | Description |
 |------|-------------|
 | `--list-tools` | Print ASCII table of all tools (name, collection, slices, annotations) |
-| `--describe-tool <name>` | Print full JSON schema and metadata for a specific tool |
-| `--generate-context` | Output structured CONTEXT.md documenting all tools |
+| `--describe-tool <name>` | Print full JSON schema and metadata for a specific tool (exits 1 if not found or filtered out) |
+| `--generate-context` | Output structured CONTEXT.md documenting all tools (pipe to file) |
 | `--debug-config` | Print resolved configuration as JSON (values, sources, filter config) |
+
+### `--list-tools` Output
+
+```
+Name             | Collection | Slices | RO | Destr | Description
+-----------------+------------+--------+----+-------+---------------------------------------------
+get-example      | example    | read   | Y  | N     | Gets an example item by ID.
+list-examples    | example    | list   | Y  | N     | Lists all example items with pagination.
+create-example   | example    | create | N  | N     | Creates a new example item.
+delete-example   | example    | delete | N  | Y     | Deletes an example item by ID.
+```
+
+### `--describe-tool` Output
+
+```json
+{
+  "name": "get-example",
+  "collection": "example",
+  "description": "Gets an example item by ID.",
+  "slices": ["read"],
+  "annotations": { "readOnlyHint": true },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The example item ID (UUID)" }
+    },
+    "required": ["id"]
+  }
+}
+```
 
 ### Examples
 
