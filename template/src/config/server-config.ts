@@ -15,6 +15,7 @@ import {
   getServerConfig,
   type ConfigFieldDefinition,
   type UmbracoServerConfig,
+  type GetServerConfigResult,
 } from "@umbraco-cms/mcp-server-sdk";
 
 // ============================================================================
@@ -91,6 +92,8 @@ export interface ServerConfig {
   umbraco: UmbracoServerConfig;
   /** Custom configuration for this server */
   custom: MyServerCustomConfig;
+  /** CLI introspection flags */
+  cliFlags: GetServerConfigResult["cliFlags"];
 }
 
 let cachedConfig: ServerConfig | null = null;
@@ -120,13 +123,14 @@ export async function loadServerConfig(isStdioMode: boolean): Promise<ServerConf
     return cachedConfig;
   }
 
-  const { config, custom } = await getServerConfig(isStdioMode, {
+  const { config, custom, cliFlags } = await getServerConfig(isStdioMode, {
     additionalFields: customFields,
   });
 
   cachedConfig = {
     umbraco: config,
     custom: custom as MyServerCustomConfig,
+    cliFlags,
   };
 
   return cachedConfig;

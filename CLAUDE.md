@@ -14,7 +14,10 @@ Monorepo for the Umbraco MCP (Model Context Protocol) Server SDK - infrastructur
 | `packages/hosted-mcp/` | Hosted MCP on Cloudflare Workers `@umbraco-cms/mcp-hosted` | Yes |
 | `packages/create-mcp-server/` | CLI scaffolding tool `@umbraco-cms/create-umbraco-mcp-server` | Yes |
 | `template/` | Starter kit for new MCP server projects (copied by create-mcp-server) | No |
-| `plugins/` | Claude Code plugins for Umbraco development | No |
+| `plugins/` | Claude Code plugins for SDK development (building, testing) | No |
+| `plugins-server/` | Claude Code plugins for server operations (CLI, configuration) | No |
+| `tests/cli/` | CLI integration tests and LLM eval tests | No |
+| `docs/` | CLI reference and planning docs | No |
 
 Each workspace has its own CLAUDE.md with detailed guidance.
 
@@ -28,11 +31,58 @@ npm run test          # Test SDK
 
 Workspace-specific commands use `-w` flag: `npm run build -w packages/mcp-server-sdk`
 
+## Test Catalogue
+
+Run all tests before merging. Tests are grouped by what they cover and what infrastructure they need.
+
+### No infrastructure required
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `npm run test` | SDK unit tests (tool filtering, config, helpers, CLI commands) | ~425 |
+| `npm test -w packages/hosted-mcp` | Hosted MCP unit tests (config, auth, consent, server creation) | ~191 |
+| `npm test -w packages/create-mcp-server` | Scaffolding CLI unit tests | ~121 |
+
+### Requires `npm run build` + `npm run build -w template`
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `npm run test:cli` | CLI integration tests — runs built template binary with filtering, introspection, dry-run, input sanitization | ~21 |
+| `npm run test:integration` | Hosted MCP Wrangler integration tests | ~20 |
+| `npm run test:integration:chained` | Chained hosted MCP integration tests | ~18 |
+
+### Requires `npm run build` + running Umbraco instance (`dotnet run --project tests/umbraco-instance`)
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `npm run test:e2e` | Hosted MCP Playwright E2E — OAuth flow, tool selection, readOnly filtering via MCP Inspector | ~15 |
+| `npm run test:e2e:chained` | Chained MCP Playwright E2E — chained tool discovery, consent screen, filtering | ~12 |
+
+### Requires `npm run build` + `USE_MOCK_API=true`
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `npm run test:template` | Template tool handler unit tests — MSW intercepts API calls, no Umbraco needed | ~24 |
+
+Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the real Umbraco API (this is the default for scaffolded sites). The `test:template` script sets it automatically.
+
+### Requires `ANTHROPIC_API_KEY` or Claude Code subscription
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `npm run test:cli:evals` | LLM eval tests — agent uses mcp-cli skill to run and interpret CLI commands | ~21 |
+
+### Requires SQL Server + .NET 10
+
+| Command | What it tests | Tests |
+|---------|--------------|-------|
+| `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server` | Full CLI E2E — scaffold, init, Umbraco setup, discover, generate, compile, test | ~19 |
+
 ## SDK Package Exports
 
 | Entry Point | Purpose |
 |-------------|---------|
-| `@umbraco-cms/mcp-server-sdk` | Main: tool helpers, decorators, types, config loaders |
+| `@umbraco-cms/mcp-server-sdk` | Main: tool helpers, decorators, types, config loaders, CLI helpers (`handleCliCommands`) |
 | `@umbraco-cms/mcp-server-sdk/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
 | `@umbraco-cms/mcp-server-sdk/evals` | LLM eval framework: runScenarioTest, verification helpers |
 | `@umbraco-cms/mcp-server-sdk/config` | Configuration loading |

@@ -7,7 +7,7 @@
  * Reuses SDK components for tool filtering, annotations, and decorators.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   shouldIncludeTool,
@@ -173,7 +173,7 @@ export function mergeConsentChoices(
 
   // Merge read-only: user can turn it ON but not OFF
   if (choices.readOnly) {
-    merged.readOnly = true;
+    merged.readonly = true;
   }
 
   return merged;
@@ -321,7 +321,7 @@ export async function createPerRequestServer(
           outputSchema: tool.outputSchema,
           annotations,
         },
-        tool.handler
+        tool.handler as ToolCallback<typeof tool.inputSchema>
       );
     }
   }

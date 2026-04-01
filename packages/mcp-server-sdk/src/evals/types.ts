@@ -5,6 +5,7 @@
  */
 
 import type { VerbosityLevel } from "./config.js";
+import type { OnElicitation } from "@anthropic-ai/claude-agent-sdk";
 
 /**
  * Result of running an agent test
@@ -75,6 +76,22 @@ export interface AgentTestOptions {
    * Use this when testing server-side filtering (slices, modes, collections).
    */
   useServerFiltering?: boolean;
+  /**
+   * Handler for MCP elicitation requests from the server.
+   * When a tool calls `server.elicitInput()`, this callback provides the response.
+   *
+   * If not set, falls back to the default configured via `configureEvals({ defaultOnElicitation })`.
+   * If neither is set, elicitation requests are auto-accepted with `{ confirm: true }`.
+   *
+   * @example
+   * ```typescript
+   * onElicitation: async (request) => ({
+   *   action: "accept",
+   *   content: { confirm: true }
+   * })
+   * ```
+   */
+  onElicitation?: OnElicitation;
 }
 
 /**

@@ -74,14 +74,14 @@ describe("loadWorkerConfig", () => {
       const config = loadWorkerConfig(
         createMockEnv({ UMBRACO_READONLY: "true" })
       );
-      expect(config.readOnly).toBe(true);
+      expect(config.readonly).toBe(true);
     });
 
     it("does not set readOnly when UMBRACO_READONLY is not true", () => {
       const config = loadWorkerConfig(
         createMockEnv({ UMBRACO_READONLY: "false" })
       );
-      expect(config.readOnly).toBeUndefined();
+      expect(config.readonly).toBeUndefined();
     });
 
     it("does not add write slices to excludeSlices (uses annotation-based filtering)", () => {
@@ -89,7 +89,7 @@ describe("loadWorkerConfig", () => {
         createMockEnv({ UMBRACO_READONLY: "true" })
       );
       expect(config.excludeSlices).toBeUndefined();
-      expect(config.readOnly).toBe(true);
+      expect(config.readonly).toBe(true);
     });
 
     it("preserves existing excludeSlices when readOnly is set", () => {
@@ -100,7 +100,7 @@ describe("loadWorkerConfig", () => {
         })
       );
       expect(config.excludeSlices).toEqual(["search"]);
-      expect(config.readOnly).toBe(true);
+      expect(config.readonly).toBe(true);
     });
   });
 

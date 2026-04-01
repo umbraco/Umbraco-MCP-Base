@@ -59,9 +59,9 @@ export function loadWorkerConfig(env: HostedMcpEnv): ServerConfigForCollections 
     config.excludeSlices = excludeSlices;
   }
 
-  // Readonly mode: annotation-based filtering via readOnly flag
+  // Readonly mode: annotation-based filtering via readonly flag
   if (env.UMBRACO_READONLY === "true") {
-    config.readOnly = true;
+    config.readonly = true;
   }
 
   return config;
@@ -99,7 +99,7 @@ export function loadSiteConfig(
   }
 
   if (site.readOnly === "true") {
-    config.readOnly = true;
+    config.readonly = true;
   }
 
   return config;

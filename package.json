@@ -1,12 +1,13 @@
 {
   "name": "umbraco-mcp-server-sdk-monorepo",
-  "version": "17.0.0-beta.6",
+  "version": "17.0.0-beta.7",
   "private": true,
   "description": "Umbraco MCP Server SDK monorepo",
   "workspaces": [
     "packages/*",
     "template",
-    "plugins"
+    "plugins",
+    "tests/cli"
   ],
   "scripts": {
     "build": "npm run build -w packages/mcp-server-sdk",
@@ -19,7 +20,10 @@
     "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
     "test:integration:chained": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-chained-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
     "test:e2e": "npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts",
-    "test:e2e:chained": "npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts"
+    "test:e2e:chained": "npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts",
+    "test:template": "USE_MOCK_API=true node --experimental-vm-modules node_modules/jest/bin/jest.js --config template/jest.config.ts --testPathPattern=__tests__ --runInBand",
+    "test:cli": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config integration/jest.config.ts --runInBand --forceExit",
+    "test:cli:evals": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config evals/jest.config.ts --runInBand --forceExit"
   },
   "engines": {
     "node": ">=22.0.0"

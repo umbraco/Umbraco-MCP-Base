@@ -1,6 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { resolve } from "path";
 import { configureToolResultMode } from "../helpers/tool-result.js";
+import { configureDryRunMode } from "../helpers/dry-run.js";
 
 export interface UmbracoAuthConfig {
   clientId: string;
@@ -20,6 +21,7 @@ export interface UmbracoServerConfig {
   allowedMediaPaths?: string[];
   readonly?: boolean;
   disableOutputCompatibilityMode?: boolean;
+  dryRun?: boolean;
   configSources: {
     clientId: "cli" | "env";
     clientSecret: "cli" | "env";
@@ -34,6 +36,7 @@ export interface UmbracoServerConfig {
     allowedMediaPaths?: "cli" | "env" | "none";
     readonly?: "cli" | "env" | "none";
     disableOutputCompatibilityMode?: "cli" | "env" | "none";
+    dryRun?: "cli" | "env" | "none";
     envFile: "cli" | "default";
   };
 }
@@ -70,6 +73,7 @@ const CONFIG_FIELDS: ConfigFieldDefinition[] = [
   { name: "allowedMediaPaths", envVar: "UMBRACO_ALLOWED_MEDIA_PATHS", cliFlag: "umbraco-allowed-media-paths", type: "csv-path" },
   { name: "readonly", envVar: "UMBRACO_READONLY", cliFlag: "umbraco-readonly", type: "boolean" },
   { name: "disableOutputCompatibilityMode", envVar: "DISABLE_OUTPUT_COMPATIBILITY_MODE", cliFlag: "disable-output-compatibility-mode", type: "boolean" },
+  { name: "dryRun", envVar: "UMBRACO_DRY_RUN", cliFlag: "umbraco-dry-run", type: "boolean" },
 ];
 
 // ============================================================================
@@ -176,6 +180,11 @@ interface CliArgs {
   "umbraco-allowed-media-paths"?: string;
   "umbraco-readonly"?: boolean;
   "disable-output-compatibility-mode"?: boolean;
+  "umbraco-dry-run"?: boolean;
+  "list-tools"?: boolean;
+  "describe-tool"?: string;
+  "generate-context"?: boolean;
+  "debug-config"?: boolean;
   env?: string;
 }
 
@@ -217,6 +226,25 @@ async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> 
           type: "string",
           description: "Path to custom .env file to load environment variables from",
         },
+        "list-tools": {
+          type: "boolean",
+          description: "Print table of all registered tools and exit",
+          default: false,
+        },
+        "describe-tool": {
+          type: "string",
+          description: "Print full JSON Schema + metadata for a specific tool and exit",
+        },
+        "generate-context": {
+          type: "boolean",
+          description: "Generate CONTEXT.md to stdout and exit",
+          default: false,
+        },
+        "debug-config": {
+          type: "boolean",
+          description: "Print resolved configuration (env vars, CLI flags, sources) and exit",
+          default: false,
+        },
       };
 
       for (const field of fields) {
@@ -253,6 +281,13 @@ export interface GetServerConfigResult {
   config: UmbracoServerConfig;
   /** Custom config values from additionalFields - cast to your own interface */
   custom: Record<string, string | string[] | boolean | undefined>;
+  /** CLI introspection flags (development-time only) */
+  cliFlags: {
+    listTools: boolean;
+    describeTool?: string;
+    generateContext: boolean;
+    debugConfig: boolean;
+  };
 }
 
 export async function getServerConfig(
@@ -301,6 +336,7 @@ export async function getServerConfig(
     allowedMediaPaths: "none",
     readonly: "none",
     disableOutputCompatibilityMode: "none",
+    dryRun: "none",
     envFile: envFileSource,
   };
 
@@ -335,14 +371,19 @@ export async function getServerConfig(
     custom[field.name] = result.value;
   }
 
-  // Validate required fields (both base and additional)
-  for (const field of allFields.filter(f => f.required)) {
-    const result = resolvedValues[field.name];
-    if (!result?.value) {
-      console.error(
-        `${field.envVar} is required (via CLI argument --${field.cliFlag} or .env file)`
-      );
-      process.exit(1);
+  // Check if an introspection-only CLI flag is set (no server needed)
+  const isIntrospectionOnly = !!(argv["list-tools"]) || !!(argv["describe-tool"]) || !!(argv["generate-context"]) || !!(argv["debug-config"]);
+
+  // Validate required fields (both base and additional) — skip for introspection commands
+  if (!isIntrospectionOnly) {
+    for (const field of allFields.filter(f => f.required)) {
+      const result = resolvedValues[field.name];
+      if (!result?.value) {
+        console.error(
+          `${field.envVar} is required (via CLI argument --${field.cliFlag} or .env file)`
+        );
+        process.exit(1);
+      }
     }
   }
 
@@ -362,6 +403,9 @@ export async function getServerConfig(
   // Auto-configure tool result mode from resolved config
   configureToolResultMode(config.disableOutputCompatibilityMode === true);
 
+  // Auto-configure dry-run mode from resolved config
+  configureDryRunMode(config.dryRun === true);
+
   return {
     config: {
       ...config,
@@ -369,5 +413,11 @@ export async function getServerConfig(
       configSources,
     },
     custom,
+    cliFlags: {
+      listTools: !!(argv["list-tools"]),
+      describeTool: argv["describe-tool"],
+      generateContext: !!(argv["generate-context"]),
+      debugConfig: !!(argv["debug-config"]),
+    },
   };
 }

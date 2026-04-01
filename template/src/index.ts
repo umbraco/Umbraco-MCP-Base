@@ -7,7 +7,7 @@
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -19,6 +19,7 @@ import {
   parseProxiedToolName,
   createCollectionConfigLoader,
   shouldIncludeTool,
+  handleCliCommands,
   type CollectionConfiguration,
 } from "@umbraco-cms/mcp-server-sdk";
 
@@ -83,10 +84,26 @@ const configLoader = createCollectionConfigLoader({
 const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(serverConfig.umbraco);
 
 // ============================================================================
-// Register Tools with Filtering
+// CLI Introspection (runs before server start, exits immediately)
 // ============================================================================
 
 const collections = [exampleCollection, example2Collection, chainedCollection];
+
+// handleCliCommands checks --list-tools, --describe-tool, --generate-context.
+// If any flag is set it prints output and calls process.exit(0).
+// Otherwise it returns and the server continues to start.
+handleCliCommands(collections, {
+  cliFlags: serverConfig.cliFlags,
+  serverName: "my-umbraco-mcp",
+  serverVersion: packageJson.version,
+  filterConfig,
+  serverConfig: serverConfig.umbraco,
+});
+
+// ============================================================================
+// Register Tools with Filtering
+// ============================================================================
+
 let registeredToolCount = 0;
 
 for (const collection of collections) {
@@ -110,7 +127,7 @@ for (const collection of collections) {
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       annotations,
-    }, tool.handler);
+    }, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }

@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-server-sdk",
-  "version": "17.0.0-beta.6",
+  "version": "17.0.0-beta.7",
   "type": "module",
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",
@@ -69,11 +69,11 @@
   },
   "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "^1.28.0",
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.76",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@jest/types": "^29.6.3",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.14.1",
@@ -86,7 +86,7 @@
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": ">=0.1.0"
+    "@anthropic-ai/claude-agent-sdk": ">=0.2.39"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
