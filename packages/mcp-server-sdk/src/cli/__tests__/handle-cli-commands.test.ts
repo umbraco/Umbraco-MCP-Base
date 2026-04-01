@@ -309,4 +309,110 @@ describe("handleCliCommands", () => {
       expect(parsed.error).toContain("serverConfig not passed");
     });
   });
+
+  describe("--call", () => {
+    it("calls a tool and prints JSON result", async () => {
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async (args: any) => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, name: "Test" }) }],
+        }),
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgs: '{"id":"abc"}' },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(consoleOutput.trim());
+      expect(parsed.id).toBe("abc");
+      expect(parsed.name).toBe("Test");
+    });
+
+    it("prints structuredContent when available", async () => {
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async () => ({
+          content: [],
+          structuredContent: { total: 3, items: ["a", "b", "c"] },
+        }),
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item" },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(consoleOutput.trim());
+      expect(parsed.total).toBe(3);
+      expect(parsed.items).toEqual(["a", "b", "c"]);
+    });
+
+    it("exits 1 for nonexistent tool", async () => {
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "nonexistent" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("nonexistent");
+      expect(consoleErrorOutput).toContain("--list-tools");
+    });
+
+    it("exits 1 for invalid JSON args", async () => {
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgs: "not-json" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("Invalid JSON");
+    });
+
+    it("exits 1 when tool handler throws", async () => {
+      const failingTool = makeTool({
+        name: "fail-tool",
+        handler: async () => { throw new Error("API timeout"); },
+      });
+      const cols = [makeCollection("items", [failingTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "fail-tool" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("API timeout");
+    });
+
+    it("defaults to empty args when --call-args not provided", async () => {
+      let receivedArgs: any;
+      const callableTool = makeTool({
+        name: "list-items",
+        handler: async (args: any) => {
+          receivedArgs = args;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "list-items" },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(receivedArgs).toEqual({});
+    });
+  });
 });
+

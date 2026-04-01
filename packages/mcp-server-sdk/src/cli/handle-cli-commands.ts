@@ -184,28 +184,30 @@ export async function handleCliCommands(
 
         // Call the tool handler and print result
         const extra = { signal: new AbortController().signal } as any;
+        let result: any;
         try {
-          const result = await Promise.resolve(tool.handler(args as any, extra)) as any;
-
-          if (result.structuredContent) {
-            console.log(JSON.stringify(result.structuredContent, null, 2));
-          } else if (result.content) {
-            for (const item of result.content) {
-              if (item.type === "text") {
-                try {
-                  console.log(JSON.stringify(JSON.parse(item.text), null, 2));
-                } catch {
-                  console.log(item.text);
-                }
-              }
-            }
-          }
-
-          process.exit(result.isError ? 1 : 0);
+          result = await Promise.resolve(tool.handler(args as any, extra));
         } catch (error: any) {
           console.error(`Tool '${toolName}' failed: ${error.message}`);
           process.exit(1);
+          return; // unreachable but satisfies TS
         }
+
+        if (result.structuredContent) {
+          console.log(JSON.stringify(result.structuredContent, null, 2));
+        } else if (result.content) {
+          for (const item of result.content) {
+            if (item.type === "text") {
+              try {
+                console.log(JSON.stringify(JSON.parse(item.text), null, 2));
+              } catch {
+                console.log(item.text);
+              }
+            }
+          }
+        }
+
+        process.exit(result.isError ? 1 : 0);
         return;
       }
     }
