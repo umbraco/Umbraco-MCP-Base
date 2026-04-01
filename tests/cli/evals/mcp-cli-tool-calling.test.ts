@@ -1,8 +1,8 @@
 /**
  * MCP CLI Tool Calling Eval Tests
  *
- * Tests that an agent WITH the mcp-cli skill can actually compose and
- * execute CLI commands via Bash. The agent uses skill knowledge to:
+ * Tests that an agent WITH the mcp-cli skill can compose and execute CLI
+ * commands via Bash. The agent uses skill knowledge to:
  * - Run introspection commands (--list-tools, --describe-tool, --generate-context)
  * - Interpret the output correctly
  * - Answer questions based on the CLI output
@@ -10,25 +10,18 @@
  * These evals require the template to be built (dist/index.js must exist).
  */
 
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
 import {
   runSkillTest,
-  verifyOutputContains,
   verifyOutputContainsAny,
   logTestResult,
   TEST_TIMEOUT,
+  SERVER_BIN,
 } from "./setup.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const SKILL_PATH = "skills/mcp-cli";
+const SKILL = "mcp-cli";
 const TURNS = 8;
 
-// Absolute path to the built template binary (relative to repo root)
-const SERVER_BIN = resolve(__dirname, "../../../template/dist/index.js");
-
-// Common allowed tools — Skill for loading knowledge, Bash for running commands
+// Skill for loading knowledge, Bash for running commands
 const ALLOWED_TOOLS = ["Skill", "Bash", "Read"];
 
 describe("CLI Tool Calling — List Tools", () => {
@@ -39,17 +32,15 @@ describe("CLI Tool Calling — List Tools", () => {
         `Use the mcp-cli skill to learn how to list tools, then run the command against this server binary: ${SERVER_BIN}
 
 Run the command and tell me: how many tools are there, and what are their names?`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
       expect(result.success).toBe(true);
 
-      // Agent should have used Bash to run the CLI
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThan(0);
 
-      // Should mention actual tool names from the template
       const check = verifyOutputContainsAny(result.finalResult, [
         "get-example",
         "list-examples",
@@ -71,7 +62,7 @@ describe("CLI Tool Calling — Describe Tool", () => {
         `Use the mcp-cli skill to learn how to describe a tool, then run the command to describe the "get-example" tool using this server binary: ${SERVER_BIN}
 
 What parameters does get-example accept? What type is the id field?`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
@@ -80,7 +71,6 @@ What parameters does get-example accept? What type is the id field?`,
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThan(0);
 
-      // Should report the id parameter and its type
       const check = verifyOutputContainsAny(result.finalResult, [
         "id",
         "uuid",
@@ -102,7 +92,7 @@ describe("CLI Tool Calling — Generate Context", () => {
         `Use the mcp-cli skill to learn how to generate context documentation, then run the command against this server binary: ${SERVER_BIN}
 
 Summarise what collections and tools the server has.`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
@@ -111,7 +101,6 @@ Summarise what collections and tools the server has.`,
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThan(0);
 
-      // Should mention collections from the template
       const check = verifyOutputContainsAny(result.finalResult, [
         "example",
         "widget",
@@ -136,7 +125,7 @@ Look at the output and tell me:
 1. Which tools are read-only?
 2. Which tools are destructive?
 3. Which tools are neither?`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
@@ -145,13 +134,11 @@ Look at the output and tell me:
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThan(0);
 
-      // Should identify delete-example as destructive
       const destructiveCheck = verifyOutputContainsAny(result.finalResult, [
         "delete-example",
         "destructive",
       ]);
 
-      // Should identify get/list/search as read-only
       const readOnlyCheck = verifyOutputContainsAny(result.finalResult, [
         "get-example",
         "list-examples",
@@ -178,7 +165,7 @@ describe("CLI Tool Calling — Filtered List Tools", () => {
         `Use the mcp-cli skill to learn how introspection and filtering work together, then run the list-tools command against this server binary: ${SERVER_BIN}
 
 Set the UMBRACO_READONLY=true environment variable when running the command. Tell me which tools appear and confirm that no mutation tools (create, update, delete) are listed.`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
@@ -187,14 +174,12 @@ Set the UMBRACO_READONLY=true environment variable when running the command. Tel
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThan(0);
 
-      // Should mention read-only tools
       const readOnlyCheck = verifyOutputContainsAny(result.finalResult, [
         "get-example",
         "list-examples",
         "get-widget",
       ]);
 
-      // Should confirm mutation tools are absent
       const noMutationCheck = verifyOutputContainsAny(result.finalResult, [
         "no mutation",
         "no create",
@@ -227,17 +212,15 @@ describe("CLI Tool Calling — Describe Then Compare", () => {
         `Use the mcp-cli skill, then describe both "get-example" and "create-example" using the server binary: ${SERVER_BIN}
 
 Compare the two tools: what parameters does each accept? Which one is read-only?`,
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, allowedTools: ALLOWED_TOOLS, verbose: true }
       );
 
       expect(result.success).toBe(true);
 
-      // Should have run --describe-tool at least twice (or once with each)
       const bashCalls = result.toolCalls.filter((tc) => tc.name === "Bash");
       expect(bashCalls.length).toBeGreaterThanOrEqual(2);
 
-      // Should compare parameters
       const check = verifyOutputContainsAny(result.finalResult, [
         "id",
         "name",

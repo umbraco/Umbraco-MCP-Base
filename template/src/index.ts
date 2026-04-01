@@ -89,10 +89,10 @@ const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(server
 
 const collections = [exampleCollection, example2Collection, chainedCollection];
 
-// handleCliCommands checks --list-tools, --describe-tool, --generate-context.
+// handleCliCommands checks --list-tools, --describe-tool, --generate-context, --call.
 // If any flag is set it prints output and calls process.exit(0).
 // Otherwise it returns and the server continues to start.
-handleCliCommands(collections, {
+await handleCliCommands(collections, {
   cliFlags: serverConfig.cliFlags,
   serverName: "my-umbraco-mcp",
   serverVersion: packageJson.version,

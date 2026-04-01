@@ -50,7 +50,8 @@ export type ConfigFieldType = "string" | "boolean" | "csv" | "csv-path";
 export interface ConfigFieldDefinition {
   name: string;
   envVar: string;
-  cliFlag: string;
+  /** CLI flag name. Omit for env-only fields (e.g. secrets that must not appear in command lines). */
+  cliFlag?: string;
   type: ConfigFieldType;
   required?: boolean;
   isAuth?: boolean;
@@ -58,9 +59,9 @@ export interface ConfigFieldDefinition {
 }
 
 const CONFIG_FIELDS: ConfigFieldDefinition[] = [
-  // Auth fields (required)
-  { name: "clientId", envVar: "UMBRACO_CLIENT_ID", cliFlag: "umbraco-client-id", type: "string", required: true, isAuth: true },
-  { name: "clientSecret", envVar: "UMBRACO_CLIENT_SECRET", cliFlag: "umbraco-client-secret", type: "string", required: true, isAuth: true, isSecret: true },
+  // Auth fields (required) — no cliFlag for credentials to prevent secret leakage in terminal/logs
+  { name: "clientId", envVar: "UMBRACO_CLIENT_ID", type: "string", required: true, isAuth: true },
+  { name: "clientSecret", envVar: "UMBRACO_CLIENT_SECRET", type: "string", required: true, isAuth: true, isSecret: true },
   { name: "baseUrl", envVar: "UMBRACO_BASE_URL", cliFlag: "umbraco-base-url", type: "string", required: true, isAuth: true },
   // Optional fields
   { name: "toolModes", envVar: "UMBRACO_TOOL_MODES", cliFlag: "umbraco-tool-modes", type: "csv" },
@@ -117,8 +118,8 @@ function resolveConfigField(
   argv: CliArgs,
   field: ConfigFieldDefinition
 ): ResolveResult {
-  const cliKey = field.cliFlag as keyof CliArgs;
-  const cliValue = argv[cliKey];
+  const cliKey = field.cliFlag as keyof CliArgs | undefined;
+  const cliValue = cliKey ? argv[cliKey] : undefined;
   const envValue = process.env[field.envVar];
 
   if (cliValue !== undefined) {
@@ -167,8 +168,6 @@ function logConfigField(
 // ============================================================================
 
 interface CliArgs {
-  "umbraco-client-id"?: string;
-  "umbraco-client-secret"?: string;
   "umbraco-base-url"?: string;
   "umbraco-tool-modes"?: string;
   "umbraco-include-tool-collections"?: string;
@@ -185,6 +184,8 @@ interface CliArgs {
   "describe-tool"?: string;
   "generate-context"?: boolean;
   "debug-config"?: boolean;
+  "call"?: string;
+  "call-args"?: string;
   env?: string;
 }
 
@@ -245,9 +246,18 @@ async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> 
           description: "Print resolved configuration (env vars, CLI flags, sources) and exit",
           default: false,
         },
+        "call": {
+          type: "string",
+          description: "Call a tool by name, print the result as JSON, and exit",
+        },
+        "call-args": {
+          type: "string",
+          description: "JSON arguments for --call (default: {})",
+        },
       };
 
       for (const field of fields) {
+        if (!field.cliFlag) continue; // env-only fields (e.g. secrets)
         const yargsType = field.type === "boolean" ? "boolean" : "string";
         yargsOptions[field.cliFlag] = {
           type: yargsType,
@@ -287,6 +297,8 @@ export interface GetServerConfigResult {
     describeTool?: string;
     generateContext: boolean;
     debugConfig: boolean;
+    callTool?: string;
+    callToolArgs?: string;
   };
 }
 
@@ -379,9 +391,10 @@ export async function getServerConfig(
     for (const field of allFields.filter(f => f.required)) {
       const result = resolvedValues[field.name];
       if (!result?.value) {
-        console.error(
-          `${field.envVar} is required (via CLI argument --${field.cliFlag} or .env file)`
-        );
+        const hint = field.cliFlag
+          ? `(via CLI argument --${field.cliFlag} or .env file)`
+          : `(via environment variable or .env file)`;
+        console.error(`${field.envVar} is required ${hint}`);
         process.exit(1);
       }
     }
@@ -418,6 +431,8 @@ export async function getServerConfig(
       describeTool: argv["describe-tool"],
       generateContext: !!(argv["generate-context"]),
       debugConfig: !!(argv["debug-config"]),
+      callTool: argv["call"],
+      callToolArgs: argv["call-args"],
     },
   };
 }
