@@ -51,7 +51,6 @@ beforeEach(() => {
   originalLog = console.log;
   originalError = console.error;
 
-  // @ts-expect-error - mock process.exit to throw instead of exiting
   process.exit = ((code?: number) => {
     exitCode = code ?? 0;
     throw new Error(`process.exit(${exitCode})`);
@@ -86,7 +85,7 @@ describe("handleCliCommands", () => {
   it("returns normally when no CLI flags are set", () => {
     // Should not throw or exit
     handleCliCommands(collections, {
-      cliFlags: { listTools: false, generateContext: false },
+      cliFlags: { listTools: false, generateContext: false, debugConfig: false },
     });
     expect(exitCode).toBeUndefined();
   });
@@ -94,7 +93,7 @@ describe("handleCliCommands", () => {
   it("handles --list-tools", () => {
     expect(() =>
       handleCliCommands(collections, {
-        cliFlags: { listTools: true, generateContext: false },
+        cliFlags: { listTools: true, generateContext: false, debugConfig: false },
       }),
     ).toThrow("process.exit(0)");
 
@@ -107,7 +106,7 @@ describe("handleCliCommands", () => {
   it("handles --describe-tool for an existing tool", () => {
     expect(() =>
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, describeTool: "get-item", generateContext: false },
+        cliFlags: { listTools: false, describeTool: "get-item", generateContext: false, debugConfig: false },
       }),
     ).toThrow("process.exit(0)");
 
@@ -121,7 +120,7 @@ describe("handleCliCommands", () => {
   it("handles --describe-tool for a missing tool", () => {
     expect(() =>
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, describeTool: "nonexistent", generateContext: false },
+        cliFlags: { listTools: false, describeTool: "nonexistent", generateContext: false, debugConfig: false },
       }),
     ).toThrow("process.exit(1)");
 
@@ -133,7 +132,7 @@ describe("handleCliCommands", () => {
   it("handles --generate-context", () => {
     expect(() =>
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, generateContext: true },
+        cliFlags: { listTools: false, generateContext: true, debugConfig: false },
         serverName: "test-server",
         serverVersion: "1.2.3",
       }),
@@ -164,7 +163,7 @@ describe("handleCliCommands", () => {
     it("--list-tools respects readOnly filter", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: true, generateContext: false },
+          cliFlags: { listTools: true, generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
       ).toThrow("process.exit(0)");
@@ -177,7 +176,7 @@ describe("handleCliCommands", () => {
     it("--list-tools respects disabledTools filter", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: true, generateContext: false },
+          cliFlags: { listTools: true, generateContext: false, debugConfig: false },
           filterConfig: excludeToolFilter,
         }),
       ).toThrow("process.exit(0)");
@@ -190,7 +189,7 @@ describe("handleCliCommands", () => {
     it("--describe-tool returns not found for filtered-out tool", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: false, describeTool: "delete-item", generateContext: false },
+          cliFlags: { listTools: false, describeTool: "delete-item", generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
       ).toThrow("process.exit(1)");
@@ -202,7 +201,7 @@ describe("handleCliCommands", () => {
     it("--describe-tool still works for included tool", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: false, describeTool: "get-item", generateContext: false },
+          cliFlags: { listTools: false, describeTool: "get-item", generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
       ).toThrow("process.exit(0)");
@@ -215,7 +214,7 @@ describe("handleCliCommands", () => {
     it("--generate-context respects filter", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: false, generateContext: true },
+          cliFlags: { listTools: false, generateContext: true, debugConfig: false },
           serverName: "test-server",
           serverVersion: "1.0.0",
           filterConfig: readOnlyFilter,
@@ -230,7 +229,7 @@ describe("handleCliCommands", () => {
     it("--generate-context skips empty collections", () => {
       expect(() =>
         handleCliCommands(collections, {
-          cliFlags: { listTools: false, generateContext: true },
+          cliFlags: { listTools: false, generateContext: true, debugConfig: false },
           serverName: "test-server",
           serverVersion: "1.0.0",
           filterConfig: includeCollectionFilter,

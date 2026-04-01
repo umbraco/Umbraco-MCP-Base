@@ -18,52 +18,66 @@ The LLM never handles authentication — the CLI does that. The LLM just sees th
 
 ## Starting the Server
 
-### Via npx (published package)
+**IMPORTANT: Never pass secrets as CLI arguments.** CLI arguments are visible in terminal output, process listings, shell history, and conversation context. Always use a `.env` file or the MCP config `env` block for `UMBRACO_CLIENT_SECRET`.
 
-```bash
-npx @umbraco-cms/mcp-dev \
-  --umbraco-client-id="your-client-id" \
-  --umbraco-client-secret="your-secret" \
-  --umbraco-base-url="https://localhost:44391"
+### Via .env file (recommended)
+
+Create a `.env` file in the project root:
+```
+UMBRACO_CLIENT_ID=your-client-id
+UMBRACO_CLIENT_SECRET=your-secret
+UMBRACO_BASE_URL=https://localhost:44391
 ```
 
-### Via built project
-
+Then start the server:
 ```bash
-node dist/index.js \
-  --umbraco-client-id="your-client-id" \
-  --umbraco-client-secret="your-secret" \
-  --umbraco-base-url="https://localhost:44391"
-```
-
-### Via environment variables
-
-```bash
-UMBRACO_CLIENT_ID="your-client-id" \
-UMBRACO_CLIENT_SECRET="your-secret" \
-UMBRACO_BASE_URL="https://localhost:44391" \
 node dist/index.js
 ```
 
-Or use a `.env` file (loaded automatically) or specify a custom path with `--env /path/to/.env`.
+Or specify a custom `.env` path:
+```bash
+node dist/index.js --env /path/to/.env
+```
+
+### Via MCP config env block
+
+When configuring in Claude Code's MCP settings, use the `env` block — these are passed as environment variables to the process, not as CLI arguments:
+
+```json
+{
+  "mcpServers": {
+    "umbraco": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "UMBRACO_CLIENT_ID": "your-client-id",
+        "UMBRACO_CLIENT_SECRET": "your-secret",
+        "UMBRACO_BASE_URL": "https://localhost:44391"
+      }
+    }
+  }
+}
+```
+
+Non-secret flags like filtering and modes can safely be passed as CLI arguments or in the `env` block.
 
 CLI arguments take precedence over environment variables, which take precedence over `.env` file values.
 
 ## Configuring Claude Code
 
-Add the server to Claude Code's MCP configuration:
+Add the server to Claude Code's MCP configuration. Always use the `env` block for credentials — never pass secrets in `args`:
 
 ```json
 {
   "mcpServers": {
     "umbraco": {
       "command": "npx",
-      "args": [
-        "@umbraco-cms/mcp-dev",
-        "--umbraco-client-id=your-client-id",
-        "--umbraco-client-secret=your-secret",
-        "--umbraco-base-url=https://localhost:44391"
-      ]
+      "args": ["@umbraco-cms/mcp-dev"],
+      "env": {
+        "UMBRACO_CLIENT_ID": "your-client-id",
+        "UMBRACO_CLIENT_SECRET": "your-secret",
+        "UMBRACO_BASE_URL": "https://localhost:44391"
+      }
     }
   }
 }
@@ -183,9 +197,12 @@ The LLM receives these validation errors and can self-correct and retry. No conf
 
 The CLI requires OAuth client credentials to authenticate against Umbraco. These are created in the Umbraco backoffice under Settings > Users as an "API user":
 
-| Flag | Env Var | Purpose |
-|------|---------|---------|
-| `--umbraco-client-id` | `UMBRACO_CLIENT_ID` | OAuth client ID from API user |
-| `--umbraco-client-secret` | `UMBRACO_CLIENT_SECRET` | OAuth client secret |
-| `--umbraco-base-url` | `UMBRACO_BASE_URL` | Umbraco instance URL |
-| `--env` | _(n/a)_ | Path to custom .env file |
+| Env Var | Purpose |
+|---------|---------|
+| `UMBRACO_CLIENT_ID` | OAuth client ID from API user |
+| `UMBRACO_CLIENT_SECRET` | OAuth client secret |
+| `UMBRACO_BASE_URL` | Umbraco instance URL |
+
+Store these in a `.env` file or in the MCP config `env` block. **Do not pass `UMBRACO_CLIENT_SECRET` as a CLI argument** — it will be visible in terminal output and conversation context.
+
+Introspection commands (`--list-tools`, `--describe-tool`, `--generate-context`) do not require auth credentials.

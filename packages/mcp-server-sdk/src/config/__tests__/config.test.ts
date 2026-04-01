@@ -38,6 +38,13 @@ async function getBaseConfigFresh(isStdioMode: boolean) {
 // Non-existent env file path to prevent loading default .env
 const NON_EXISTENT_ENV_FILE = "/tmp/non-existent-env-file-for-testing.env";
 
+/** Set required auth env vars so CLI tests can focus on non-auth fields */
+function setAuthEnvVars() {
+  process.env.UMBRACO_CLIENT_ID = "test-client-id";
+  process.env.UMBRACO_CLIENT_SECRET = "test-secret";
+  process.env.UMBRACO_BASE_URL = "http://localhost:5000";
+}
+
 describe("getServerConfig", () => {
   let exitCode: number | undefined;
   let consoleOutput: string[] = [];
@@ -85,36 +92,10 @@ describe("getServerConfig", () => {
   });
 
   describe("CLI argument parsing", () => {
-    it("should parse --umbraco-client-id from CLI", async () => {
-      process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
-        "--umbraco-base-url", "http://localhost:5000"
-      ];
-
-      const config = await getBaseConfigFresh(true);
-
-      expect(config.auth.clientId).toBe("test-client-id");
-      expect(config.configSources.clientId).toBe("cli");
-    });
-
-    it("should parse --umbraco-client-secret from CLI", async () => {
-      process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "my-secret-value",
-        "--umbraco-base-url", "http://localhost:5000"
-      ];
-
-      const config = await getBaseConfigFresh(true);
-
-      expect(config.auth.clientSecret).toBe("my-secret-value");
-      expect(config.configSources.clientSecret).toBe("cli");
-    });
-
     it("should parse --umbraco-base-url from CLI", async () => {
+      process.env.UMBRACO_CLIENT_ID = "test-client-id";
+      process.env.UMBRACO_CLIENT_SECRET = "test-secret";
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "https://my-umbraco.example.com"
       ];
 
@@ -125,9 +106,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-tool-modes as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-tool-modes", "content,media,editor"
       ];
@@ -139,9 +119,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-include-tool-collections as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-include-tool-collections", "document,media,data-type"
       ];
@@ -153,9 +132,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-exclude-tool-collections as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-exclude-tool-collections", "user,member"
       ];
@@ -167,9 +145,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-include-slices as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-include-slices", "create,read,tree"
       ];
@@ -181,9 +158,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-exclude-slices as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-exclude-slices", "delete,recycle-bin"
       ];
@@ -195,9 +171,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-include-tools as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-include-tools", "get-document,create-document"
       ];
@@ -209,9 +184,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-exclude-tools as CSV from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-exclude-tools", "delete-document,empty-recycle-bin"
       ];
@@ -223,9 +197,8 @@ describe("getServerConfig", () => {
     });
 
     it("should parse --umbraco-readonly as boolean from CLI", async () => {
+      setAuthEnvVars();
       process.argv = ["node", "index.js",
-        "--umbraco-client-id", "test-client-id",
-        "--umbraco-client-secret", "test-secret",
         "--umbraco-base-url", "http://localhost:5000",
         "--umbraco-readonly"
       ];
@@ -340,35 +313,6 @@ describe("getServerConfig", () => {
   });
 
   describe("CLI precedence over ENV", () => {
-    it("should prefer CLI clientId over ENV", async () => {
-      process.env.UMBRACO_CLIENT_ID = "env-client-id";
-      process.env.UMBRACO_CLIENT_SECRET = "env-secret";
-      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
-      process.argv = ["node", "index.js",
-        "--env", NON_EXISTENT_ENV_FILE,
-        "--umbraco-client-id", "cli-client-id"
-      ];
-
-      const config = await getBaseConfigFresh(true);
-
-      expect(config.auth.clientId).toBe("cli-client-id");
-      expect(config.configSources.clientId).toBe("cli");
-    });
-
-    it("should prefer CLI clientSecret over ENV", async () => {
-      process.env.UMBRACO_CLIENT_ID = "env-client-id";
-      process.env.UMBRACO_CLIENT_SECRET = "env-secret";
-      process.env.UMBRACO_BASE_URL = "http://localhost:5000";
-      process.argv = ["node", "index.js",
-        "--env", NON_EXISTENT_ENV_FILE,
-        "--umbraco-client-secret", "cli-secret"
-      ];
-
-      const config = await getBaseConfigFresh(true);
-
-      expect(config.auth.clientSecret).toBe("cli-secret");
-      expect(config.configSources.clientSecret).toBe("cli");
-    });
 
     it("should prefer CLI toolModes over ENV", async () => {
       process.env.UMBRACO_CLIENT_ID = "env-client-id";
