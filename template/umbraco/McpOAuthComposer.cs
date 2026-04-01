@@ -57,7 +57,7 @@ public class RegisterMcpClientHandler
 
     private async Task RegisterClient(CancellationToken cancellationToken)
     {
-        const string clientId = "umbraco-back-office-mcp";
+        const string clientId = "umbraco-back-office-hosted-mcp";
 
         // Remove any existing registration (e.g. client_credentials from the UI)
         // so we can re-register with authorization_code grant + redirect URI.

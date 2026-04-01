@@ -26,6 +26,7 @@ const config: Config = {
       },
     ],
   },
+  setupFiles: ["<rootDir>/evals/jest-setup.ts"],
   testMatch: ["<rootDir>/evals/**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
