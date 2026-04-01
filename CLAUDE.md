@@ -15,7 +15,6 @@ Monorepo for the Umbraco MCP (Model Context Protocol) Server SDK - infrastructur
 | `packages/create-mcp-server/` | CLI scaffolding tool `@umbraco-cms/create-umbraco-mcp-server` | Yes |
 | `template/` | Starter kit for new MCP server projects (copied by create-mcp-server) | No |
 | `plugins/` | Claude Code plugins for SDK development (building, testing) | No |
-| `plugins-server/` | Claude Code plugins for server operations (CLI, configuration) | No |
 | `tests/cli/` | CLI integration tests and LLM eval tests | No |
 | `docs/` | CLI reference and planning docs | No |
 
