@@ -64,8 +64,14 @@ describe("rejectPathTraversal", () => {
     expect(() => rejectPathTraversal("..\\windows\\system32", "field")).toThrow(ToolValidationError);
   });
 
-  it("should reject absolute paths", () => {
-    expect(() => rejectPathTraversal("/etc/passwd", "field")).toThrow(ToolValidationError);
+  it("should allow absolute paths starting with /", () => {
+    // Umbraco uses /-prefixed paths as identifiers for stylesheets, scripts, etc.
+    expect(() => rejectPathTraversal("/stylesheet.css", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("/scripts/app.js", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("/Views/Partials/header.cshtml", "field")).not.toThrow();
+  });
+
+  it("should reject UNC paths and Windows absolute paths", () => {
     expect(() => rejectPathTraversal("\\\\server\\share", "field")).toThrow(ToolValidationError);
     expect(() => rejectPathTraversal("C:\\Windows", "field")).toThrow(ToolValidationError);
   });

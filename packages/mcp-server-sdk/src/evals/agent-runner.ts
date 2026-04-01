@@ -12,6 +12,7 @@ import {
   getDefaultModel,
   getDefaultMaxTurns,
   getDefaultMaxBudgetUsd,
+  getDefaultOnElicitation,
   getToolsString,
   getVerbosity
 } from "./config.js";
@@ -58,6 +59,11 @@ export async function runAgentTest(
     env.UMBRACO_INCLUDE_TOOLS = toolsString;
   }
 
+  // Resolve elicitation handler: per-test > config default > auto-accept
+  const onElicitation = options?.onElicitation
+    ?? getDefaultOnElicitation()
+    ?? (async () => ({ action: "accept" as const, content: { confirm: true } }));
+
   for await (const message of query({
     prompt,
     options: {
@@ -75,7 +81,8 @@ export async function runAgentTest(
       allowDangerouslySkipPermissions: true,
       tools: [],
       maxTurns: options?.maxTurns ?? getDefaultMaxTurns(),
-      maxBudgetUsd: options?.maxBudget ?? getDefaultMaxBudgetUsd()
+      maxBudgetUsd: options?.maxBudget ?? getDefaultMaxBudgetUsd(),
+      onElicitation,
     }
   })) {
     // Capture init message

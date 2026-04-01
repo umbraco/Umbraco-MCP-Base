@@ -5,6 +5,8 @@
  * Configure these values for your MCP server before running tests.
  */
 
+import type { OnElicitation } from "@anthropic-ai/claude-agent-sdk";
+
 /**
  * Verbosity levels for test output:
  * - "quiet": Minimal output (just pass/fail per test, summary at end)
@@ -33,6 +35,12 @@ export interface EvalConfig {
   defaultTimeoutMs: number;
   /** Default verbosity level */
   defaultVerbosity: VerbosityLevel;
+  /**
+   * Default handler for MCP elicitation requests.
+   * If not set, elicitation requests are auto-accepted with `{ confirm: true }`.
+   * Override per-test via `AgentTestOptions.onElicitation`.
+   */
+  defaultOnElicitation?: OnElicitation;
 }
 
 // Default configuration (can be overridden by configureEvals)
@@ -89,6 +97,7 @@ export function getDefaultMaxTurns(): number { return config.defaultMaxTurns; }
 export function getDefaultMaxBudgetUsd(): number { return config.defaultMaxBudgetUsd; }
 export function getDefaultTimeoutMs(): number { return config.defaultTimeoutMs; }
 export function getDefaultVerbosity(): VerbosityLevel { return config.defaultVerbosity; }
+export function getDefaultOnElicitation(): OnElicitation | undefined { return config.defaultOnElicitation; }
 
 /**
  * Gets tool list as comma-separated string for environment variables.

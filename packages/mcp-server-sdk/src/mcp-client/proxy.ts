@@ -23,6 +23,7 @@ export interface ProxiedTool {
     name: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
   };
 
   /** Prefixed name for the parent client (e.g., "cms--get-document") */
@@ -144,6 +145,7 @@ export function proxiedToolsToDefinitions(
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
 }> {
   return proxiedTools.map((pt) => ({
     name: pt.prefixedName,
@@ -152,5 +154,6 @@ export function proxiedToolsToDefinitions(
       type: "object",
       properties: {},
     },
+    ...(pt.originalTool.outputSchema ? { outputSchema: pt.originalTool.outputSchema } : {}),
   }));
 }

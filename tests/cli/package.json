@@ -1,5 +1,8 @@
 {
   "name": "@umbraco-cms/mcp-cli-tests",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.39"
+  }
 }

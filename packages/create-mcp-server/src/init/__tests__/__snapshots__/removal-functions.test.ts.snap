@@ -10,7 +10,7 @@ exports[`combined removals should snapshot index.ts after chaining-first removal
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -112,7 +112,7 @@ for (const collection of collections) {
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
-      annotations}, tool.handler);
+      annotations}, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }
@@ -147,7 +147,7 @@ exports[`combined removals should snapshot index.ts after examples + chaining re
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -249,7 +249,7 @@ for (const collection of collections) {
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
-      annotations}, tool.handler);
+      annotations}, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }
@@ -284,7 +284,7 @@ exports[`removeChaining should snapshot index.ts after removal 1`] = `
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -388,7 +388,7 @@ for (const collection of collections) {
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
-      annotations}, tool.handler);
+      annotations}, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }
@@ -423,7 +423,7 @@ exports[`removeExamples should snapshot index.ts after removal 1`] = `
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -541,7 +541,7 @@ for (const collection of collections) {
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       annotations,
-    }, tool.handler);
+    }, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }

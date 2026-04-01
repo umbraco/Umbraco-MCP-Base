@@ -43,13 +43,16 @@ export function rejectControlCharacters(value: string, fieldName: string): void 
 }
 
 /**
- * Reject path traversal sequences (../, ..\, absolute paths).
+ * Reject path traversal sequences (../, ..\) and Windows absolute paths.
  * Prevents agents from hallucinating file system paths into API parameters.
+ *
+ * Note: Paths starting with `/` are allowed because Umbraco uses `/`-prefixed
+ * paths as identifiers for stylesheets, scripts, partial views, and static files.
  *
  * @throws ToolValidationError if path traversal is detected
  */
 export function rejectPathTraversal(value: string, fieldName: string): void {
-  if (/\.\.[\\/]/.test(value) || /^[/\\]/.test(value) || /^[a-zA-Z]:[\\/]/.test(value)) {
+  if (/\.\.[\\/]/.test(value) || /^[\\]/.test(value) || /^[a-zA-Z]:[\\/]/.test(value)) {
     throw new ToolValidationError({
       title: "Invalid Input",
       detail: `Field '${fieldName}' contains a path traversal or absolute path. Use a relative identifier (e.g., a name or UUID), not a file system path.`,

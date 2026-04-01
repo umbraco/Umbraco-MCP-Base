@@ -7,7 +7,7 @@
  * Reuses SDK components for tool filtering, annotations, and decorators.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   shouldIncludeTool,
@@ -321,7 +321,7 @@ export async function createPerRequestServer(
           outputSchema: tool.outputSchema,
           annotations,
         },
-        tool.handler
+        tool.handler as ToolCallback<typeof tool.inputSchema>
       );
     }
   }

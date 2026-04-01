@@ -7,7 +7,7 @@
  */
 
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -127,7 +127,7 @@ for (const collection of collections) {
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
       annotations,
-    }, tool.handler);
+    }, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
     registeredToolCount++;
   }
