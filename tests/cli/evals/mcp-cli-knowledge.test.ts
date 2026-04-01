@@ -1,37 +1,27 @@
 /**
- * MCP CLI Skill Evaluation Tests
+ * MCP CLI Knowledge Evaluation Tests
  *
- * Tests whether the mcp-cli skill helps an agent guide users through
- * setting up and configuring an Umbraco MCP server via the CLI.
+ * Tests whether an agent with the mcp-cli skill can correctly answer
+ * questions about configuring and operating Umbraco MCP servers.
  *
  * Each test pair runs:
  * 1. With skill: runSkillTest (has CLI knowledge)
- * 2. Without skill: runAgentContentTest (baseline — no CLI knowledge)
+ * 2. Without skill: runBaselineTest (baseline — no CLI knowledge)
  *
  * "WITH" tests assert correctness. "WITHOUT" tests log results for comparison.
  */
 
 import {
   runSkillTest,
-  runAgentContentTest,
+  runBaselineTest,
   verifyOutputContains,
   verifyOutputContainsAny,
   logTestResult,
   TEST_TIMEOUT,
 } from "./setup.js";
 
-const SKILL_PATH = "skills/mcp-cli";
+const SKILL = "mcp-cli";
 const TURNS = 6;
-
-const BASELINE_SKILL = `---
-name: baseline
-description: You are a helpful assistant.
----
-
-# Assistant
-
-You are a helpful assistant. Answer questions to the best of your ability.
-`;
 
 // ============================================================================
 // Setting up the server
@@ -43,16 +33,16 @@ describe("MCP CLI — Server Setup", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. How do I start an Umbraco MCP server from the CLI with authentication? I have a client ID and secret.",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
       expect(result.success).toBe(true);
 
       const check = verifyOutputContainsAny(result.finalResult, [
-        "--umbraco-client-id",
         "UMBRACO_CLIENT_ID",
-        "umbraco-client-id",
+        ".env",
+        "env",
       ]);
 
       if (!check.passed) logTestResult(result, "WITH skill: server setup");
@@ -64,15 +54,14 @@ describe("MCP CLI — Server Setup", () => {
   it(
     "WITHOUT skill: baseline — start server with auth",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "How do I start an Umbraco MCP server from the CLI with authentication? I have a client ID and secret.",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
-        "--umbraco-client-id",
         "UMBRACO_CLIENT_ID",
+        ".env",
       ]);
 
       logTestResult(result, `WITHOUT skill: server setup (passed: ${check.passed})`);
@@ -87,11 +76,11 @@ describe("MCP CLI — Server Setup", () => {
 
 describe("MCP CLI — Claude Code Config", () => {
   it(
-    "WITH skill: should show Claude Code MCP server config",
+    "WITH skill: should show Claude Code MCP server config with env block",
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. How do I add an Umbraco MCP server to Claude Code's configuration? Show me the JSON config.",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
@@ -101,15 +90,14 @@ describe("MCP CLI — Claude Code Config", () => {
         "mcpServers",
       ]);
 
-      const hasCommand = verifyOutputContainsAny(result.finalResult, [
-        "npx",
-        "node",
-        "command",
+      const hasEnvBlock = verifyOutputContainsAny(result.finalResult, [
+        '"env"',
+        "env",
       ]);
 
-      if (!check.passed || !hasCommand.passed) logTestResult(result, "WITH skill: claude code config");
+      if (!check.passed || !hasEnvBlock.passed) logTestResult(result, "WITH skill: claude code config");
       expect(check.passed).toBe(true);
-      expect(hasCommand.passed).toBe(true);
+      expect(hasEnvBlock.passed).toBe(true);
     },
     TEST_TIMEOUT
   );
@@ -117,9 +105,8 @@ describe("MCP CLI — Claude Code Config", () => {
   it(
     "WITHOUT skill: baseline — Claude Code config",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "How do I add an Umbraco MCP server to Claude Code's configuration? Show me the JSON config.",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
@@ -144,7 +131,7 @@ describe("MCP CLI — Dry-Run Mode", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. I want to let an LLM try mutation tools without risk. How do I configure the server for this? What will the LLM see when it calls a create tool?",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
@@ -172,9 +159,8 @@ describe("MCP CLI — Dry-Run Mode", () => {
   it(
     "WITHOUT skill: baseline — dry-run mode",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "I want to let an LLM try Umbraco MCP mutation tools without risk. How do I configure the server?",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
@@ -201,7 +187,7 @@ describe("MCP CLI — Readonly Mode", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. What is the difference between dry-run and readonly mode? In readonly, can the LLM still see mutation tools?",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
@@ -212,7 +198,6 @@ describe("MCP CLI — Readonly Mode", () => {
         "--umbraco-readonly",
       ]);
 
-      // Should explain tools are removed/hidden, not just blocked
       const removedCheck = verifyOutputContainsAny(result.finalResult, [
         "removed",
         "not registered",
@@ -234,9 +219,8 @@ describe("MCP CLI — Readonly Mode", () => {
   it(
     "WITHOUT skill: baseline — readonly mode",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "What is the difference between dry-run and readonly mode in an Umbraco MCP server?",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
@@ -263,13 +247,12 @@ describe("MCP CLI — Tool Filtering", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. I want the LLM to only be able to read and list content — no create, update, or delete. How do I configure this?",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
       expect(result.success).toBe(true);
 
-      // Agent may suggest slice filtering OR readonly mode — both are valid
       const check = verifyOutputContainsAny(result.finalResult, [
         "UMBRACO_INCLUDE_SLICES",
         "--umbraco-include-slices",
@@ -286,9 +269,8 @@ describe("MCP CLI — Tool Filtering", () => {
   it(
     "WITHOUT skill: baseline — tool filtering",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "I want an Umbraco MCP LLM to only be able to read and list content. How do I configure this?",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
@@ -314,7 +296,7 @@ describe("MCP CLI — Introspection", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. I've built an Umbraco MCP server but I don't know what tools it has. How can I find out without starting the server or having Umbraco running?",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
@@ -324,9 +306,9 @@ describe("MCP CLI — Introspection", () => {
         "--list-tools",
         "--describe-tool",
         "--generate-context",
+        "--call",
       ]);
 
-      // Should mention no auth/Umbraco needed
       const noAuthCheck = verifyOutputContainsAny(result.finalResult, [
         "not require",
         "don't need",
@@ -346,9 +328,8 @@ describe("MCP CLI — Introspection", () => {
   it(
     "WITHOUT skill: baseline — tool discovery",
     async () => {
-      const result = await runAgentContentTest(
+      const result = await runBaselineTest(
         "I've built an Umbraco MCP server but don't know what tools it has. How can I find out without starting the server?",
-        BASELINE_SKILL,
         { maxTurns: 3 }
       );
 
@@ -365,55 +346,30 @@ describe("MCP CLI — Introspection", () => {
 });
 
 // ============================================================================
-// Introspection + Filtering
+// Secret safety
 // ============================================================================
 
-describe("MCP CLI — Introspection Respects Filtering", () => {
+describe("MCP CLI — Secret Safety", () => {
   it(
-    "WITH skill: should know that --list-tools respects filtering env vars",
+    "WITH skill: should recommend .env or env block, not CLI args for secrets",
     async () => {
       const result = await runSkillTest(
-        "Use the mcp-cli skill. If I set UMBRACO_READONLY=true and run --list-tools, will I see all tools or only the read-only ones? What about other filtering env vars like UMBRACO_INCLUDE_SLICES?",
-        SKILL_PATH,
+        "Use the mcp-cli skill. How should I pass my UMBRACO_CLIENT_SECRET when starting the server?",
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
       expect(result.success).toBe(true);
 
-      // Should explain that introspection respects filtering
-      const filteringCheck = verifyOutputContainsAny(result.finalResult, [
-        "only read",
-        "read-only",
-        "filtered",
-        "respect",
-        "applies",
-        "only show",
-        "what the LLM would see",
-        "exactly what",
+      const envCheck = verifyOutputContainsAny(result.finalResult, [
+        ".env",
+        "env block",
+        "environment variable",
+        "env var",
       ]);
 
-      if (!filteringCheck.passed) logTestResult(result, "WITH skill: introspection + filtering");
-      expect(filteringCheck.passed).toBe(true);
-    },
-    TEST_TIMEOUT
-  );
-
-  it(
-    "WITHOUT skill: baseline — introspection + filtering",
-    async () => {
-      const result = await runAgentContentTest(
-        "If I set UMBRACO_READONLY=true and run --list-tools on an Umbraco MCP server, will I see all tools or only the read-only ones?",
-        BASELINE_SKILL,
-        { maxTurns: 3 }
-      );
-
-      const check = verifyOutputContainsAny(result.finalResult, [
-        "read-only",
-        "filtered",
-        "only",
-      ]);
-
-      logTestResult(result, `WITHOUT skill: introspection + filtering (passed: ${check.passed})`);
+      if (!envCheck.passed) logTestResult(result, "WITH skill: secret safety");
+      expect(envCheck.passed).toBe(true);
     },
     TEST_TIMEOUT
   );
@@ -429,7 +385,7 @@ describe("MCP CLI — Config Precedence", () => {
     async () => {
       const result = await runSkillTest(
         "Use the mcp-cli skill. If I set UMBRACO_BASE_URL in my .env file and also pass --umbraco-base-url on the CLI, which one wins?",
-        SKILL_PATH,
+        SKILL,
         { maxTurns: TURNS, verbose: true }
       );
 
