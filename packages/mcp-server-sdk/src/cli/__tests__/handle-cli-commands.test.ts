@@ -51,7 +51,7 @@ beforeEach(() => {
   originalLog = console.log;
   originalError = console.error;
 
-  // @ts-expect-error - mock process.exit to throw instead of exiting
+  // Mock process.exit to throw instead of exiting
   process.exit = ((code?: number) => {
     exitCode = code ?? 0;
     throw new Error(`process.exit(${exitCode})`);
@@ -83,20 +83,20 @@ describe("handleCliCommands", () => {
     makeCollection("items", [tool1, tool2]),
   ];
 
-  it("returns normally when no CLI flags are set", () => {
+  it("returns normally when no CLI flags are set", async () => {
     // Should not throw or exit
     handleCliCommands(collections, {
-      cliFlags: { listTools: false, generateContext: false },
+      cliFlags: { listTools: false, generateContext: false, debugConfig: false },
     });
     expect(exitCode).toBeUndefined();
   });
 
-  it("handles --list-tools", () => {
-    expect(() =>
+  it("handles --list-tools", async () => {
+    await expect(
       handleCliCommands(collections, {
-        cliFlags: { listTools: true, generateContext: false },
+        cliFlags: { listTools: true, generateContext: false, debugConfig: false },
       }),
-    ).toThrow("process.exit(0)");
+    ).rejects.toThrow("process.exit(0)");
 
     expect(exitCode).toBe(0);
     expect(consoleOutput).toContain("get-item");
@@ -104,12 +104,12 @@ describe("handleCliCommands", () => {
     expect(consoleOutput).toContain("items");
   });
 
-  it("handles --describe-tool for an existing tool", () => {
-    expect(() =>
+  it("handles --describe-tool for an existing tool", async () => {
+    await expect(
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, describeTool: "get-item", generateContext: false },
+        cliFlags: { listTools: false, describeTool: "get-item", generateContext: false, debugConfig: false },
       }),
-    ).toThrow("process.exit(0)");
+    ).rejects.toThrow("process.exit(0)");
 
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(consoleOutput.trim());
@@ -118,26 +118,26 @@ describe("handleCliCommands", () => {
     expect(parsed.slices).toEqual(["read"]);
   });
 
-  it("handles --describe-tool for a missing tool", () => {
-    expect(() =>
+  it("handles --describe-tool for a missing tool", async () => {
+    await expect(
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, describeTool: "nonexistent", generateContext: false },
+        cliFlags: { listTools: false, describeTool: "nonexistent", generateContext: false, debugConfig: false },
       }),
-    ).toThrow("process.exit(1)");
+    ).rejects.toThrow("process.exit(1)");
 
     expect(exitCode).toBe(1);
     expect(consoleErrorOutput).toContain("nonexistent");
     expect(consoleErrorOutput).toContain("--list-tools");
   });
 
-  it("handles --generate-context", () => {
-    expect(() =>
+  it("handles --generate-context", async () => {
+    await expect(
       handleCliCommands(collections, {
-        cliFlags: { listTools: false, generateContext: true },
+        cliFlags: { listTools: false, generateContext: true, debugConfig: false },
         serverName: "test-server",
         serverVersion: "1.2.3",
       }),
-    ).toThrow("process.exit(0)");
+    ).rejects.toThrow("process.exit(0)");
 
     expect(exitCode).toBe(0);
     expect(consoleOutput).toContain("test-server");
@@ -161,81 +161,81 @@ describe("handleCliCommands", () => {
       enabledCollections: ["nonexistent"],
     };
 
-    it("--list-tools respects readOnly filter", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: true, generateContext: false },
+    it("--list-tools respects readOnly filter", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: true, generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       expect(consoleOutput).toContain("get-item");
       expect(consoleOutput).not.toContain("delete-item");
     });
 
-    it("--list-tools respects disabledTools filter", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: true, generateContext: false },
+    it("--list-tools respects disabledTools filter", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: true, generateContext: false, debugConfig: false },
           filterConfig: excludeToolFilter,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       expect(consoleOutput).toContain("get-item");
       expect(consoleOutput).not.toContain("delete-item");
     });
 
-    it("--describe-tool returns not found for filtered-out tool", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: false, describeTool: "delete-item", generateContext: false },
+    it("--describe-tool returns not found for filtered-out tool", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: false, describeTool: "delete-item", generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
-      ).toThrow("process.exit(1)");
+      ).rejects.toThrow("process.exit(1)");
 
       expect(exitCode).toBe(1);
       expect(consoleErrorOutput).toContain("delete-item");
     });
 
-    it("--describe-tool still works for included tool", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: false, describeTool: "get-item", generateContext: false },
+    it("--describe-tool still works for included tool", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: false, describeTool: "get-item", generateContext: false, debugConfig: false },
           filterConfig: readOnlyFilter,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(consoleOutput.trim());
       expect(parsed.name).toBe("get-item");
     });
 
-    it("--generate-context respects filter", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: false, generateContext: true },
+    it("--generate-context respects filter", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: true, debugConfig: false },
           serverName: "test-server",
           serverVersion: "1.0.0",
           filterConfig: readOnlyFilter,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       expect(consoleOutput).toContain("get-item");
       expect(consoleOutput).not.toContain("delete-item");
     });
 
-    it("--generate-context skips empty collections", () => {
-      expect(() =>
-        handleCliCommands(collections, {
-          cliFlags: { listTools: false, generateContext: true },
+    it("--generate-context skips empty collections", async () => {
+      await expect(
+      handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: true, debugConfig: false },
           serverName: "test-server",
           serverVersion: "1.0.0",
           filterConfig: includeCollectionFilter,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       // Collection header should not appear since all tools are filtered out
@@ -244,7 +244,7 @@ describe("handleCliCommands", () => {
   });
 
   describe("--debug-config", () => {
-    it("prints resolved config as JSON and exits", () => {
+    it("prints resolved config as JSON and exits", async () => {
       const mockConfig = {
         auth: { clientId: "test-id", clientSecret: "test-secret", baseUrl: "http://localhost" },
         readonly: true,
@@ -257,13 +257,13 @@ describe("handleCliCommands", () => {
         },
       };
 
-      expect(() =>
-        handleCliCommands(collections, {
+      await expect(
+      handleCliCommands(collections, {
           cliFlags: { listTools: false, generateContext: false, debugConfig: true },
           serverConfig: mockConfig as any,
           filterConfig: { ...DEFAULT_COLLECTION_CONFIG, readOnly: true },
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(consoleOutput.trim());
@@ -275,7 +275,7 @@ describe("handleCliCommands", () => {
       expect(parsed.resolvedFilterConfig.readOnly).toBe(true);
     });
 
-    it("does not leak secrets in output", () => {
+    it("does not leak secrets in output", async () => {
       const mockConfig = {
         auth: { clientId: "my-secret-id", clientSecret: "my-secret-password", baseUrl: "http://localhost" },
         configSources: {
@@ -286,27 +286,133 @@ describe("handleCliCommands", () => {
         },
       };
 
-      expect(() =>
-        handleCliCommands(collections, {
+      await expect(
+      handleCliCommands(collections, {
           cliFlags: { listTools: false, generateContext: false, debugConfig: true },
           serverConfig: mockConfig as any,
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(consoleOutput).not.toContain("my-secret-id");
       expect(consoleOutput).not.toContain("my-secret-password");
     });
 
-    it("prints error when serverConfig not provided", () => {
-      expect(() =>
-        handleCliCommands(collections, {
+    it("prints error when serverConfig not provided", async () => {
+      await expect(
+      handleCliCommands(collections, {
           cliFlags: { listTools: false, generateContext: false, debugConfig: true },
         }),
-      ).toThrow("process.exit(0)");
+      ).rejects.toThrow("process.exit(0)");
 
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(consoleOutput.trim());
       expect(parsed.error).toContain("serverConfig not passed");
     });
   });
+
+  describe("--call", () => {
+    it("calls a tool and prints JSON result", async () => {
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async (args: any) => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, name: "Test" }) }],
+        }),
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgs: '{"id":"abc"}' },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(consoleOutput.trim());
+      expect(parsed.id).toBe("abc");
+      expect(parsed.name).toBe("Test");
+    });
+
+    it("prints structuredContent when available", async () => {
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async () => ({
+          content: [],
+          structuredContent: { total: 3, items: ["a", "b", "c"] },
+        }),
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item" },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(consoleOutput.trim());
+      expect(parsed.total).toBe(3);
+      expect(parsed.items).toEqual(["a", "b", "c"]);
+    });
+
+    it("exits 1 for nonexistent tool", async () => {
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "nonexistent" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("nonexistent");
+      expect(consoleErrorOutput).toContain("--list-tools");
+    });
+
+    it("exits 1 for invalid JSON args", async () => {
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgs: "not-json" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("Invalid JSON");
+    });
+
+    it("exits 1 when tool handler throws", async () => {
+      const failingTool = makeTool({
+        name: "fail-tool",
+        handler: async () => { throw new Error("API timeout"); },
+      });
+      const cols = [makeCollection("items", [failingTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "fail-tool" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("API timeout");
+    });
+
+    it("defaults to empty args when --call-args not provided", async () => {
+      let receivedArgs: any;
+      const callableTool = makeTool({
+        name: "list-items",
+        handler: async (args: any) => {
+          receivedArgs = args;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "list-items" },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(receivedArgs).toEqual({});
+    });
+  });
 });
+

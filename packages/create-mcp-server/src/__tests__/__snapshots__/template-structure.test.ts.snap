@@ -3,6 +3,7 @@
 exports[`template structure should match the expected file listing 1`] = `
 [
   ".claude/settings.json",
+  ".claude/skills/mcp-cli/SKILL.md",
   ".dev.vars.example",
   ".discover.json",
   ".env.example",

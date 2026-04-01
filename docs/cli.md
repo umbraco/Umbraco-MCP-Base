@@ -12,14 +12,15 @@ Umbraco MCP servers built with `@umbraco-cms/mcp-server-sdk` run as CLI tools ov
 
 ## Authentication
 
-| Flag | Env Var | Required | Description |
-|------|---------|----------|-------------|
-| `--umbraco-client-id` | `UMBRACO_CLIENT_ID` | Yes | OAuth client ID from Umbraco API user |
-| `--umbraco-client-secret` | `UMBRACO_CLIENT_SECRET` | Yes | OAuth client secret |
-| `--umbraco-base-url` | `UMBRACO_BASE_URL` | Yes | Umbraco instance URL |
-| `--env` | — | No | Path to custom `.env` file |
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `UMBRACO_CLIENT_ID` | Yes | OAuth client ID from Umbraco API user |
+| `UMBRACO_CLIENT_SECRET` | Yes | OAuth client secret |
+| `UMBRACO_BASE_URL` | Yes | Umbraco instance URL |
 
 Auth credentials are created in the Umbraco backoffice under **Settings > Users** as an API user.
+
+**IMPORTANT: Never pass secrets as CLI arguments.** CLI arguments are visible in terminal output, process listings, shell history, and AI conversation context. Always use a `.env` file or the MCP config `env` block for credentials.
 
 ### Configuration Precedence
 
@@ -30,38 +31,31 @@ A `.env` file in the current working directory is loaded automatically. Use `--e
 ## Starting the Server
 
 ```bash
-# Via npx (published package)
-npx @umbraco-cms/mcp-dev \
-  --umbraco-client-id="your-client-id" \
-  --umbraco-client-secret="your-secret" \
-  --umbraco-base-url="https://localhost:44391"
-
-# Via built project
-node dist/index.js \
-  --umbraco-client-id="your-client-id" \
-  --umbraco-client-secret="your-secret" \
-  --umbraco-base-url="https://localhost:44391"
-
-# Via environment variables
-UMBRACO_CLIENT_ID="your-client-id" \
-UMBRACO_CLIENT_SECRET="your-secret" \
-UMBRACO_BASE_URL="https://localhost:44391" \
+# Via .env file (recommended) — create .env with credentials, then:
 node dist/index.js
+
+# Via npx with .env file
+npx @umbraco-cms/mcp-dev
+
+# Via custom .env path
+node dist/index.js --env /path/to/.env
 ```
 
 ### Claude Code Configuration
+
+Always use the `env` block for credentials — these are passed as environment variables to the process, not as CLI arguments:
 
 ```json
 {
   "mcpServers": {
     "umbraco": {
       "command": "npx",
-      "args": [
-        "@umbraco-cms/mcp-dev",
-        "--umbraco-client-id=your-client-id",
-        "--umbraco-client-secret=your-secret",
-        "--umbraco-base-url=https://localhost:44391"
-      ]
+      "args": ["@umbraco-cms/mcp-dev"],
+      "env": {
+        "UMBRACO_CLIENT_ID": "your-client-id",
+        "UMBRACO_CLIENT_SECRET": "your-secret",
+        "UMBRACO_BASE_URL": "https://localhost:44391"
+      }
     }
   }
 }
