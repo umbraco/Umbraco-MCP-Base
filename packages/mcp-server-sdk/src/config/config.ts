@@ -185,6 +185,8 @@ interface CliArgs {
   "describe-tool"?: string;
   "generate-context"?: boolean;
   "debug-config"?: boolean;
+  "call"?: string;
+  "call-args"?: string;
   env?: string;
 }
 
@@ -245,6 +247,14 @@ async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> 
           description: "Print resolved configuration (env vars, CLI flags, sources) and exit",
           default: false,
         },
+        "call": {
+          type: "string",
+          description: "Call a tool by name, print the result as JSON, and exit",
+        },
+        "call-args": {
+          type: "string",
+          description: "JSON arguments for --call (default: {})",
+        },
       };
 
       for (const field of fields) {
@@ -287,6 +297,8 @@ export interface GetServerConfigResult {
     describeTool?: string;
     generateContext: boolean;
     debugConfig: boolean;
+    callTool?: string;
+    callToolArgs?: string;
   };
 }
 
@@ -418,6 +430,8 @@ export async function getServerConfig(
       describeTool: argv["describe-tool"],
       generateContext: !!(argv["generate-context"]),
       debugConfig: !!(argv["debug-config"]),
+      callTool: argv["call"],
+      callToolArgs: argv["call-args"],
     },
   };
 }

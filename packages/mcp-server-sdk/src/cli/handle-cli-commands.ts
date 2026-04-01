@@ -63,10 +63,10 @@ function getToolsForCli(col: ToolCollectionExport<any>, user?: unknown): ReturnT
   }
 }
 
-export function handleCliCommands(
+export async function handleCliCommands(
   collections: ToolCollectionExport<any>[],
   options: HandleCliCommandsOptions,
-): void {
+): Promise<void> {
   const { cliFlags, serverName, serverVersion, user, filterConfig, serverConfig } = options;
 
   if (cliFlags?.debugConfig) {
@@ -158,5 +158,61 @@ export function handleCliCommands(
     });
     console.log(context);
     process.exit(0);
+  }
+
+  if (cliFlags?.callTool) {
+    const toolName = cliFlags.callTool;
+
+    // Find the tool across all collections
+    for (const col of collections) {
+      const tool = getToolsForCli(col, user).find((t) => t.name === toolName);
+      if (tool) {
+        if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
+          break; // Tool exists but is filtered out
+        }
+
+        // Parse arguments
+        let args: Record<string, unknown> = {};
+        if (cliFlags.callToolArgs) {
+          try {
+            args = JSON.parse(cliFlags.callToolArgs);
+          } catch {
+            console.error(`Invalid JSON for --call-args: ${cliFlags.callToolArgs}`);
+            process.exit(1);
+          }
+        }
+
+        // Call the tool handler and print result
+        const extra = { signal: new AbortController().signal } as any;
+        try {
+          const result = await Promise.resolve(tool.handler(args as any, extra)) as any;
+
+          if (result.structuredContent) {
+            console.log(JSON.stringify(result.structuredContent, null, 2));
+          } else if (result.content) {
+            for (const item of result.content) {
+              if (item.type === "text") {
+                try {
+                  console.log(JSON.stringify(JSON.parse(item.text), null, 2));
+                } catch {
+                  console.log(item.text);
+                }
+              }
+            }
+          }
+
+          process.exit(result.isError ? 1 : 0);
+        } catch (error: any) {
+          console.error(`Tool '${toolName}' failed: ${error.message}`);
+          process.exit(1);
+        }
+        return;
+      }
+    }
+
+    console.error(
+      `Tool '${toolName}' not found. Use --list-tools to see available tools.`,
+    );
+    process.exit(1);
   }
 }
