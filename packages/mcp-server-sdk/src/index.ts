@@ -84,6 +84,22 @@ export {
   withDryRun,
 } from "./helpers/dry-run.js";
 
+// Server Reference (for tools that need elicitation)
+export {
+  setServerRef,
+  getServerRef,
+  clearServerRef,
+} from "./helpers/server-ref.js";
+
+// Elicitation Helpers
+export {
+  confirmAction,
+  type ConfirmActionOptions,
+} from "./helpers/elicitation.js";
+
+// Chained Result Extraction
+export { extractChainedResult } from "./helpers/chained-result.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,
