@@ -76,10 +76,7 @@ jobs:
       - name: Wrangler integration tests
         run: npm run test:integration
 
-      - name: Chained Wrangler integration tests
-        run: npm run test:integration:chained
-
-      # ── Playwright E2E (needs Umbraco) ──
+      # ── Tests requiring Umbraco ──
 
       - name: Setup .NET dev certs
         run: dotnet dev-certs https
@@ -112,6 +109,9 @@ jobs:
           tail -50 /tmp/umbraco.log
           exit 1
         timeout-minutes: 6
+
+      - name: Chained Wrangler integration tests
+        run: npm run test:integration:chained
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
