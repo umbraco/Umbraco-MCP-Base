@@ -211,6 +211,17 @@ export function createAuthorizeHandler(
     // Handle POST (consent form submission)
     if (request.method === "POST") {
       const formData = await request.formData();
+
+      // Validate CSRF state token (generated on GET, embedded as hidden field)
+      const submittedState = formData.get("state")?.toString();
+      if (!submittedState) {
+        return new Response("Missing consent state", { status: 400 });
+      }
+      const consentStateData = await consumeOAuthState(env.OAUTH_KV, `consent:${submittedState}`);
+      if (!consentStateData || consentStateData.clientId !== authRequest.clientId) {
+        return new Response("Invalid or expired consent state", { status: 403 });
+      }
+
       const action = formData.get("action");
 
       if (action === "deny") {
