@@ -232,13 +232,17 @@ async function main() {
   console.log("  Setting client credentials...");
   await setClientCredentials(bearerToken, userId);
 
-  // Verify
+  // Verify (with retry — OpenIddict may need a moment to register the client)
   console.log("  Verifying...");
-  if (await checkExisting()) {
-    console.log("API user created and verified successfully");
-  } else {
-    throw new Error("API user was created but verification failed");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (await checkExisting()) {
+      console.log("API user created and verified successfully");
+      return;
+    }
+    console.log(`  Verification attempt ${attempt + 1}/5 failed, waiting 2s...`);
+    await new Promise((r) => setTimeout(r, 2000));
   }
+  throw new Error("API user was created but verification failed after 5 attempts");
 }
 
 main().catch((err) => {
