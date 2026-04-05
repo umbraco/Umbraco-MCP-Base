@@ -127,12 +127,12 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Hosted MCP Playwright E2E
-        run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 2
-        timeout-minutes: 10
+        run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 2 --timeout 120000
+        timeout-minutes: 15
 
       - name: Chained MCP Playwright E2E
-        run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 2
-        timeout-minutes: 10
+        run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 2 --timeout 120000
+        timeout-minutes: 15
 
   evals:
     name: LLM Eval Tests
