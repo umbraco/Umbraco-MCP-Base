@@ -127,12 +127,22 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Hosted MCP Playwright E2E
-        run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 2 --timeout 120000
+        run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 1 --timeout 120000
         timeout-minutes: 15
 
       - name: Chained MCP Playwright E2E
-        run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 2 --timeout 120000
-        timeout-minutes: 15
+        run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 1 --timeout 120000
+        timeout-minutes: 10
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: |
+            tests/hosted-mcp-e2e/test-results/
+            tests/hosted-chained-mcp-e2e/test-results/
+          retention-days: 7
 
   evals:
     name: LLM Eval Tests

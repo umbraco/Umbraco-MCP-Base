@@ -7,6 +7,8 @@ export default defineConfig({
   workers: 1,
   use: {
     ignoreHTTPSErrors: true,
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
   },
   projects: [
     {
