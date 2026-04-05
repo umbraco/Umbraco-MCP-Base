@@ -38,5 +38,8 @@
     "Model Context Protocol"
   ],
   "author": "Phil Whittaker",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.21.1"
+  }
 }

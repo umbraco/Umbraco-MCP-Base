@@ -116,15 +116,14 @@ jobs:
       - name: Chained Wrangler integration tests
         run: npm run test:integration:chained
 
-      # Playwright E2E tests require @modelcontextprotocol/inspector which
-      # isn't a project dependency — runs via npx which is unreliable in CI.
-      # TODO: Add inspector as devDependency and enable these tests.
-      # - name: Install Playwright browsers
-      #   run: npx playwright install --with-deps chromium
-      # - name: Hosted MCP Playwright E2E
-      #   run: npm run test:e2e
-      # - name: Chained MCP Playwright E2E
-      #   run: npm run test:e2e:chained
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Hosted MCP Playwright E2E
+        run: npm run test:e2e
+
+      - name: Chained MCP Playwright E2E
+        run: npm run test:e2e:chained
 
   evals:
     name: LLM Eval Tests
