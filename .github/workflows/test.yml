@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      UMBRACO_CLIENT_ID: umbraco-back-office-mcp
+      UMBRACO_CLIENT_ID: umbraco-mcp-api-user
       UMBRACO_CLIENT_SECRET: '1234567890'
       UMBRACO_BASE_URL: https://localhost:5201
       NODE_TLS_REJECT_UNAUTHORIZED: '0'
