@@ -50,7 +50,7 @@ public class RegisterMcpClientHandler
 
     private async Task RegisterClient(CancellationToken cancellationToken)
     {
-        const string clientId = "umbraco-back-office-mcp";
+        const string clientId = "umbraco-back-office-hosted-mcp";
 
         var existing = await _applicationManager.FindByClientIdAsync(clientId, cancellationToken);
         if (existing is not null)

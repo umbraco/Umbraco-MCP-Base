@@ -12,7 +12,7 @@ let workerUrl: string | undefined;
 const BASE_VARS = {
   UMBRACO_BASE_URL: process.env.CI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",
-  UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+  UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-hosted-mcp",
   UMBRACO_API_CLIENT_ID: "umbraco-back-office-mcp",
   UMBRACO_API_CLIENT_SECRET: "1234567890",
   COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
