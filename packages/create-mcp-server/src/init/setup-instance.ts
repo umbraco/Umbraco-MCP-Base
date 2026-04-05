@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { buildWithPsw } from "./psw-cli.js";
 
 export interface SetupInstanceOptions {
@@ -60,6 +61,15 @@ export async function setupInstance(
     connectionString: opts.connectionString,
     adminEmail,
     adminPassword,
+  });
+
+  // Add DevelopmentMode package — provides Swagger UI and the umbraco-swagger
+  // OAuth client needed for API user creation via the discover flow
+  execFileSync("dotnet", ["add", "package", "Umbraco.Cms.DevelopmentMode.Backoffice"], {
+    cwd: instanceDir,
+    encoding: "utf-8",
+    timeout: 60_000,
+    stdio: "inherit",
   });
 
   // Write connection string and unattended install config to appsettings
