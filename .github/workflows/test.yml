@@ -133,6 +133,18 @@ jobs:
           exit 1
         timeout-minutes: 4
 
+      - name: Verify OAuth client registration
+        run: |
+          echo "Testing authorization_code client (umbraco-back-office-mcp)..."
+          RESPONSE=$(curl -sf "http://localhost:5200/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" -o /dev/null -w "%{http_code}" -L --max-redirs 0 2>&1 || true)
+          echo "Response: $RESPONSE"
+          if echo "$RESPONSE" | grep -qE "302|200"; then
+            echo "OAuth client registered correctly"
+          else
+            echo "OAuth client may not be registered — checking Umbraco logs..."
+            grep -i "mcp\|oauth\|openiddict\|composer" /tmp/umbraco.log | tail -20
+          fi
+
       - name: Create API user
         run: node tests/ci/create-api-user.mjs http://localhost:5200 admin@admin.com 1234567890
 
