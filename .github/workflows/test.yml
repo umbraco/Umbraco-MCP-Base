@@ -116,14 +116,20 @@ jobs:
       - name: Chained Wrangler integration tests
         run: npm run test:integration:chained
 
+      # Kill stale workerd processes from integration tests (can hold ports)
+      - name: Clean up stale workerd
+        run: pkill -f workerd || true
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: Hosted MCP Playwright E2E
         run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 2
+        timeout-minutes: 5
 
       - name: Chained MCP Playwright E2E
         run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 2
+        timeout-minutes: 5
 
   evals:
     name: LLM Eval Tests
