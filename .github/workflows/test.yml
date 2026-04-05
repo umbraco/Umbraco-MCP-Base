@@ -110,6 +110,9 @@ jobs:
           exit 1
         timeout-minutes: 6
 
+      - name: Create API user
+        run: node tests/ci/create-api-user.mjs http://localhost:5200 admin@admin.com 1234567890
+
       - name: Chained Wrangler integration tests
         run: npm run test:integration:chained
 
