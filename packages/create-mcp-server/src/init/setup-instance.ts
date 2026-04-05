@@ -65,12 +65,19 @@ export async function setupInstance(
 
   // Add DevelopmentMode package — provides Swagger UI and the umbraco-swagger
   // OAuth client needed for API user creation via the discover flow
-  execFileSync("dotnet", ["add", "package", "Umbraco.Cms.DevelopmentMode.Backoffice"], {
-    cwd: instanceDir,
-    encoding: "utf-8",
-    timeout: 60_000,
-    stdio: "inherit",
-  });
+  const csprojFiles = fs.readdirSync(instanceDir).filter(f => f.endsWith(".csproj"));
+  if (csprojFiles.length > 0) {
+    try {
+      execFileSync("dotnet", ["add", "package", "Umbraco.Cms.DevelopmentMode.Backoffice"], {
+        cwd: instanceDir,
+        encoding: "utf-8",
+        timeout: 60_000,
+        stdio: "inherit",
+      });
+    } catch {
+      // Non-fatal — DevelopmentMode is optional (only needed for discover flow)
+    }
+  }
 
   // Write connection string and unattended install config to appsettings
   if (opts.connectionString) {
