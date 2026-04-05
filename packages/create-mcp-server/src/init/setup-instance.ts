@@ -77,6 +77,12 @@ export async function setupInstance(
   // Patch Program.cs to disable OpenIddict transport security in development
   patchProgramCs(instanceDir);
 
+  // Ensure wwwroot/media/ exists — Umbraco 17 crashes on startup without it
+  const mediaDir = path.join(instanceDir, "wwwroot", "media");
+  if (!fs.existsSync(mediaDir)) {
+    fs.mkdirSync(mediaDir, { recursive: true });
+  }
+
   return {
     instanceDir: opts.instanceDir,
     adminEmail,
