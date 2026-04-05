@@ -120,10 +120,10 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Hosted MCP Playwright E2E
-        run: npm run test:e2e
+        run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 2
 
       - name: Chained MCP Playwright E2E
-        run: npm run test:e2e:chained
+        run: npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts --retries 2
 
   evals:
     name: LLM Eval Tests
