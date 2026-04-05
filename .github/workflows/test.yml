@@ -163,9 +163,9 @@ jobs:
 
       - name: Verify OAuth (pre-E2E)
         run: |
-          curl -sf "http://localhost:5200/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" -o /tmp/oauth-test.txt -w "HTTP %{http_code}" -L --max-redirs 0 2>&1 || true
-          cat /tmp/oauth-test.txt
-          echo ""
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:5200/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" --max-redirs 0 2>&1 || true)
+          echo "OAuth client check: HTTP $RESP"
+          if [ "$RESP" = "302" ]; then echo "OK — client registered"; else echo "WARN — unexpected response"; fi
 
       - name: Hosted MCP Playwright E2E
         run: npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts --retries 1 --timeout 120000
