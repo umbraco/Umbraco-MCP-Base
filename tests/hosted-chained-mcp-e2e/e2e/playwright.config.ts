@@ -10,6 +10,7 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     launchOptions: {
+      args: ["--ignore-certificate-errors"],
       slowMo: process.env.SLOW_MO ? Number(process.env.SLOW_MO) : 0,
     },
   },

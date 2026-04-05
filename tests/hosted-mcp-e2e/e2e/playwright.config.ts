@@ -9,6 +9,9 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    launchOptions: {
+      args: ["--ignore-certificate-errors"],
+    },
   },
   projects: [
     {
