@@ -135,13 +135,16 @@ jobs:
 
       - name: Verify OAuth client registration
         run: |
-          echo "Testing authorization_code client (umbraco-back-office-mcp)..."
-          RESPONSE=$(curl -sf "http://localhost:5200/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" -o /dev/null -w "%{http_code}" -L --max-redirs 0 2>&1 || true)
-          echo "Response: $RESPONSE"
-          if echo "$RESPONSE" | grep -qE "302|200"; then
-            echo "OAuth client registered correctly"
+          echo "Testing on HTTP (5200)..."
+          HTTP_RESP=$(curl -sf "http://localhost:5200/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" -o /dev/null -w "%{http_code}" -L --max-redirs 0 2>&1 || true)
+          echo "HTTP Response: $HTTP_RESP"
+          echo "Testing on HTTPS (5201)..."
+          HTTPS_RESP=$(curl -skf "https://localhost:5201/umbraco/management/api/v1/security/back-office/authorize?client_id=umbraco-back-office-mcp&redirect_uri=http://127.0.0.1:8787/callback&response_type=code&code_challenge=test&code_challenge_method=S256" -o /dev/null -w "%{http_code}" -L --max-redirs 0 2>&1 || true)
+          echo "HTTPS Response: $HTTPS_RESP"
+          if echo "$HTTP_RESP" | grep -qE "302|200"; then
+            echo "OAuth client registered on HTTP"
           else
-            echo "OAuth client may not be registered — checking Umbraco logs..."
+            echo "OAuth client NOT registered! Umbraco logs:"
             grep -i "mcp\|oauth\|openiddict\|composer" /tmp/umbraco.log | tail -20
           fi
 
