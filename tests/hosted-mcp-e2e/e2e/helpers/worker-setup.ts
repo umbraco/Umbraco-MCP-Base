@@ -26,7 +26,6 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
     logLevel: "error",
   });
 
-  // unstable_dev provides address and port
   const address = worker.address;
   const port = worker.port;
   workerUrl = `http://${address}:${port}`;
@@ -38,6 +37,8 @@ export async function stopWorker(): Promise<void> {
     await worker.stop();
     worker = undefined;
     workerUrl = undefined;
+    // Give workerd time to release ports
+    await new Promise((r) => setTimeout(r, 1000));
   }
 }
 

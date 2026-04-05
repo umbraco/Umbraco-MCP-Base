@@ -40,6 +40,7 @@ export async function stopWorker(): Promise<void> {
     await worker.stop();
     worker = undefined;
     workerUrl = undefined;
+    await new Promise((r) => setTimeout(r, 1000));
   }
 }
 

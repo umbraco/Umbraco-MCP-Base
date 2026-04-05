@@ -27,8 +27,8 @@ export async function startInspector(
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error("Timed out waiting for MCP Inspector to start"));
-    }, 30000);
+      reject(new Error("Timed out waiting for MCP Inspector to start (60s)"));
+    }, 60000);
 
     const proc = spawn(
       "npx",
