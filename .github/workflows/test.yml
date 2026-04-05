@@ -110,6 +110,29 @@ jobs:
           exit 1
         timeout-minutes: 6
 
+      # Restart Umbraco so McpOAuthComposer registers the OAuth client
+      # (on first boot the DB doesn't exist yet, so it skips)
+      - name: Restart Umbraco
+        run: |
+          kill $(cat /tmp/umbraco.pid) 2>/dev/null || true
+          sleep 3
+          cd tests/umbraco-instance
+          ASPNETCORE_ENVIRONMENT=Development \
+          ASPNETCORE_URLS="http://localhost:5200;https://localhost:5201" \
+          dotnet run --no-launch-profile > /tmp/umbraco.log 2>&1 &
+          echo $! > /tmp/umbraco.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5200/umbraco/management/api/v1/server/status 2>/dev/null | grep -q "Run"; then
+              echo "Umbraco restarted!"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Umbraco restart failed"
+          tail -20 /tmp/umbraco.log
+          exit 1
+        timeout-minutes: 4
+
       - name: Create API user
         run: node tests/ci/create-api-user.mjs http://localhost:5200 admin@admin.com 1234567890
 
