@@ -185,6 +185,66 @@ jobs:
             tests/hosted-chained-mcp-e2e/test-results/
           retention-days: 7
 
+  cli-e2e:
+    name: CLI Scaffolding E2E
+    runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Moloko99
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Moloko99 -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      TEST_SQL_CONNECTION_STRING: "Server=localhost,1433;User Id=sa;Password=Moloko99;TrustServerCertificate=True"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup .NET dev certs
+        run: dotnet dev-certs https
+
+      - name: Install PSW CLI
+        run: dotnet tool install -g PackageScriptWriter.Cli --prerelease
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build && npm run build -w packages/create-mcp-server
+
+      - name: Run CLI E2E tests
+        run: npm run test:e2e -w packages/create-mcp-server
+        timeout-minutes: 15
+
   evals:
     name: LLM Eval Tests
     if: >-
