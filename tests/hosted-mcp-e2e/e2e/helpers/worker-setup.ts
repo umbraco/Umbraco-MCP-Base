@@ -9,8 +9,12 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
+// In CI, use HTTP to avoid self-signed cert issues in Chromium popups.
+// Locally, use HTTPS (dev cert is trusted).
+const isCI = !!process.env.CI;
+
 const BASE_VARS = {
-  UMBRACO_BASE_URL: "https://localhost:5201",
+  UMBRACO_BASE_URL: isCI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",
   UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
   COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",

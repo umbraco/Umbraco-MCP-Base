@@ -10,7 +10,7 @@ let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
 const BASE_VARS = {
-  UMBRACO_BASE_URL: "https://localhost:5201",
+  UMBRACO_BASE_URL: process.env.CI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",
   UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
   UMBRACO_API_CLIENT_ID: "umbraco-back-office-mcp",
