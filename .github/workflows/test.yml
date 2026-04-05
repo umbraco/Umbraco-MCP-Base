@@ -148,14 +148,8 @@ jobs:
             grep -i "mcp\|oauth\|openiddict\|composer" /tmp/umbraco.log | tail -20
           fi
 
-      - name: Create API user
-        run: node tests/ci/create-api-user.mjs http://localhost:5200 admin@admin.com 1234567890
-
       - name: Chained Wrangler integration tests
         run: npm run test:integration:chained
-        env:
-          UMBRACO_CLIENT_ID: umbraco-mcp-api-user
-          UMBRACO_CLIENT_SECRET: '1234567890'
 
       # Kill stale workerd processes and clean Wrangler temp dirs from integration tests
       - name: Clean up before E2E
