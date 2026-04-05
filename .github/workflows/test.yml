@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      UMBRACO_CLIENT_ID: umbraco-mcp-api-user
+      UMBRACO_CLIENT_ID: umbraco-back-office-mcp
       UMBRACO_CLIENT_SECRET: '1234567890'
       UMBRACO_BASE_URL: https://localhost:5201
       NODE_TLS_REJECT_UNAUTHORIZED: '0'
@@ -147,9 +147,6 @@ jobs:
             echo "OAuth client NOT registered! Umbraco logs:"
             grep -i "mcp\|oauth\|openiddict\|composer" /tmp/umbraco.log | tail -20
           fi
-
-      - name: Create API user
-        run: node tests/ci/create-api-user.mjs http://localhost:5200 admin@admin.com 1234567890
 
       - name: Chained Wrangler integration tests
         run: npm run test:integration:chained

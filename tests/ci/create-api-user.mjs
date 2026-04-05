@@ -26,7 +26,7 @@ const BASE_URL = process.argv[2] || "http://localhost:56472";
 const ADMIN_EMAIL = process.argv[3] || "admin@admin.com";
 const ADMIN_PASSWORD = process.argv[4] || "1234567890";
 
-const CLIENT_ID = "umbraco-mcp-api-user";
+const CLIENT_ID = "umbraco-back-office-mcp";
 const CLIENT_SECRET = "1234567890";
 const ADMIN_GROUP_KEY = "e5e7f6c8-7f9c-4b5b-8d5d-9e1e5a4f7e4d";
 const SWAGGER_CLIENT_ID = "umbraco-swagger";
