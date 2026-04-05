@@ -24,6 +24,10 @@ const __dirname = path.dirname(__filename);
 // Allow self-signed certs for localhost Umbraco
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+// In CI, the Swagger OAuth client isn't available (DevelopmentMode only with trusted dev certs).
+// Steps that need authenticated API access are skipped.
+const skipIfCI = process.env.CI ? test.skip : test;
+
 const BASE_CONNECTION_STRING = getBaseConnectionString();
 const DB_NAME = `umbraco_e2e_${randomUUID().slice(0, 8)}`;
 
@@ -377,7 +381,7 @@ describeOrSkip("CLI full E2E", () => {
   }, 300_000);
 
   // ── Step 4: Check API user creation ─────────────────────────────────────
-  test("Step 4: discover — API user creation works", async () => {
+  skipIfCI("Step 4: discover — API user creation works", async () => {
     const { checkApiUser } = await import("../../src/discover/check-api-user.js");
 
     const result = await checkApiUser(baseUrl);
@@ -397,7 +401,7 @@ describeOrSkip("CLI full E2E", () => {
   // ── Step 5: Verify API user with direct token request ───────────────────
   let accessToken: string;
 
-  test("Step 5: verify API user can get access token", async () => {
+  skipIfCI("Step 5: verify API user can get access token", async () => {
     const tokenUrl = `${baseUrl}/umbraco/management/api/v1/security/back-office/token`;
 
     const response = await fetch(tokenUrl, {
@@ -422,7 +426,7 @@ describeOrSkip("CLI full E2E", () => {
   }, 15_000);
 
   // ── Step 5b: Verify API user exists in Umbraco user list ────────────────
-  test("Step 5b: verify API user exists via management API", async () => {
+  skipIfCI("Step 5b: verify API user exists via management API", async () => {
     // Use the token from step 5 to query the current user endpoint
     const currentUserUrl = `${baseUrl}/umbraco/management/api/v1/user/current`;
 
@@ -588,7 +592,7 @@ describeOrSkip("CLI full E2E", () => {
   }, 180_000);
 
   // ── Step 10b: Integration test against real Umbraco ─────────────────────
-  test("Step 10b: integration test works against real Umbraco (no MSW)", () => {
+  skipIfCI("Step 10b: integration test works against real Umbraco (no MSW)", () => {
     // Write a simple integration test that calls the real Umbraco API.
     // This verifies:
     // 1. MSW doesn't intercept (USE_MOCK_API is not set)
@@ -667,7 +671,7 @@ describe("real API integration", () => {
   }, 60_000);
 
   // ── Step 11: Real API call with generated client against running Umbraco ─
-  test("Step 11: real Management API call succeeds", async () => {
+  skipIfCI("Step 11: real Management API call succeeds", async () => {
     // Call the server information endpoint — this proves:
     // 1. The Umbraco instance is running and accessible
     // 2. The API user token works for Management API calls
