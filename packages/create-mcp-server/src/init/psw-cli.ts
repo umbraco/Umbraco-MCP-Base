@@ -20,6 +20,8 @@ export interface PswBuildOptions {
   connectionString?: string;
   adminEmail?: string;
   adminPassword?: string;
+  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  umbracoVersion?: string;
 }
 
 export interface PswBuildResult {
@@ -140,6 +142,9 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
     "--no-interaction",
     ...(opts.connectionString
       ? ["--connection-string", opts.connectionString]
+      : []),
+    ...(opts.umbracoVersion
+      ? ["--version", opts.umbracoVersion]
       : []),
   ];
 

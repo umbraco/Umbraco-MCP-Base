@@ -9,6 +9,8 @@ export interface SetupInstanceOptions {
   projectDir: string;
   instanceName?: string;
   connectionString?: string;
+  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  umbracoVersion?: string;
 }
 
 export interface SetupInstanceResult {
@@ -61,6 +63,7 @@ export async function setupInstance(
     connectionString: opts.connectionString,
     adminEmail,
     adminPassword,
+    umbracoVersion: opts.umbracoVersion,
   });
 
   // Add DevelopmentMode package — provides Swagger UI and the umbraco-swagger
@@ -94,7 +97,9 @@ export async function setupInstance(
   // Patch Program.cs to disable OpenIddict transport security in development
   patchProgramCs(instanceDir);
 
-  // Ensure wwwroot/media/ exists — Umbraco 17 crashes on startup without it
+  // WORKAROUND: Umbraco 17.3 regression — crashes on startup without wwwroot/media/
+  // See: https://github.com/umbraco/Umbraco-CMS/issues/22355
+  // Remove this when the issue is fixed upstream.
   const mediaDir = path.join(instanceDir, "wwwroot", "media");
   if (!fs.existsSync(mediaDir)) {
     fs.mkdirSync(mediaDir, { recursive: true });

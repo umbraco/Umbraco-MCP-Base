@@ -24,11 +24,9 @@ const __dirname = path.dirname(__filename);
 // Allow self-signed certs for localhost Umbraco
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-// Skip API user tests in CI — the umbraco-swagger OAuth client isn't registered
-// in freshly scaffolded projects even with DevelopmentMode.Backoffice installed.
-// These tests pass locally where the Swagger client is pre-registered.
-// TODO: Investigate why DevelopmentMode doesn't register the swagger client in CI.
-const testOrSkipAuth = process.env.CI ? test.skip : test;
+// Umbraco version to install. Override with TEST_UMBRACO_VERSION env var.
+// Supports stable (17.2.2), prerelease (17.0.0-rc4), or undefined for latest.
+const UMBRACO_VERSION = process.env.TEST_UMBRACO_VERSION || undefined;
 
 const BASE_CONNECTION_STRING = getBaseConnectionString();
 const DB_NAME = `umbraco_e2e_${randomUUID().slice(0, 8)}`;
@@ -238,6 +236,7 @@ describeOrSkip("CLI full E2E", () => {
       instanceDir,
       projectDir,
       connectionString: buildConnectionString(DB_NAME),
+      umbracoVersion: UMBRACO_VERSION,
     });
 
     // Verify appsettings.local.json has connection string (gitignored)
@@ -381,9 +380,11 @@ describeOrSkip("CLI full E2E", () => {
       `[E2E] Step 3 passed: Umbraco healthy at ${baseUrl} (${Math.round((Date.now() - start) / 1000)}s)`,
     );
 
-    // Restart Umbraco so BackOfficeApplicationManager registers the swagger OAuth
-    // client. On first boot (Install runtime level), the client registration is
-    // skipped — it only runs at Upgrade level or higher (i.e. second boot).
+    // WORKAROUND: Umbraco 17.3 regression — OAuth clients not registered after
+    // unattended install. BackOfficeApplicationManager skips registration when
+    // RuntimeLevel < Upgrade (which is the case on first boot).
+    // See: https://github.com/umbraco/Umbraco-CMS/issues/22356
+    // Remove this restart when the issue is fixed upstream.
     console.log("[E2E] Restarting Umbraco for OAuth client registration...");
     umbracoProcess.kill();
     await new Promise((r) => setTimeout(r, 2000));
