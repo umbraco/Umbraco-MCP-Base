@@ -144,7 +144,7 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
       ? ["--connection-string", opts.connectionString]
       : []),
     ...(opts.umbracoVersion
-      ? ["--version", opts.umbracoVersion]
+      ? ["--template-version", opts.umbracoVersion]
       : []),
   ];
 
