@@ -303,6 +303,111 @@ export async function promptToolMode(): Promise<ToolModeChoice> {
   return choice;
 }
 
+/**
+ * Fetch available Umbraco CMS versions from NuGet, filtered to major version 17+.
+ * Returns stable versions and prerelease (RC, beta) sorted newest first.
+ */
+async function fetchUmbracoVersions(): Promise<string[]> {
+  const resp = await fetch(
+    "https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json",
+    { signal: AbortSignal.timeout(10_000) },
+  );
+  if (!resp.ok) return [];
+
+  const data = (await resp.json()) as { versions: string[] };
+
+  // Filter to 17.x+ and sort newest first
+  return data.versions
+    .filter((v) => {
+      const major = parseInt(v.split(".")[0], 10);
+      return major >= 17;
+    })
+    .reverse();
+}
+
+export async function promptUmbracoVersion(): Promise<string | undefined> {
+  let versions: string[] = [];
+  try {
+    versions = await fetchUmbracoVersions();
+  } catch {
+    // Offline — let user type manually or use latest
+  }
+
+  if (versions.length === 0) {
+    const { version } = await prompts(
+      {
+        type: "text",
+        name: "version",
+        message: "Umbraco version (leave empty for latest):",
+      },
+      { onCancel },
+    );
+    return version?.trim() || undefined;
+  }
+
+  // Group: latest stable, recent stable, prerelease
+  const stable = versions.filter((v) => !v.includes("-"));
+  const prerelease = versions.filter((v) => v.includes("-"));
+  const latestStable = stable[0];
+
+  const choices: Array<{ title: string; description?: string; value: string }> = [];
+
+  if (latestStable) {
+    choices.push({
+      title: `Latest stable (${latestStable})`,
+      description: "Recommended",
+      value: latestStable,
+    });
+  }
+
+  // Add next few stable versions
+  for (const v of stable.slice(1, 5)) {
+    choices.push({ title: v, value: v });
+  }
+
+  // Add recent prerelease versions (RC, beta)
+  if (prerelease.length > 0) {
+    for (const v of prerelease.slice(0, 5)) {
+      choices.push({
+        title: v,
+        description: "prerelease",
+        value: v,
+      });
+    }
+  }
+
+  choices.push({
+    title: "Enter version manually",
+    description: "Type any version string",
+    value: "__manual__",
+  });
+
+  const { version } = await prompts(
+    {
+      type: "select",
+      name: "version",
+      message: "Umbraco version:",
+      choices,
+    },
+    { onCancel },
+  );
+
+  if (version === "__manual__") {
+    const { manual } = await prompts(
+      {
+        type: "text",
+        name: "manual",
+        message: "Enter Umbraco version:",
+        validate: (v) => (v.trim().length > 0 ? true : "Version is required"),
+      },
+      { onCancel },
+    );
+    return manual?.trim();
+  }
+
+  return version;
+}
+
 export async function promptInstallPsw(): Promise<boolean> {
   const { install } = await prompts(
     {
