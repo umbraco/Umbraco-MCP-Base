@@ -380,10 +380,60 @@ describeOrSkip("CLI full E2E", () => {
     console.log(
       `[E2E] Step 3 passed: Umbraco healthy at ${baseUrl} (${Math.round((Date.now() - start) / 1000)}s)`,
     );
+
+    // Restart Umbraco so BackOfficeApplicationManager registers the swagger OAuth
+    // client. On first boot (Install runtime level), the client registration is
+    // skipped — it only runs at Upgrade level or higher (i.e. second boot).
+    console.log("[E2E] Restarting Umbraco for OAuth client registration...");
+    umbracoProcess.kill();
+    await new Promise((r) => setTimeout(r, 2000));
+
+    detectedUrl = undefined;
+    umbracoProcess = spawn(
+      "dotnet",
+      ["run", "--no-build"],
+      {
+        cwd: instanceDir,
+        env: {
+          ...process.env,
+          ASPNETCORE_ENVIRONMENT: "Development",
+          ...(process.env.CI ? { ASPNETCORE_URLS: "http://localhost:0;https://localhost:0" } : {}),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    umbracoProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      const urlMatch = line.match(/Now listening on: (http:\/\/localhost:\d+)/);
+      if (urlMatch && !detectedUrl) {
+        detectedUrl = urlMatch[1];
+        console.log(`[E2E] Restarted on: ${detectedUrl}`);
+      }
+    });
+    umbracoProcess.stderr?.on("data", () => {});
+
+    // Wait for restart
+    const restartStart = Date.now();
+    while (Date.now() - restartStart < 120_000) {
+      if (detectedUrl) {
+        try {
+          const resp = await fetch(`${detectedUrl}/umbraco/swagger/`, {
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (resp.ok) {
+            baseUrl = detectedUrl;
+            console.log(`[E2E] Umbraco restarted at ${baseUrl}`);
+            break;
+          }
+        } catch {}
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }, 300_000);
 
   // ── Step 4: Check API user creation ─────────────────────────────────────
-  testOrSkipAuth("Step 4: discover — API user creation works", async () => {
+  test("Step 4: discover — API user creation works", async () => {
     const { checkApiUser } = await import("../../src/discover/check-api-user.js");
 
     const result = await checkApiUser(baseUrl);
@@ -403,7 +453,7 @@ describeOrSkip("CLI full E2E", () => {
   // ── Step 5: Verify API user with direct token request ───────────────────
   let accessToken: string;
 
-  testOrSkipAuth("Step 5: verify API user can get access token", async () => {
+  test("Step 5: verify API user can get access token", async () => {
     const tokenUrl = `${baseUrl}/umbraco/management/api/v1/security/back-office/token`;
 
     const response = await fetch(tokenUrl, {
@@ -428,7 +478,7 @@ describeOrSkip("CLI full E2E", () => {
   }, 15_000);
 
   // ── Step 5b: Verify API user exists in Umbraco user list ────────────────
-  testOrSkipAuth("Step 5b: verify API user exists via management API", async () => {
+  test("Step 5b: verify API user exists via management API", async () => {
     // Use the token from step 5 to query the current user endpoint
     const currentUserUrl = `${baseUrl}/umbraco/management/api/v1/user/current`;
 
@@ -594,7 +644,7 @@ describeOrSkip("CLI full E2E", () => {
   }, 180_000);
 
   // ── Step 10b: Integration test against real Umbraco ─────────────────────
-  testOrSkipAuth("Step 10b: integration test works against real Umbraco (no MSW)", () => {
+  test("Step 10b: integration test works against real Umbraco (no MSW)", () => {
     // Write a simple integration test that calls the real Umbraco API.
     // This verifies:
     // 1. MSW doesn't intercept (USE_MOCK_API is not set)
@@ -673,7 +723,7 @@ describe("real API integration", () => {
   }, 60_000);
 
   // ── Step 11: Real API call with generated client against running Umbraco ─
-  testOrSkipAuth("Step 11: real Management API call succeeds", async () => {
+  test("Step 11: real Management API call succeeds", async () => {
     // Call the server information endpoint — this proves:
     // 1. The Umbraco instance is running and accessible
     // 2. The API user token works for Management API calls
