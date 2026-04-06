@@ -307,8 +307,8 @@ describeOrSkip("CLI full E2E", () => {
         env: {
           ...process.env,
           ASPNETCORE_ENVIRONMENT: "Development",
-          // Use explicit ports to avoid conflicts with other services on CI
-          ASPNETCORE_URLS: "http://localhost:0;https://localhost:0",
+          // Use random ports in CI to avoid address-in-use conflicts
+          ...(process.env.CI ? { ASPNETCORE_URLS: "http://localhost:0;https://localhost:0" } : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
