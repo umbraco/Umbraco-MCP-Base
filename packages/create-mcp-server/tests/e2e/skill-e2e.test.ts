@@ -147,13 +147,17 @@ Build tools ONLY for the "${targetCollection}" group from .discover.json. Build 
     expect(collectionDir).toBeDefined();
     targetCollection = collectionDir!;
 
-    // Verify compile passes
-    execFileSync("npm", ["run", "compile"], {
-      cwd: projectDir,
-      encoding: "utf-8",
-      timeout: 60_000,
-      stdio: "pipe",
-    });
+    // Verify compile passes (exclude worker.ts — file: refs cause type duplication)
+    const tsconfigPath = path.join(projectDir, "tsconfig.json");
+    if (fs.existsSync(path.join(projectDir, "tsconfig.e2e.json"))) {
+      execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.e2e.json"], {
+        cwd: projectDir, encoding: "utf-8", timeout: 60_000, stdio: "pipe",
+      });
+    } else {
+      execFileSync("npm", ["run", "compile"], {
+        cwd: projectDir, encoding: "utf-8", timeout: 60_000, stdio: "pipe",
+      });
+    }
 
     console.log(`[Skill E2E] Step 1 passed: ${targetCollection} tools compile`);
   }, 600_000);
