@@ -9,10 +9,13 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
+// Use HTTP for both in CI to avoid self-signed cert issues.
+// The redirect_uri (http://127.0.0.1:8787/callback) matches the
+// registered URIs in McpOAuthComposer.
 const BASE_VARS = {
-  UMBRACO_BASE_URL: "https://localhost:5201",
+  UMBRACO_BASE_URL: process.env.CI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",
-  UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+  UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-hosted-mcp",
   COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   ENABLE_INFO_ENDPOINT: "true",
 };
@@ -26,7 +29,6 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
     logLevel: "error",
   });
 
-  // unstable_dev provides address and port
   const address = worker.address;
   const port = worker.port;
   workerUrl = `http://${address}:${port}`;
@@ -38,6 +40,8 @@ export async function stopWorker(): Promise<void> {
     await worker.stop();
     worker = undefined;
     workerUrl = undefined;
+    // Give workerd time to release ports
+    await new Promise((r) => setTimeout(r, 1000));
   }
 }
 

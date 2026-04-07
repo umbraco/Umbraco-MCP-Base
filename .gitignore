@@ -6,6 +6,7 @@ coverage/
 .env
 .dev.vars
 !tests/hosted-mcp-e2e/.dev.vars
+!tests/hosted-chained-mcp-e2e/.dev.vars
 *.log
 junit.xml
 .DS_Store

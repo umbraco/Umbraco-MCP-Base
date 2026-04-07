@@ -8,6 +8,7 @@
  */
 
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { z } from "zod";
 import {
   shouldIncludeTool,
@@ -217,10 +218,14 @@ export async function createPerRequestServer(
   env: HostedMcpEnv,
   props: AuthProps
 ): Promise<McpServer> {
-  const server = new McpServer({
-    name: options.name,
-    version: options.version,
-  });
+  const server = new McpServer(
+    { name: options.name, version: options.version },
+    {
+      // Use Workers-compatible JSON Schema validator instead of Ajv.
+      // Ajv uses new Function() which is blocked in Cloudflare Workers.
+      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+    },
+  );
 
   // Resolve site-specific env overlay for multi-site deployments.
   // Uses the site's base URL for API calls instead of the global env URL.

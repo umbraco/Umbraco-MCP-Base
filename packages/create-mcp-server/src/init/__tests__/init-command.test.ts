@@ -76,11 +76,14 @@ const mockPromptConnectionString = jest.fn<() => Promise<string>>();
 const mockPromptInstallPsw = jest.fn<() => Promise<boolean>>();
 const mockPromptToolMode = jest.fn<() => Promise<string>>();
 
+const mockPromptUmbracoVersion = jest.fn<() => Promise<string | undefined>>().mockResolvedValue(undefined);
+
 jest.unstable_mockModule("../prompts.js", () => ({
   promptUmbracoSetup: mockPromptUmbracoSetup,
   promptToolMode: mockPromptToolMode,
   promptFeatureChoices: mockPromptFeatureChoices,
   promptPackageSelection: mockPromptPackageSelection,
+  promptUmbracoVersion: mockPromptUmbracoVersion,
   getInstanceLocation: mockGetInstanceLocation,
   promptSwaggerUrl: mockPromptSwaggerUrl,
   promptConnectionString: mockPromptConnectionString,

@@ -78,3 +78,19 @@ export {
   isDryRunEnabled,
   withDryRun,
 } from "./dry-run.js";
+
+// Server reference (for tools that need elicitation)
+export {
+  setServerRef,
+  getServerRef,
+  clearServerRef,
+} from "./server-ref.js";
+
+// Elicitation helpers
+export {
+  confirmAction,
+  type ConfirmActionOptions,
+} from "./elicitation.js";
+
+// Chained result extraction
+export { extractChainedResult } from "./chained-result.js";

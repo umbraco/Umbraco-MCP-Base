@@ -42,6 +42,20 @@ export async function checkApiUser(baseUrl: string): Promise<ApiUserCheckResult>
     return { authenticated: true, created: true };
   }
 
+  // WORKAROUND: Umbraco 17.3 regression — the umbraco-swagger OAuth client
+  // is not registered after a fresh unattended install (first boot). The user
+  // needs to restart Umbraco so BackOfficeApplicationManager registers it.
+  // See: https://github.com/umbraco/Umbraco-CMS/issues/22356
+  if (createResult.error?.includes("Could not login") || createResult.error?.includes("bearer token")) {
+    return {
+      authenticated: false,
+      error: createResult.error +
+        "\n\n  This can happen if Umbraco was just installed for the first time." +
+        "\n  Try restarting Umbraco and running discover again." +
+        "\n  See: https://github.com/umbraco/Umbraco-CMS/issues/22356",
+    };
+  }
+
   return { authenticated: false, error: createResult.error };
 }
 

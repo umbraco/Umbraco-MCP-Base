@@ -36,7 +36,7 @@ export async function startWorker(): Promise<Unstable_DevWorker> {
     vars: {
       UMBRACO_BASE_URL: "https://localhost:5201",
       UMBRACO_SERVER_URL: "http://localhost:5200",
-      UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-mcp",
+      UMBRACO_OAUTH_CLIENT_ID: "umbraco-back-office-hosted-mcp",
       COOKIE_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       ENABLE_INFO_ENDPOINT: "true",
     },

@@ -56,7 +56,7 @@ describe("MCP CLI — Server Setup", () => {
     async () => {
       const result = await runBaselineTest(
         "How do I start an Umbraco MCP server from the CLI with authentication? I have a client ID and secret.",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
@@ -107,7 +107,7 @@ describe("MCP CLI — Claude Code Config", () => {
     async () => {
       const result = await runBaselineTest(
         "How do I add an Umbraco MCP server to Claude Code's configuration? Show me the JSON config.",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
@@ -161,7 +161,7 @@ describe("MCP CLI — Dry-Run Mode", () => {
     async () => {
       const result = await runBaselineTest(
         "I want to let an LLM try Umbraco MCP mutation tools without risk. How do I configure the server?",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
@@ -221,7 +221,7 @@ describe("MCP CLI — Readonly Mode", () => {
     async () => {
       const result = await runBaselineTest(
         "What is the difference between dry-run and readonly mode in an Umbraco MCP server?",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
@@ -271,7 +271,7 @@ describe("MCP CLI — Tool Filtering", () => {
     async () => {
       const result = await runBaselineTest(
         "I want an Umbraco MCP LLM to only be able to read and list content. How do I configure this?",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [
@@ -330,7 +330,7 @@ describe("MCP CLI — Introspection", () => {
     async () => {
       const result = await runBaselineTest(
         "I've built an Umbraco MCP server but don't know what tools it has. How can I find out without starting the server?",
-        { maxTurns: 3 }
+        { maxTurns: 2, maxRetries: 0 }
       );
 
       const check = verifyOutputContainsAny(result.finalResult, [

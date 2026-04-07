@@ -10,18 +10,17 @@ export interface GenerateResult {
 export function generateClient(projectDir: string): GenerateResult {
   try {
     // Ensure dependencies are installed (Orval needs to be available)
-    if (!fs.existsSync(path.join(projectDir, "node_modules"))) {
-      execSync("npm install", {
-        cwd: projectDir,
-        stdio: "inherit",
-        timeout: 120_000,
-      });
-    }
+    // Always run install — node_modules may exist but be incomplete
+    execSync("npm install", {
+      cwd: projectDir,
+      stdio: "inherit",
+      timeout: 120_000,
+    });
 
     execSync("npm run generate", {
       cwd: projectDir,
       stdio: "inherit",
-      timeout: 60_000,
+      timeout: 180_000,
       env: {
         ...process.env,
         NODE_TLS_REJECT_UNAUTHORIZED: "0",

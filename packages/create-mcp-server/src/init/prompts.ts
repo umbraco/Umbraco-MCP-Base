@@ -303,6 +303,90 @@ export async function promptToolMode(): Promise<ToolModeChoice> {
   return choice;
 }
 
+export async function promptUmbracoVersion(): Promise<string | undefined> {
+  const { fetchUmbracoVersions } = await import("./nuget-versions.js");
+  let versions: string[] = [];
+  try {
+    versions = await fetchUmbracoVersions();
+  } catch {
+    // Offline — let user type manually or use latest
+  }
+
+  if (versions.length === 0) {
+    const { version } = await prompts(
+      {
+        type: "text",
+        name: "version",
+        message: "Umbraco version (leave empty for latest):",
+      },
+      { onCancel },
+    );
+    return version?.trim() || undefined;
+  }
+
+  // Group: latest stable, recent stable, prerelease
+  const stable = versions.filter((v) => !v.includes("-"));
+  const prerelease = versions.filter((v) => v.includes("-"));
+  const latestStable = stable[0];
+
+  const choices: Array<{ title: string; description?: string; value: string }> = [];
+
+  if (latestStable) {
+    choices.push({
+      title: `Latest stable (${latestStable})`,
+      description: "Recommended",
+      value: latestStable,
+    });
+  }
+
+  // Add next few stable versions
+  for (const v of stable.slice(1, 5)) {
+    choices.push({ title: v, value: v });
+  }
+
+  // Add recent prerelease versions (RC, beta)
+  if (prerelease.length > 0) {
+    for (const v of prerelease.slice(0, 5)) {
+      choices.push({
+        title: v,
+        description: "prerelease",
+        value: v,
+      });
+    }
+  }
+
+  choices.push({
+    title: "Enter version manually",
+    description: "Type any version string",
+    value: "__manual__",
+  });
+
+  const { version } = await prompts(
+    {
+      type: "select",
+      name: "version",
+      message: "Umbraco version:",
+      choices,
+    },
+    { onCancel },
+  );
+
+  if (version === "__manual__") {
+    const { manual } = await prompts(
+      {
+        type: "text",
+        name: "manual",
+        message: "Enter Umbraco version:",
+        validate: (v) => (v.trim().length > 0 ? true : "Version is required"),
+      },
+      { onCancel },
+    );
+    return manual?.trim();
+  }
+
+  return version;
+}
+
 export async function promptInstallPsw(): Promise<boolean> {
   const { install } = await prompts(
     {

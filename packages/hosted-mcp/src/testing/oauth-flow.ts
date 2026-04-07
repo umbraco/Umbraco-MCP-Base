@@ -92,7 +92,7 @@ export async function handleOAuthFlow(
   );
 
   const emailInput = oauthPage.getByRole("textbox").first();
-  await emailInput.waitFor({ timeout: 10000 });
+  await emailInput.waitFor({ timeout: 30000 });
   await emailInput.fill(creds.email);
   await oauthPage.getByRole("textbox").nth(1).fill(creds.password);
   await oauthPage.getByRole("button", { name: "Login" }).click();

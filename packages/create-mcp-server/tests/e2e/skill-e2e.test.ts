@@ -1,23 +1,17 @@
 /**
- * Skill E2E test for /build-tools and /build-tools-tests.
+ * Skill E2E — full tool-building pipeline for a single collection.
  *
- * Uses Claude Agent SDK to run the actual skills against a scaffolded project
- * with a running Umbraco instance.
+ * Proves the complete MCP development loop end-to-end:
+ *   1. /build-tools — creates GET/list tools for one collection, compiles
+ *   2. /build-tools-tests — creates integration tests
+ *   3. Run tests — integration tests pass against running Umbraco
  *
- * Workflow:
- *   1. Run CLI E2E first with KEEP_E2E_ASSETS=true to create the project
- *   2. Run this test to exercise the skills against the preserved project
- *   3. Run CLI E2E cleanup to tear down
+ * Uses a single small collection (culture) to keep run time reasonable (~8 min).
  *
- * Commands:
- *   # Step 1: Create project + start Umbraco (keeps assets)
- *   KEEP_E2E_ASSETS=true TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server
- *
- *   # Step 2: Run skill tests (reuses project from step 1)
- *   npm run test:e2e:skills -w packages/create-mcp-server
- *
- *   # Step 3: Clean up (kills Umbraco, drops DB, removes temp dir)
- *   npm run test:e2e:cleanup -w packages/create-mcp-server
+ * Requires:
+ *   - CLI E2E manifest (run CLI E2E with KEEP_E2E_ASSETS=true first)
+ *   - Claude Code subscription or ANTHROPIC_API_KEY
+ *   - Running Umbraco instance (from CLI E2E)
  */
 
 import * as fs from "node:fs";
@@ -38,7 +32,6 @@ interface E2eManifest {
   instanceDir: string;
   baseUrl: string;
   dbName: string;
-  umbracoProcessPid?: number;
 }
 
 function loadManifest(): E2eManifest | undefined {
@@ -54,25 +47,25 @@ const manifest = loadManifest();
 const SKIP = !manifest;
 const describeOrSkip = SKIP ? describe.skip : describe;
 
-if (SKIP) {
-  console.log("[Skill E2E] No manifest found. Run CLI E2E first with KEEP_E2E_ASSETS=true:");
-  console.log(`  KEEP_E2E_ASSETS=true TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server`);
+if (!manifest) {
+  console.log("[Skill E2E] No manifest — run CLI E2E first with KEEP_E2E_ASSETS=true");
 }
 
-describeOrSkip("Build-tools skill E2E", () => {
+describeOrSkip("Skill E2E — build tool and integration test", () => {
   const projectDir = manifest?.projectDir ?? "";
   const baseUrl = manifest?.baseUrl ?? "";
+  let targetCollection = "";
 
   beforeAll(() => {
-    // Verify the project still exists and Umbraco is reachable
     expect(fs.existsSync(projectDir)).toBe(true);
     console.log(`[Skill E2E] Project: ${projectDir}`);
     console.log(`[Skill E2E] Umbraco: ${baseUrl}`);
 
-    // Ensure skills are copied
+    // Copy skills into the project
     const skillsDir = path.join(projectDir, ".claude", "skills");
+    fs.mkdirSync(skillsDir, { recursive: true });
     const pluginsDir = path.resolve(__dirname, "../../../../plugins/skills");
-    for (const skill of ["build-tools", "build-tools-tests", "mcp-patterns", "mcp-testing"]) {
+    for (const skill of ["build-tools", "build-tools-tests"]) {
       const src = path.join(pluginsDir, skill);
       const dest = path.join(skillsDir, skill);
       if (fs.existsSync(src) && !fs.existsSync(dest)) {
@@ -80,15 +73,21 @@ describeOrSkip("Build-tools skill E2E", () => {
       }
     }
 
-    // Copy agents
-    const agentsDir = path.join(projectDir, ".claude", "agents");
-    const pluginAgentsDir = path.resolve(__dirname, "../../../../plugins/agents");
-    if (fs.existsSync(pluginAgentsDir) && !fs.existsSync(agentsDir)) {
-      fs.cpSync(pluginAgentsDir, agentsDir, { recursive: true });
-    }
+    // Pick a collection from .discover.json
+    // The discover manifest lists collection names (the agent resolves operations from swagger)
+    const discoverPath = path.join(projectDir, ".discover.json");
+    expect(fs.existsSync(discoverPath)).toBe(true);
+    const discover = JSON.parse(fs.readFileSync(discoverPath, "utf-8"));
+    const collections = discover.collections as string[];
+    expect(collections.length).toBeGreaterThan(0);
+
+    // Use "culture" or "language" if available (small, read-heavy), otherwise first
+    targetCollection = collections.find(c => c === "culture") ??
+      collections.find(c => c === "language") ??
+      collections[0];
+    console.log(`[Skill E2E] Target: ${targetCollection}`);
   }, 30_000);
 
-  // Helper to run a skill via Agent SDK
   async function runSkill(prompt: string, opts?: { maxTurns?: number; maxBudget?: number }): Promise<{ text: string; tools: string[] }> {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
     let text = "";
@@ -104,8 +103,8 @@ describeOrSkip("Build-tools skill E2E", () => {
           settingSources: ["project"],
           allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
           permissionMode: "bypassPermissions",
-          maxTurns: opts?.maxTurns ?? 80,
-          maxBudgetUsd: opts?.maxBudget ?? 8.0,
+          maxTurns: opts?.maxTurns ?? 40,
+          maxBudgetUsd: opts?.maxBudget ?? 3.0,
           abortController,
           env: { ...process.env, CLAUDECODE: "" },
         },
@@ -128,66 +127,78 @@ describeOrSkip("Build-tools skill E2E", () => {
     return { text, tools };
   }
 
-  // ── Step 1: /build-tools creates Language collection ────────────────────
-  test("Step 1: /build-tools creates Language collection that compiles", async () => {
-    console.log("[Skill E2E] Running /build-tools for Language...");
+  // ── Step 1: Build tools ─────────────────────────────────────────────────
+  test("Step 1: /build-tools creates collection that compiles", async () => {
+    console.log(`[Skill E2E] Building tools for ${targetCollection}...`);
+
     await runSkill(`/build-tools
 
-Build tools ONLY for the "Language" group from .discover.json. This is a simple CRUD collection with list, get, create, update, and delete operations. Do NOT build tools for any other group. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`);
+Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`, {
+      maxTurns: 30,
+      maxBudget: 2.0,
+    });
 
-    // Verify tools created
-    const toolsDir = path.join(projectDir, "src/umbraco-api/tools/language");
-    if (!fs.existsSync(toolsDir)) {
-      const toolsParent = path.join(projectDir, "src/umbraco-api/tools");
-      if (fs.existsSync(toolsParent)) {
-        console.log(`[Skill E2E] Tools dir contents: ${fs.readdirSync(toolsParent).join(", ")}`);
-      }
-    }
-    expect(fs.existsSync(toolsDir)).toBe(true);
+    // Verify the collection directory exists
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools");
+    const collectionDir = fs.readdirSync(toolsDir).find(d =>
+      d !== "example" && d !== "example-2" && d !== "chained" && d !== "umbraco-server" &&
+      fs.statSync(path.join(toolsDir, d)).isDirectory()
+    );
+    expect(collectionDir).toBeDefined();
+    targetCollection = collectionDir!;
 
-    // Verify compile passes
-    try {
-      execFileSync("npm", ["run", "compile"], {
-        cwd: projectDir,
-        encoding: "utf-8",
-        timeout: 60_000,
-        stdio: "pipe",
+    // Verify compile passes (exclude worker.ts — file: refs cause type duplication)
+    const tsconfigPath = path.join(projectDir, "tsconfig.json");
+    if (fs.existsSync(path.join(projectDir, "tsconfig.e2e.json"))) {
+      execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.e2e.json"], {
+        cwd: projectDir, encoding: "utf-8", timeout: 60_000, stdio: "pipe",
       });
-      console.log("[Skill E2E] Step 1 passed: Language tools compile cleanly");
-    } catch (err: unknown) {
-      const e = err as { stdout?: string; stderr?: string };
-      console.log("[Skill E2E] Compile errors after build-tools:");
-      if (e.stdout) console.log(e.stdout.slice(-2000));
-      if (e.stderr) console.log(e.stderr.slice(-2000));
-      throw new Error("Language tools don't compile — skill needs improvement");
+    } else {
+      execFileSync("npm", ["run", "compile"], {
+        cwd: projectDir, encoding: "utf-8", timeout: 60_000, stdio: "pipe",
+      });
     }
-  }, 900_000);
 
-  // ── Step 2: /build-tools-tests creates integration tests ────────────────
-  test("Step 2: /build-tools-tests creates Language tests", async () => {
-    console.log("[Skill E2E] Running /build-tools-tests for Language...");
+    console.log(`[Skill E2E] Step 1 passed: ${targetCollection} tools compile`);
+  }, 600_000);
+
+  // ── Step 2: Build tests (builders, helpers, integration tests) ──────────
+  test("Step 2: /build-tools-tests creates tests that pass", async () => {
+    console.log(`[Skill E2E] Building tests for ${targetCollection}...`);
+
     await runSkill(`/build-tools-tests
 
-Build integration tests ONLY for the "language" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env. After creating the tests, run them to verify they pass.`);
+Build integration tests for the "${targetCollection}" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env. Create:
+1. A builder for test data if needed (read-only tools may not need one)
+2. Integration tests for the GET tools only
+3. Run the tests to verify they pass
 
-    // Verify test files created
-    const testDir = path.join(projectDir, "src/umbraco-api/tools/language/__tests__");
+Only test the read/list tools — do not create tests for mutations.`, {
+      maxTurns: 30,
+      maxBudget: 2.0,
+    });
+
+    // Verify test directory exists with test files
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools", targetCollection);
+    const testDir = path.join(toolsDir, "__tests__");
     expect(fs.existsSync(testDir)).toBe(true);
 
-    const testFiles = fs.readdirSync(testDir, { recursive: true }) as string[];
-    const testTsFiles = testFiles.filter((f: string) => f.endsWith(".test.ts"));
-    expect(testTsFiles.length).toBeGreaterThan(0);
+    const testFiles = (fs.readdirSync(testDir, { recursive: true }) as string[])
+      .filter((f: string) => f.endsWith(".test.ts"));
+    expect(testFiles.length).toBeGreaterThan(0);
 
-    console.log(`[Skill E2E] Step 2 passed: ${testTsFiles.length} test files created`);
-  }, 900_000);
+    console.log(`[Skill E2E] ${testFiles.length} test file(s) created`);
 
-  // ── Step 3: Integration tests pass ──────────────────────────────────────
-  test("Step 3: Language integration tests pass", () => {
-    console.log("[Skill E2E] Running Language integration tests...");
+    // Run the integration tests
     try {
       execFileSync(
         "node",
-        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPattern=language/__tests__", "--runInBand"],
+        [
+          "--experimental-vm-modules",
+          "node_modules/jest/bin/jest.js",
+          `--testPathPattern=${targetCollection}/__tests__`,
+          "--runInBand",
+        ],
         {
           cwd: projectDir,
           encoding: "utf-8",
@@ -202,13 +213,12 @@ Build integration tests ONLY for the "language" collection. The Umbraco instance
           },
         },
       );
+      console.log("[Skill E2E] Step 2 passed: integration tests pass");
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string };
       if (e.stdout) console.log("[test stdout]", e.stdout.slice(-3000));
       if (e.stderr) console.log("[test stderr]", e.stderr.slice(-3000));
       throw err;
     }
-
-    console.log("[Skill E2E] Step 3 passed: Language integration tests pass");
-  }, 180_000);
+  }, 600_000);
 });

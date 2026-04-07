@@ -134,19 +134,36 @@ All packages are versioned together and published from the `main` branch via Azu
 
 ### Release process
 
-1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.5`)
-2. Bump the version in **all** package.json files and `marketplace.json`:
+1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.9`)
+2. Bump the version in **all** files (use find-and-replace for the old version string):
    - `package.json` (root)
    - `packages/mcp-server-sdk/package.json`
    - `packages/hosted-mcp/package.json`
    - `packages/create-mcp-server/package.json`
    - `template/package.json`
    - `plugins/package.json`
-   - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+   - `plugins/.claude-plugin/plugin.json`
+   - `.claude-plugin/marketplace.json` (`metadata.version` and each `plugins[].version`)
 3. Run `npm install --package-lock-only` to update `package-lock.json`
-4. Commit, push, and create a PR from the release branch into `main`
-5. The CI pipeline publishes packages when the PR is merged to `main`
-6. Manually create a GitHub Release tagged `v<version>` from the merge commit
+4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/package.json plugins/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
+5. Commit, push, and create a PR from the release branch into `main`
+6. CI runs all tests including LLM evals and skill E2E (release PRs only)
+7. Merge when all checks pass — Azure Pipelines publishes packages to npm
+8. Create a GitHub Release tagged `v<version>` from the merge commit
+9. Merge `main` back into `dev` via PR (to sync version numbers)
+
+### Post-release: merge main to dev
+
+After a release is published, main has the version bump commit that dev doesn't. Create a PR to merge main back:
+
+```bash
+git checkout dev && git pull
+git checkout -b chore/merge-main-to-dev
+git merge origin/main --no-edit
+# Resolve any conflicts (take dev's version for code, main's for versions)
+git push -u origin chore/merge-main-to-dev
+gh pr create --base dev --title "Merge main into dev after <version> release"
+```
 
 ### Version scheme
 
