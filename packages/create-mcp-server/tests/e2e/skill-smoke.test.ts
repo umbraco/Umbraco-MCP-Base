@@ -47,14 +47,11 @@ function loadManifest(): E2eManifest | undefined {
 }
 
 const manifest = loadManifest();
-const SKIP = !manifest || !process.env.ANTHROPIC_API_KEY;
+const SKIP = !manifest;
 const describeOrSkip = SKIP ? describe.skip : describe;
 
 if (!manifest) {
   console.log("[Smoke] No manifest — run CLI E2E first with KEEP_E2E_ASSETS=true");
-}
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.log("[Smoke] No ANTHROPIC_API_KEY — skipping skill smoke test");
 }
 
 describeOrSkip("Skill smoke — full pipeline for one collection", () => {
@@ -79,28 +76,19 @@ describeOrSkip("Skill smoke — full pipeline for one collection", () => {
       }
     }
 
-    // Pick a small collection from .discover.json
+    // Pick a collection from .discover.json
+    // The discover manifest lists collection names (the agent resolves operations from swagger)
     const discoverPath = path.join(projectDir, ".discover.json");
     expect(fs.existsSync(discoverPath)).toBe(true);
     const discover = JSON.parse(fs.readFileSync(discoverPath, "utf-8"));
-    const collections = discover.collections as Array<{
-      name: string;
-      operations: Array<{ method: string; operationId: string }>;
-    }>;
+    const collections = discover.collections as string[];
+    expect(collections.length).toBeGreaterThan(0);
 
-    // Find a small collection with GET + list operations (good for smoke testing)
-    const candidates = collections
-      .filter(c => {
-        const ops = c.operations;
-        const hasGet = ops.some(o => o.method === "GET");
-        const opCount = ops.length;
-        return hasGet && opCount >= 2 && opCount <= 6;
-      })
-      .sort((a, b) => a.operations.length - b.operations.length);
-
-    expect(candidates.length).toBeGreaterThan(0);
-    targetCollection = candidates[0].name;
-    console.log(`[Smoke] Target: ${targetCollection} (${candidates[0].operations.length} operations)`);
+    // Use "culture" or "language" if available (small, read-heavy), otherwise first
+    targetCollection = collections.find(c => c === "culture") ??
+      collections.find(c => c === "language") ??
+      collections[0];
+    console.log(`[Smoke] Target: ${targetCollection}`);
   }, 30_000);
 
   async function runSkill(prompt: string, opts?: { maxTurns?: number; maxBudget?: number }): Promise<{ text: string; tools: string[] }> {
