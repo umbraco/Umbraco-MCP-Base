@@ -3,13 +3,22 @@
  *
  * Used by both the version picker (prompts.ts) and E2E tests to resolve
  * available versions without duplicating the NuGet API call.
+ *
+ * The minimum major version is derived from this package's version
+ * (e.g. 17.0.0-beta.8 → major 17) so it stays in sync automatically.
  */
+
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const pkg = require("../../package.json") as { version: string };
+const MIN_MAJOR = parseInt(pkg.version.split(".")[0], 10);
 
 const NUGET_INDEX_URL =
   "https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json";
 
 /**
- * Fetch all Umbraco CMS versions (17.x+) from NuGet, newest first.
+ * Fetch Umbraco CMS versions from NuGet, newest first.
+ * Filtered to the current major version and above.
  * Includes stable and prerelease (RC, beta, alpha).
  */
 export async function fetchUmbracoVersions(): Promise<string[]> {
@@ -23,7 +32,7 @@ export async function fetchUmbracoVersions(): Promise<string[]> {
   return data.versions
     .filter((v) => {
       const major = parseInt(v.split(".")[0], 10);
-      return major >= 17;
+      return major >= MIN_MAJOR;
     })
     .reverse();
 }
