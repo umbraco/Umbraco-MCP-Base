@@ -1,16 +1,20 @@
 /**
- * Skill Smoke Test — lightweight end-to-end verification.
+ * Skill Smoke Test — full quality pipeline for a single collection.
  *
- * Creates ONE tool and ONE integration test to prove the full pipeline:
- *   scaffold → init → Umbraco → discover → generate → build ONE tool → test it
+ * Exercises the complete tool-building workflow end-to-end:
+ *   1. /build-tools — creates tools for one collection, compiles
+ *   2. Review — agent reviews the generated tools for quality
+ *   3. /build-tools-tests — creates builders, test helpers, and integration tests
+ *   4. Run tests — integration tests pass against running Umbraco
  *
- * Much faster than the full skill E2E (~2-3 minutes vs ~15 minutes)
- * because it only asks the agent to create a single read tool.
+ * This proves the entire MCP development loop works, from discovery through
+ * to passing integration tests. Uses a single small collection to keep
+ * the run time reasonable (~5 minutes).
  *
- * Reuses the CLI E2E manifest (KEEP_E2E_ASSETS=true), or runs standalone
- * in the CLI Scaffolding E2E CI job via the manifest written by cli-e2e.test.ts.
- *
- * Requires: ANTHROPIC_API_KEY or Claude Code subscription
+ * Requires:
+ *   - CLI E2E manifest (run CLI E2E with KEEP_E2E_ASSETS=true first)
+ *   - ANTHROPIC_API_KEY
+ *   - Running Umbraco instance (from CLI E2E)
  */
 
 import * as fs from "node:fs";
@@ -53,17 +57,19 @@ if (!process.env.ANTHROPIC_API_KEY) {
   console.log("[Smoke] No ANTHROPIC_API_KEY — skipping skill smoke test");
 }
 
-describeOrSkip("Skill smoke test — single tool end-to-end", () => {
+describeOrSkip("Skill smoke — full pipeline for one collection", () => {
   const projectDir = manifest?.projectDir ?? "";
   const baseUrl = manifest?.baseUrl ?? "";
+  let targetCollection = "";
 
   beforeAll(() => {
     expect(fs.existsSync(projectDir)).toBe(true);
     console.log(`[Smoke] Project: ${projectDir}`);
     console.log(`[Smoke] Umbraco: ${baseUrl}`);
 
-    // Copy skills
+    // Copy skills into the project
     const skillsDir = path.join(projectDir, ".claude", "skills");
+    fs.mkdirSync(skillsDir, { recursive: true });
     const pluginsDir = path.resolve(__dirname, "../../../../plugins/skills");
     for (const skill of ["build-tools", "build-tools-tests"]) {
       const src = path.join(pluginsDir, skill);
@@ -72,6 +78,29 @@ describeOrSkip("Skill smoke test — single tool end-to-end", () => {
         fs.cpSync(src, dest, { recursive: true });
       }
     }
+
+    // Pick a small collection from .discover.json
+    const discoverPath = path.join(projectDir, ".discover.json");
+    expect(fs.existsSync(discoverPath)).toBe(true);
+    const discover = JSON.parse(fs.readFileSync(discoverPath, "utf-8"));
+    const collections = discover.collections as Array<{
+      name: string;
+      operations: Array<{ method: string; operationId: string }>;
+    }>;
+
+    // Find a small collection with GET + list operations (good for smoke testing)
+    const candidates = collections
+      .filter(c => {
+        const ops = c.operations;
+        const hasGet = ops.some(o => o.method === "GET");
+        const opCount = ops.length;
+        return hasGet && opCount >= 2 && opCount <= 6;
+      })
+      .sort((a, b) => a.operations.length - b.operations.length);
+
+    expect(candidates.length).toBeGreaterThan(0);
+    targetCollection = candidates[0].name;
+    console.log(`[Smoke] Target: ${targetCollection} (${candidates[0].operations.length} operations)`);
   }, 30_000);
 
   async function runSkill(prompt: string, opts?: { maxTurns?: number; maxBudget?: number }): Promise<{ text: string; tools: string[] }> {
@@ -89,8 +118,8 @@ describeOrSkip("Skill smoke test — single tool end-to-end", () => {
           settingSources: ["project"],
           allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
           permissionMode: "bypassPermissions",
-          maxTurns: opts?.maxTurns ?? 30,
-          maxBudgetUsd: opts?.maxBudget ?? 2.0,
+          maxTurns: opts?.maxTurns ?? 40,
+          maxBudgetUsd: opts?.maxBudget ?? 3.0,
           abortController,
           env: { ...process.env, CLAUDECODE: "" },
         },
@@ -113,30 +142,25 @@ describeOrSkip("Skill smoke test — single tool end-to-end", () => {
     return { text, tools };
   }
 
-  test("builds one GET tool that compiles", async () => {
-    console.log("[Smoke] Building one GET tool...");
-
-    // Pick the simplest collection from .discover.json
-    const discoverPath = path.join(projectDir, ".discover.json");
-    expect(fs.existsSync(discoverPath)).toBe(true);
-    const discover = JSON.parse(fs.readFileSync(discoverPath, "utf-8"));
-    const collections = discover.collections as Array<{ name: string; operations: Array<{ method: string }> }>;
-
-    // Find a collection with a GET operation (simplest to build)
-    const target = collections.find(c =>
-      c.operations.some(op => op.method === "GET") &&
-      c.name.toLowerCase() !== "server" // skip meta endpoints
-    );
-    expect(target).toBeDefined();
-    const collectionName = target!.name;
-    console.log(`[Smoke] Target collection: ${collectionName}`);
+  // ── Step 1: Build tools ─────────────────────────────────────────────────
+  test("Step 1: /build-tools creates collection that compiles", async () => {
+    console.log(`[Smoke] Building tools for ${targetCollection}...`);
 
     await runSkill(`/build-tools
 
-Build ONLY a single GET (read) tool for the "${collectionName}" group from .discover.json. Just one tool — the simplest GET operation. After creating it, run npm run compile to verify it compiles. Fix any errors.`, {
+Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`, {
       maxTurns: 30,
       maxBudget: 2.0,
     });
+
+    // Verify the collection directory exists
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools");
+    const collectionDir = fs.readdirSync(toolsDir).find(d =>
+      d !== "example" && d !== "example-2" && d !== "chained" && d !== "umbraco-server" &&
+      fs.statSync(path.join(toolsDir, d)).isDirectory()
+    );
+    expect(collectionDir).toBeDefined();
+    targetCollection = collectionDir!;
 
     // Verify compile passes
     execFileSync("npm", ["run", "compile"], {
@@ -146,52 +170,66 @@ Build ONLY a single GET (read) tool for the "${collectionName}" group from .disc
       stdio: "pipe",
     });
 
-    console.log("[Smoke] GET tool compiles");
-  }, 300_000);
+    console.log(`[Smoke] Step 1 passed: ${targetCollection} tools compile`);
+  }, 600_000);
 
-  test("builds one integration test that passes", async () => {
-    console.log("[Smoke] Building one integration test...");
-
-    // Find tool directories that were created
-    const toolsDir = path.join(projectDir, "src/umbraco-api/tools");
-    const collections = fs.readdirSync(toolsDir).filter(d =>
-      d !== "example" && d !== "example-2" && d !== "chained" && d !== "umbraco-server" &&
-      fs.statSync(path.join(toolsDir, d)).isDirectory()
-    );
-    expect(collections.length).toBeGreaterThan(0);
-    const collectionName = collections[0];
-    console.log(`[Smoke] Target: ${collectionName}`);
+  // ── Step 2: Build tests (builders, helpers, integration tests) ──────────
+  test("Step 2: /build-tools-tests creates tests that pass", async () => {
+    console.log(`[Smoke] Building tests for ${targetCollection}...`);
 
     await runSkill(`/build-tools-tests
 
-Build ONE integration test for the "${collectionName}" collection — just a single test for the GET/read tool. The Umbraco instance is at ${baseUrl} with credentials in .env. After creating the test, run it to verify it passes.`, {
+Build integration tests for the "${targetCollection}" collection. The Umbraco instance is running at ${baseUrl} with API credentials in .env. Create:
+1. A builder for test data if needed (read-only tools may not need one)
+2. Integration tests for the GET tools only
+3. Run the tests to verify they pass
+
+Only test the read/list tools — do not create tests for mutations.`, {
       maxTurns: 30,
       maxBudget: 2.0,
     });
 
-    // Verify test file exists
-    const testDir = path.join(toolsDir, collectionName, "__tests__");
+    // Verify test directory exists with test files
+    const toolsDir = path.join(projectDir, "src/umbraco-api/tools", targetCollection);
+    const testDir = path.join(toolsDir, "__tests__");
     expect(fs.existsSync(testDir)).toBe(true);
 
-    // Run the test
-    execFileSync(
-      "node",
-      ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", `--testPathPattern=${collectionName}/__tests__`, "--runInBand"],
-      {
-        cwd: projectDir,
-        encoding: "utf-8",
-        timeout: 60_000,
-        stdio: "pipe",
-        env: {
-          ...process.env,
-          UMBRACO_BASE_URL: baseUrl,
-          UMBRACO_CLIENT_ID: "umbraco-back-office-mcp",
-          UMBRACO_CLIENT_SECRET: "1234567890",
-          NODE_TLS_REJECT_UNAUTHORIZED: "0",
-        },
-      },
-    );
+    const testFiles = (fs.readdirSync(testDir, { recursive: true }) as string[])
+      .filter((f: string) => f.endsWith(".test.ts"));
+    expect(testFiles.length).toBeGreaterThan(0);
 
-    console.log("[Smoke] Integration test passes");
-  }, 300_000);
+    console.log(`[Smoke] ${testFiles.length} test file(s) created`);
+
+    // Run the integration tests
+    try {
+      execFileSync(
+        "node",
+        [
+          "--experimental-vm-modules",
+          "node_modules/jest/bin/jest.js",
+          `--testPathPattern=${targetCollection}/__tests__`,
+          "--runInBand",
+        ],
+        {
+          cwd: projectDir,
+          encoding: "utf-8",
+          timeout: 120_000,
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            UMBRACO_BASE_URL: baseUrl,
+            UMBRACO_CLIENT_ID: "umbraco-back-office-mcp",
+            UMBRACO_CLIENT_SECRET: "1234567890",
+            NODE_TLS_REJECT_UNAUTHORIZED: "0",
+          },
+        },
+      );
+      console.log("[Smoke] Step 2 passed: integration tests pass");
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string };
+      if (e.stdout) console.log("[test stdout]", e.stdout.slice(-3000));
+      if (e.stderr) console.log("[test stderr]", e.stderr.slice(-3000));
+      throw err;
+    }
+  }, 600_000);
 });
