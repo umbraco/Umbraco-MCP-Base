@@ -16,6 +16,7 @@ const config: Config = {
       },
     ],
   },
+  setupFiles: ["./jest-setup.ts"],
   testMatch: ["**/tests/e2e/**/*.test.ts"],
   testPathIgnorePatterns: ["/node_modules/", "/dist/"],
   testTimeout: 600_000, // 10 minutes — PSW + dotnet run can be slow

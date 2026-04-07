@@ -7,6 +7,11 @@ export default defineConfig({
   workers: 1,
   use: {
     ignoreHTTPSErrors: true,
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    launchOptions: {
+      args: ["--ignore-certificate-errors"],
+    },
   },
   projects: [
     {

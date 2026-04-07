@@ -24,6 +24,14 @@ const __dirname = path.dirname(__filename);
 // Allow self-signed certs for localhost Umbraco
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+// Umbraco version to install. Override with TEST_UMBRACO_VERSION env var.
+// By default, fetches the latest stable (non-prerelease) version from NuGet.
+import { getLatestStableVersion } from "../../src/init/nuget-versions.js";
+
+const resolvedVersion = process.env.TEST_UMBRACO_VERSION || await getLatestStableVersion();
+if (resolvedVersion) console.log(`[E2E] Using Umbraco ${resolvedVersion} (latest stable)`);
+const UMBRACO_VERSION = resolvedVersion;
+
 const BASE_CONNECTION_STRING = getBaseConnectionString();
 const DB_NAME = `umbraco_e2e_${randomUUID().slice(0, 8)}`;
 
@@ -232,6 +240,7 @@ describeOrSkip("CLI full E2E", () => {
       instanceDir,
       projectDir,
       connectionString: buildConnectionString(DB_NAME),
+      umbracoVersion: UMBRACO_VERSION,
     });
 
     // Verify appsettings.local.json has connection string (gitignored)
@@ -301,6 +310,8 @@ describeOrSkip("CLI full E2E", () => {
         env: {
           ...process.env,
           ASPNETCORE_ENVIRONMENT: "Development",
+          // Use random ports in CI to avoid address-in-use conflicts
+          ...(process.env.CI ? { ASPNETCORE_URLS: "http://localhost:0;https://localhost:0" } : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -372,6 +383,58 @@ describeOrSkip("CLI full E2E", () => {
     console.log(
       `[E2E] Step 3 passed: Umbraco healthy at ${baseUrl} (${Math.round((Date.now() - start) / 1000)}s)`,
     );
+
+    // WORKAROUND: Umbraco 17.3 regression — OAuth clients not registered after
+    // unattended install. BackOfficeApplicationManager skips registration when
+    // RuntimeLevel < Upgrade (which is the case on first boot).
+    // See: https://github.com/umbraco/Umbraco-CMS/issues/22356
+    // Remove this restart when the issue is fixed upstream.
+    console.log("[E2E] Restarting Umbraco for OAuth client registration...");
+    umbracoProcess.kill();
+    await new Promise((r) => setTimeout(r, 2000));
+
+    detectedUrl = undefined;
+    umbracoProcess = spawn(
+      "dotnet",
+      ["run", "--no-build"],
+      {
+        cwd: instanceDir,
+        env: {
+          ...process.env,
+          ASPNETCORE_ENVIRONMENT: "Development",
+          ...(process.env.CI ? { ASPNETCORE_URLS: "http://localhost:0;https://localhost:0" } : {}),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    umbracoProcess.stdout?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      const urlMatch = line.match(/Now listening on: (http:\/\/localhost:\d+)/);
+      if (urlMatch && !detectedUrl) {
+        detectedUrl = urlMatch[1];
+        console.log(`[E2E] Restarted on: ${detectedUrl}`);
+      }
+    });
+    umbracoProcess.stderr?.on("data", () => {});
+
+    // Wait for restart
+    const restartStart = Date.now();
+    while (Date.now() - restartStart < 120_000) {
+      if (detectedUrl) {
+        try {
+          const resp = await fetch(`${detectedUrl}/umbraco/swagger/`, {
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (resp.ok) {
+            baseUrl = detectedUrl;
+            console.log(`[E2E] Umbraco restarted at ${baseUrl}`);
+            break;
+          }
+        } catch {}
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }, 300_000);
 
   // ── Step 4: Check API user creation ─────────────────────────────────────

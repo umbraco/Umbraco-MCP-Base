@@ -86,11 +86,15 @@ function createMockAuthRequest(
   };
 }
 
+// Fixed consent state token for tests — must match KV setup in each test
+const TEST_CONSENT_STATE = "test-consent-state-token";
+
 function createApproveFormBody(
   fields: Record<string, string | string[]> = {}
 ): FormData {
   const form = new FormData();
   form.set("action", "approve");
+  form.set("state", TEST_CONSENT_STATE);
   for (const [key, value] of Object.entries(fields)) {
     if (Array.isArray(value)) {
       for (const v of value) {
@@ -117,7 +121,13 @@ function createJsonResponse(status: number, body: unknown): Response {
 
 beforeEach(() => {
   mockStoreOAuthState.mockClear();
-  mockConsumeOAuthState.mockClear();
+  mockConsumeOAuthState.mockClear().mockImplementation(async (_kv: unknown, key: string) => {
+    // Return valid consent state for CSRF validation on POST
+    if (key.startsWith("consent:")) {
+      return { clientId: "mcp-client-1" };
+    }
+    return null;
+  });
   mockStoreUmbracoToken.mockClear();
   mockStoreLogoutRedirect.mockClear();
   mockConsumeLogoutRedirect.mockClear();
@@ -231,6 +241,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "deny");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,
@@ -256,6 +267,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "deny");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,
@@ -359,6 +371,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "reauth");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,
@@ -379,6 +392,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "reauth");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,
@@ -399,6 +413,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "reauth");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,
@@ -422,6 +437,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const form = new FormData();
       form.set("action", "reauth");
+      form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
         body: form,

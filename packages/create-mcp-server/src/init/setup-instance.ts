@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { buildWithPsw } from "./psw-cli.js";
 
 export interface SetupInstanceOptions {
@@ -8,6 +9,8 @@ export interface SetupInstanceOptions {
   projectDir: string;
   instanceName?: string;
   connectionString?: string;
+  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  umbracoVersion?: string;
 }
 
 export interface SetupInstanceResult {
@@ -60,7 +63,27 @@ export async function setupInstance(
     connectionString: opts.connectionString,
     adminEmail,
     adminPassword,
+    umbracoVersion: opts.umbracoVersion,
   });
+
+  // Add DevelopmentMode package — required for the discover flow.
+  // This package registers the umbraco-swagger OAuth client which is used
+  // by checkApiUser to create API users via PKCE. PSW doesn't include it.
+  // Note: On Umbraco 17.3, the client is only registered on second boot
+  // (see https://github.com/umbraco/Umbraco-CMS/issues/22356)
+  const csprojFiles = fs.readdirSync(instanceDir).filter(f => f.endsWith(".csproj"));
+  if (csprojFiles.length > 0) {
+    try {
+      execFileSync("dotnet", ["add", "package", "Umbraco.Cms.DevelopmentMode.Backoffice"], {
+        cwd: instanceDir,
+        encoding: "utf-8",
+        timeout: 60_000,
+        stdio: "inherit",
+      });
+    } catch {
+      // Non-fatal — DevelopmentMode is optional (only needed for discover flow)
+    }
+  }
 
   // Write connection string and unattended install config to appsettings
   if (opts.connectionString) {
@@ -76,6 +99,14 @@ export async function setupInstance(
 
   // Patch Program.cs to disable OpenIddict transport security in development
   patchProgramCs(instanceDir);
+
+  // WORKAROUND: Umbraco 17.3 regression — crashes on startup without wwwroot/media/
+  // See: https://github.com/umbraco/Umbraco-CMS/issues/22355
+  // Remove this when the issue is fixed upstream.
+  const mediaDir = path.join(instanceDir, "wwwroot", "media");
+  if (!fs.existsSync(mediaDir)) {
+    fs.mkdirSync(mediaDir, { recursive: true });
+  }
 
   return {
     instanceDir: opts.instanceDir,

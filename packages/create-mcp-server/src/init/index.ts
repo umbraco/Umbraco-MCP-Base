@@ -15,6 +15,7 @@ import {
   promptToolMode,
   promptFeatureChoices,
   promptPackageSelection,
+  promptUmbracoVersion,
   getInstanceLocation,
   promptSwaggerUrl,
   promptConnectionString,
@@ -101,9 +102,12 @@ export async function runInit(dir?: string): Promise<void> {
   let swaggerUrl: string | undefined;
   let connectionString: string | undefined;
 
+  let umbracoVersion: string | undefined;
+
   if (umbracoChoice === "create") {
     connectionString = await promptConnectionString();
     packageName = await promptPackageSelection();
+    umbracoVersion = await promptUmbracoVersion();
     instanceLocation = getInstanceLocation(projectDir);
   } else if (umbracoChoice === "existing") {
     swaggerUrl = await promptSwaggerUrl();
@@ -133,6 +137,7 @@ export async function runInit(dir?: string): Promise<void> {
         instanceDir: instanceLocation.path,
         projectDir,
         connectionString,
+        umbracoVersion,
       });
 
       instanceCreated = true;

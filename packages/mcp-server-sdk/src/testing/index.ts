@@ -23,3 +23,8 @@ export {
   validateToolResponse,
   problemDetailsSchema,
 } from "./mock-handler.js";
+
+export {
+  setupElicitationMock,
+  type ElicitationMock,
+} from "./elicitation-mock.js";
