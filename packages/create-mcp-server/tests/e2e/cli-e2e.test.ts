@@ -226,6 +226,17 @@ describeOrSkip("CLI full E2E", () => {
     );
     expect(pkg.name).toBe("test-project");
 
+    // Rewrite SDK/hosted deps to use monorepo file: references
+    // (the scaffold writes the current package version which may not be published yet)
+    const monorepoRoot = path.resolve(__dirname, "../../../..");
+    if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
+      pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = `file:${path.join(monorepoRoot, "packages/mcp-server-sdk")}`;
+    }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = `file:${path.join(monorepoRoot, "packages/hosted-mcp")}`;
+    }
+    fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+
     console.log("[E2E] Step 1 passed: project scaffolded");
   });
 
@@ -887,6 +898,18 @@ describeOrSkip("CLI container mode E2E", () => {
     expect(fs.existsSync(path.join(projectDir, "package.json"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "src/index.ts"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "src/config/mcp-servers.ts"))).toBe(true);
+
+    // Rewrite deps to monorepo file: references (same as main E2E)
+    const monorepoRoot = path.resolve(__dirname, "../../../..");
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"));
+    if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
+      pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = `file:${path.join(monorepoRoot, "packages/mcp-server-sdk")}`;
+    }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = `file:${path.join(monorepoRoot, "packages/hosted-mcp")}`;
+    }
+    fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+
     console.log("[Container E2E] Step 1 passed: project scaffolded");
   });
 
