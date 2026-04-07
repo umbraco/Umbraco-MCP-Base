@@ -66,8 +66,11 @@ export async function setupInstance(
     umbracoVersion: opts.umbracoVersion,
   });
 
-  // Add DevelopmentMode package — provides Swagger UI and the umbraco-swagger
-  // OAuth client needed for API user creation via the discover flow
+  // Add DevelopmentMode package — required for the discover flow.
+  // This package registers the umbraco-swagger OAuth client which is used
+  // by checkApiUser to create API users via PKCE. PSW doesn't include it.
+  // Note: On Umbraco 17.3, the client is only registered on second boot
+  // (see https://github.com/umbraco/Umbraco-CMS/issues/22356)
   const csprojFiles = fs.readdirSync(instanceDir).filter(f => f.endsWith(".csproj"));
   if (csprojFiles.length > 0) {
     try {

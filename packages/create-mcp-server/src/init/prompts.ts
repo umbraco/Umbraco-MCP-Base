@@ -303,29 +303,8 @@ export async function promptToolMode(): Promise<ToolModeChoice> {
   return choice;
 }
 
-/**
- * Fetch available Umbraco CMS versions from NuGet, filtered to major version 17+.
- * Returns stable versions and prerelease (RC, beta) sorted newest first.
- */
-async function fetchUmbracoVersions(): Promise<string[]> {
-  const resp = await fetch(
-    "https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json",
-    { signal: AbortSignal.timeout(10_000) },
-  );
-  if (!resp.ok) return [];
-
-  const data = (await resp.json()) as { versions: string[] };
-
-  // Filter to 17.x+ and sort newest first
-  return data.versions
-    .filter((v) => {
-      const major = parseInt(v.split(".")[0], 10);
-      return major >= 17;
-    })
-    .reverse();
-}
-
 export async function promptUmbracoVersion(): Promise<string | undefined> {
+  const { fetchUmbracoVersions } = await import("./nuget-versions.js");
   let versions: string[] = [];
   try {
     versions = await fetchUmbracoVersions();

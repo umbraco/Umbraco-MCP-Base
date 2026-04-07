@@ -26,27 +26,11 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // Umbraco version to install. Override with TEST_UMBRACO_VERSION env var.
 // By default, fetches the latest stable (non-prerelease) version from NuGet.
-const UMBRACO_VERSION = process.env.TEST_UMBRACO_VERSION || await getLatestStableVersion();
+import { getLatestStableVersion } from "../../src/init/nuget-versions.js";
 
-async function getLatestStableVersion(): Promise<string | undefined> {
-  try {
-    const resp = await fetch(
-      "https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json",
-      { signal: AbortSignal.timeout(10_000) },
-    );
-    if (!resp.ok) return undefined;
-    const data = (await resp.json()) as { versions: string[] };
-    // Latest stable: no dash (no -rc, -beta, -alpha), 17.x+
-    const stable = data.versions
-      .filter((v) => !v.includes("-") && parseInt(v.split(".")[0], 10) >= 17)
-      .reverse();
-    const version = stable[0];
-    if (version) console.log(`[E2E] Using Umbraco ${version} (latest stable)`);
-    return version;
-  } catch {
-    return undefined; // Fallback to PSW default (latest including RC)
-  }
-}
+const resolvedVersion = process.env.TEST_UMBRACO_VERSION || await getLatestStableVersion();
+if (resolvedVersion) console.log(`[E2E] Using Umbraco ${resolvedVersion} (latest stable)`);
+const UMBRACO_VERSION = resolvedVersion;
 
 const BASE_CONNECTION_STRING = getBaseConnectionString();
 const DB_NAME = `umbraco_e2e_${randomUUID().slice(0, 8)}`;
