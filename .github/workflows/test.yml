@@ -247,10 +247,9 @@ jobs:
 
   evals:
     name: LLM Eval Tests
-    # TODO: Restore release-only guard after verifying evals pass
-    # if: >-
-    #   github.event.pull_request.base.ref == 'main' &&
-    #   startsWith(github.event.pull_request.head.ref, 'release/')
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
 
     env:
