@@ -244,6 +244,21 @@ jobs:
       - name: Run CLI E2E tests
         run: npm run test:e2e -w packages/create-mcp-server
         timeout-minutes: 15
+        env:
+          KEEP_E2E_ASSETS: 'true'
+
+      - name: Skill smoke test (single tool end-to-end)
+        if: >-
+          github.event.pull_request.base.ref == 'main' &&
+          startsWith(github.event.pull_request.head.ref, 'release/')
+        run: npm run test:e2e:smoke -w packages/create-mcp-server
+        timeout-minutes: 10
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Clean up E2E assets
+        if: always()
+        run: npm run test:e2e:cleanup -w packages/create-mcp-server || true
 
   evals:
     name: LLM Eval Tests
