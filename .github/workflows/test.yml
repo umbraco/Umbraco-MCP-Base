@@ -247,10 +247,9 @@ jobs:
 
   evals:
     name: LLM Eval Tests
-    # Temp: verify baseline timeout fix
-    # if: >-
-    #   github.event.pull_request.base.ref == 'main' &&
-    #   startsWith(github.event.pull_request.head.ref, 'release/')
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
 
     env:
