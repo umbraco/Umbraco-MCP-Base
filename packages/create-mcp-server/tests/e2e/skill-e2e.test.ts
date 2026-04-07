@@ -1,19 +1,16 @@
 /**
- * Skill Smoke Test — full quality pipeline for a single collection.
+ * Skill E2E — full tool-building pipeline for a single collection.
  *
- * Exercises the complete tool-building workflow end-to-end:
- *   1. /build-tools — creates tools for one collection, compiles
- *   2. Review — agent reviews the generated tools for quality
- *   3. /build-tools-tests — creates builders, test helpers, and integration tests
- *   4. Run tests — integration tests pass against running Umbraco
+ * Proves the complete MCP development loop end-to-end:
+ *   1. /build-tools — creates GET/list tools for one collection, compiles
+ *   2. /build-tools-tests — creates integration tests
+ *   3. Run tests — integration tests pass against running Umbraco
  *
- * This proves the entire MCP development loop works, from discovery through
- * to passing integration tests. Uses a single small collection to keep
- * the run time reasonable (~5 minutes).
+ * Uses a single small collection (culture) to keep run time reasonable (~8 min).
  *
  * Requires:
  *   - CLI E2E manifest (run CLI E2E with KEEP_E2E_ASSETS=true first)
- *   - ANTHROPIC_API_KEY
+ *   - Claude Code subscription or ANTHROPIC_API_KEY
  *   - Running Umbraco instance (from CLI E2E)
  */
 
@@ -51,18 +48,18 @@ const SKIP = !manifest;
 const describeOrSkip = SKIP ? describe.skip : describe;
 
 if (!manifest) {
-  console.log("[Smoke] No manifest — run CLI E2E first with KEEP_E2E_ASSETS=true");
+  console.log("[Skill E2E] No manifest — run CLI E2E first with KEEP_E2E_ASSETS=true");
 }
 
-describeOrSkip("Skill smoke — full pipeline for one collection", () => {
+describeOrSkip("Skill E2E — build tool and integration test", () => {
   const projectDir = manifest?.projectDir ?? "";
   const baseUrl = manifest?.baseUrl ?? "";
   let targetCollection = "";
 
   beforeAll(() => {
     expect(fs.existsSync(projectDir)).toBe(true);
-    console.log(`[Smoke] Project: ${projectDir}`);
-    console.log(`[Smoke] Umbraco: ${baseUrl}`);
+    console.log(`[Skill E2E] Project: ${projectDir}`);
+    console.log(`[Skill E2E] Umbraco: ${baseUrl}`);
 
     // Copy skills into the project
     const skillsDir = path.join(projectDir, ".claude", "skills");
@@ -88,7 +85,7 @@ describeOrSkip("Skill smoke — full pipeline for one collection", () => {
     targetCollection = collections.find(c => c === "culture") ??
       collections.find(c => c === "language") ??
       collections[0];
-    console.log(`[Smoke] Target: ${targetCollection}`);
+    console.log(`[Skill E2E] Target: ${targetCollection}`);
   }, 30_000);
 
   async function runSkill(prompt: string, opts?: { maxTurns?: number; maxBudget?: number }): Promise<{ text: string; tools: string[] }> {
@@ -120,7 +117,7 @@ describeOrSkip("Skill smoke — full pipeline for one collection", () => {
         }
         if (message.type === "result") {
           const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
-          console.log(`[Smoke] Result: ${r.subtype}, turns: ${r.num_turns}, cost: $${r.total_cost_usd?.toFixed(3)}`);
+          console.log(`[Skill E2E] Result: ${r.subtype}, turns: ${r.num_turns}, cost: $${r.total_cost_usd?.toFixed(3)}`);
         }
       }
     } finally {
@@ -132,7 +129,7 @@ describeOrSkip("Skill smoke — full pipeline for one collection", () => {
 
   // ── Step 1: Build tools ─────────────────────────────────────────────────
   test("Step 1: /build-tools creates collection that compiles", async () => {
-    console.log(`[Smoke] Building tools for ${targetCollection}...`);
+    console.log(`[Skill E2E] Building tools for ${targetCollection}...`);
 
     await runSkill(`/build-tools
 
@@ -158,12 +155,12 @@ Build tools ONLY for the "${targetCollection}" group from .discover.json. Build 
       stdio: "pipe",
     });
 
-    console.log(`[Smoke] Step 1 passed: ${targetCollection} tools compile`);
+    console.log(`[Skill E2E] Step 1 passed: ${targetCollection} tools compile`);
   }, 600_000);
 
   // ── Step 2: Build tests (builders, helpers, integration tests) ──────────
   test("Step 2: /build-tools-tests creates tests that pass", async () => {
-    console.log(`[Smoke] Building tests for ${targetCollection}...`);
+    console.log(`[Skill E2E] Building tests for ${targetCollection}...`);
 
     await runSkill(`/build-tools-tests
 
@@ -186,7 +183,7 @@ Only test the read/list tools — do not create tests for mutations.`, {
       .filter((f: string) => f.endsWith(".test.ts"));
     expect(testFiles.length).toBeGreaterThan(0);
 
-    console.log(`[Smoke] ${testFiles.length} test file(s) created`);
+    console.log(`[Skill E2E] ${testFiles.length} test file(s) created`);
 
     // Run the integration tests
     try {
@@ -212,7 +209,7 @@ Only test the read/list tools — do not create tests for mutations.`, {
           },
         },
       );
-      console.log("[Smoke] Step 2 passed: integration tests pass");
+      console.log("[Skill E2E] Step 2 passed: integration tests pass");
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string };
       if (e.stdout) console.log("[test stdout]", e.stdout.slice(-3000));

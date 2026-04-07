@@ -247,11 +247,11 @@ jobs:
         env:
           KEEP_E2E_ASSETS: 'true'
 
-      - name: Skill smoke test (single tool end-to-end)
+      - name: Skill E2E (build tool + integration test)
         if: >-
           github.event.pull_request.base.ref == 'main' &&
           startsWith(github.event.pull_request.head.ref, 'release/')
-        run: npm run test:e2e:smoke -w packages/create-mcp-server
+        run: npm run test:e2e:skills -w packages/create-mcp-server
         timeout-minutes: 10
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
