@@ -239,7 +239,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: npm run build && npm run build -w packages/create-mcp-server
+        run: npm run build && npm run build -w packages/hosted-mcp && npm run build -w packages/create-mcp-server
 
       - name: Run CLI E2E tests
         run: npm run test:e2e -w packages/create-mcp-server
