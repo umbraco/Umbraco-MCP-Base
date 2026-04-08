@@ -99,6 +99,8 @@ export interface ToolDefinition<
   slices: string[];
   /** Optional annotations for tool behavior hints */
   annotations?: Partial<ToolAnnotations>;
+  /** Override cursor pagination page size (default: 50). Only used on tools with skip/take params. */
+  pageSize?: number;
   /** @deprecated Use annotations.readOnlyHint instead - kept for backwards compatibility */
   isReadOnly?: boolean;
 }
