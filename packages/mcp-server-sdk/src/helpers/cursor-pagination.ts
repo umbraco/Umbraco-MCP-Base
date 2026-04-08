@@ -176,18 +176,28 @@ export function withCursorPagination<
   };
 
   // Build new output schema: add nextCursor
+  const nextCursorSchema = z
+    .string()
+    .nullish()
+    .describe(
+      "Cursor for the next page. Pass as the cursor parameter to fetch more results. Absent when on the last page."
+    );
+
   let newOutputSchema = tool.outputSchema;
-  if (tool.outputSchema && typeof tool.outputSchema === "object" && !("_def" in tool.outputSchema)) {
-    // It's a ZodRawShape (object shape), add nextCursor field
-    newOutputSchema = {
-      ...(tool.outputSchema as ZodRawShape),
-      nextCursor: z
-        .string()
-        .nullish()
-        .describe(
-          "Cursor for the next page. Pass as the cursor parameter to fetch more results. Absent when on the last page."
-        ),
-    } as any;
+  if (tool.outputSchema && typeof tool.outputSchema === "object") {
+    if ("_def" in tool.outputSchema) {
+      // It's a ZodType (e.g. z.object({...})) — extend it
+      const zodObj = tool.outputSchema as z.ZodObject<any>;
+      if (typeof zodObj.extend === "function") {
+        newOutputSchema = zodObj.extend({ nextCursor: nextCursorSchema }) as any;
+      }
+    } else {
+      // It's a ZodRawShape (plain object), add nextCursor field
+      newOutputSchema = {
+        ...(tool.outputSchema as ZodRawShape),
+        nextCursor: nextCursorSchema,
+      } as any;
+    }
   }
 
   return {
