@@ -101,6 +101,14 @@ export function validateErrorResult(result: CallToolResult): z.infer<typeof prob
  * @returns The validated and parsed data matching the tool's output schema
  * @throws Error if tool has no outputSchema or validation fails
  */
+export function validateToolResponse<T extends z.ZodRawShape>(
+  tool: { outputSchema?: T },
+  result: CallToolResult
+): z.infer<z.ZodObject<T>>;
+export function validateToolResponse<T extends ZodType>(
+  tool: { outputSchema?: T },
+  result: CallToolResult
+): z.infer<T>;
 export function validateToolResponse(
   tool: { outputSchema?: z.ZodRawShape | ZodType },
   result: CallToolResult
