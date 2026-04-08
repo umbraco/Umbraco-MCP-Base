@@ -120,13 +120,13 @@ Tools with `skip`/`take` in their input schema use cursor-based pagination at ru
 
 ```typescript
 import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
-import { validateToolResponse } from "@umbraco-cms/mcp-server-sdk/testing";
+import { validateToolResponse, type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
 it("should list entities", async () => {
   const cursorTool = withCursorPagination(listEntitiesTool);
   const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
-  const data = validateToolResponse(cursorTool, result);
+  const data = validateToolResponse(cursorTool, result) as CursorPaginatedResult;
   expect(data.items.length).toBeGreaterThan(0);
 });
 ```
@@ -136,7 +136,7 @@ it("should list entities", async () => {
 - Wrap with `withCursorPagination(tool)` before calling handler
 - Pass `{}` for first page (no cursor = default page size)
 - Use `{ ...tool, pageSize: N }` to override page size
-- Use `validateToolResponse(cursorTool, result)` with the **cursor-wrapped** tool
+- Cast `validateToolResponse` results to `CursorPaginatedResult` from `@umbraco-cms/mcp-server-sdk/testing`
 - For cursor pagination test: use `nextCursor` from response to fetch page 2
 
 ## Sequential Workflow

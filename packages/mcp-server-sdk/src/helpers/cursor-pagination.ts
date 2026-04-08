@@ -13,6 +13,7 @@ import { z, type ZodRawShape, type ZodType } from "zod";
 import type { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResultError } from "./tool-result.js";
 
+
 // ============================================================================
 // Cursor State
 // ============================================================================
@@ -145,7 +146,7 @@ export function withCursorPagination<
 >(
   tool: ToolDefinition<InputArgs, OutputArgs>,
   options?: CursorPaginationOptions
-): ToolDefinition<any, any> {
+): ToolDefinition<ZodRawShape, OutputArgs> {
   // Detection: only apply if inputSchema has both skip and take
   if (
     !tool.inputSchema ||

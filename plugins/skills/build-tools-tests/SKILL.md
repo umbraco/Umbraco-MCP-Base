@@ -386,14 +386,15 @@ Paginated tools (those with `skip`/`take` in their input schema) use cursor-base
 
 ```typescript
 import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
+import { type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
 it("should list entities", async () => {
   const cursorTool = withCursorPagination(listEntitiesTool);
   const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
 
-  // Validate against cursor-wrapped output schema (includes nextCursor)
-  const data = validateToolResponse(cursorTool, result);
+  // Cast to CursorPaginatedResult for nextCursor access
+  const data = validateToolResponse(cursorTool, result) as CursorPaginatedResult;
   expect(data.items.length).toBeGreaterThan(0);
 });
 
@@ -402,14 +403,14 @@ it("should paginate with cursor", async () => {
   const cursorTool = withCursorPagination({ ...listEntitiesTool, pageSize: 1 });
 
   const page1 = await cursorTool.handler({}, createMockRequestHandlerExtra());
-  const data1 = validateToolResponse(cursorTool, page1);
+  const data1 = validateToolResponse(cursorTool, page1) as CursorPaginatedResult;
   expect(data1.nextCursor).toBeDefined();
 
   const page2 = await cursorTool.handler(
     { cursor: data1.nextCursor },
     createMockRequestHandlerExtra()
   );
-  const data2 = validateToolResponse(cursorTool, page2);
+  const data2 = validateToolResponse(cursorTool, page2) as CursorPaginatedResult;
   expect(data2.items[0]).not.toEqual(data1.items[0]);
 });
 ```
@@ -418,7 +419,7 @@ it("should paginate with cursor", async () => {
 - **NEVER** pass `skip` or `take` to handlers — use `withCursorPagination()` and the `cursor` param
 - Pass `{}` for first page (no cursor = first page with default page size)
 - Use `{ ...tool, pageSize: N }` to override page size for pagination tests
-- Use `validateToolResponse(cursorTool, result)` — pass the cursor-wrapped tool, not the original
+- Cast `validateToolResponse` results to `CursorPaginatedResult` from `@umbraco-cms/mcp-server-sdk/testing`
 - For edge cases (skip past end), use `encodeCursor({ s: 10000, t: 10 })` as cursor value
 
 #### File naming — one file per tool
