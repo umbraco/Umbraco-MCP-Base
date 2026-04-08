@@ -114,6 +114,31 @@ describe("get-entity", () => {
 - Extensive edge cases
 - Complex validation scenarios
 
+### Paginated Tool Testing (Cursor Pagination)
+
+Tools with `skip`/`take` in their input schema use cursor-based pagination at runtime. Tests **must** use `withCursorPagination` to test what the LLM actually sees:
+
+```typescript
+import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
+import { validateToolResponse } from "@umbraco-cms/mcp-server-sdk/testing";
+import listEntitiesTool from "../get/list-entities.js";
+
+it("should list entities", async () => {
+  const cursorTool = withCursorPagination(listEntitiesTool);
+  const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
+  const data = validateToolResponse(cursorTool, result);
+  expect(data.items.length).toBeGreaterThan(0);
+});
+```
+
+**Rules:**
+- **NEVER** pass `skip` or `take` to handlers
+- Wrap with `withCursorPagination(tool)` before calling handler
+- Pass `{}` for first page (no cursor = default page size)
+- Use `{ ...tool, pageSize: N }` to override page size
+- Use `validateToolResponse(cursorTool, result)` with the **cursor-wrapped** tool
+- For cursor pagination test: use `nextCursor` from response to fetch page 2
+
 ## Sequential Workflow
 
 **CRITICAL**: Complete each test file fully before proceeding:

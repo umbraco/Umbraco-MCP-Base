@@ -94,3 +94,13 @@ export {
 
 // Chained result extraction
 export { extractChainedResult } from "./chained-result.js";
+
+
+// Cursor-based pagination
+export {
+  withCursorPagination,
+  encodeCursor,
+  decodeCursor,
+  computeNextCursor,
+  type CursorPaginationOptions,
+} from "./cursor-pagination.js";

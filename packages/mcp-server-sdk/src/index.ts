@@ -100,6 +100,15 @@ export {
 // Chained Result Extraction
 export { extractChainedResult } from "./helpers/chained-result.js";
 
+// Cursor-Based Pagination
+export {
+  withCursorPagination,
+  encodeCursor,
+  decodeCursor,
+  computeNextCursor,
+  type CursorPaginationOptions,
+} from "./helpers/cursor-pagination.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,

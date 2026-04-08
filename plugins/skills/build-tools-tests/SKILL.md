@@ -380,6 +380,47 @@ Always use the snapshot helper:
 expect(createSnapshotResult(result, builder.getId())).toMatchSnapshot();
 ```
 
+#### Cursor pagination in tests
+
+Paginated tools (those with `skip`/`take` in their input schema) use cursor-based pagination at runtime via `withCursorPagination`. Tests for these tools **must** use the cursor wrapper:
+
+```typescript
+import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
+import listEntitiesTool from "../get/list-entities.js";
+
+it("should list entities", async () => {
+  const cursorTool = withCursorPagination(listEntitiesTool);
+  const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
+
+  // Validate against cursor-wrapped output schema (includes nextCursor)
+  const data = validateToolResponse(cursorTool, result);
+  expect(data.items.length).toBeGreaterThan(0);
+});
+
+it("should paginate with cursor", async () => {
+  // Use a small pageSize to force multiple pages
+  const cursorTool = withCursorPagination({ ...listEntitiesTool, pageSize: 1 });
+
+  const page1 = await cursorTool.handler({}, createMockRequestHandlerExtra());
+  const data1 = validateToolResponse(cursorTool, page1);
+  expect(data1.nextCursor).toBeDefined();
+
+  const page2 = await cursorTool.handler(
+    { cursor: data1.nextCursor },
+    createMockRequestHandlerExtra()
+  );
+  const data2 = validateToolResponse(cursorTool, page2);
+  expect(data2.items[0]).not.toEqual(data1.items[0]);
+});
+```
+
+**Key rules:**
+- **NEVER** pass `skip` or `take` to handlers — use `withCursorPagination()` and the `cursor` param
+- Pass `{}` for first page (no cursor = first page with default page size)
+- Use `{ ...tool, pageSize: N }` to override page size for pagination tests
+- Use `validateToolResponse(cursorTool, result)` — pass the cursor-wrapped tool, not the original
+- For edge cases (skip past end), use `encodeCursor({ s: 10000, t: 10 })` as cursor value
+
 #### File naming — one file per tool
 
 | Tool file | Test file |
