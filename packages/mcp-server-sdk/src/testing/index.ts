@@ -28,3 +28,18 @@ export {
   setupElicitationMock,
   type ElicitationMock,
 } from "./elicitation-mock.js";
+
+/**
+ * Typed result from a cursor-paginated tool response.
+ * Cast validateToolResponse results to this when testing cursor-wrapped tools:
+ *
+ * ```typescript
+ * const data = validateToolResponse(cursorTool, result) as CursorPaginatedResult;
+ * expect(data.nextCursor).toBeDefined();
+ * ```
+ */
+export interface CursorPaginatedResult {
+  total: number;
+  items: unknown[];
+  nextCursor?: string;
+}
