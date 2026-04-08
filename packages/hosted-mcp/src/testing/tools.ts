@@ -54,7 +54,7 @@ export async function callTool(
   toolName: string,
   resultMarker: string,
 ): Promise<string> {
-  await page.getByText(toolName).click();
+  await page.getByText(toolName, { exact: true }).first().click();
 
   const runButton = page.getByRole("button", { name: /Run|Execute/i });
   await runButton.waitFor({ timeout: 5000 });
