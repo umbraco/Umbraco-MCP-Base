@@ -226,6 +226,17 @@ describeOrSkip("CLI full E2E", () => {
     );
     expect(pkg.name).toBe("test-project");
 
+    // Rewrite SDK/hosted deps to use monorepo file: references
+    // (the scaffold writes the current package version which may not be published yet)
+    const monorepoRoot = path.resolve(__dirname, "../../../..");
+    if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
+      pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = `file:${path.join(monorepoRoot, "packages/mcp-server-sdk")}`;
+    }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = `file:${path.join(monorepoRoot, "packages/hosted-mcp")}`;
+    }
+    fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+
     console.log("[E2E] Step 1 passed: project scaffolded");
   });
 
@@ -609,7 +620,13 @@ describeOrSkip("CLI full E2E", () => {
   // ── Step 9: TypeScript compile on scaffolded project ────────────────────
   test("Step 9: scaffolded project TypeScript compiles cleanly", () => {
     console.log("[E2E] Running TypeScript compile check...");
-    execFileSync("npm", ["run", "compile"], {
+    // Exclude worker.ts and client-fetch.ts — they import from @umbraco-cms/mcp-hosted
+    // which via file: refs causes duplicate @modelcontextprotocol/sdk types.
+    // Worker compilation is verified by Step 12 (wrangler build + start).
+    const tsconfig = JSON.parse(fs.readFileSync(path.join(projectDir, "tsconfig.json"), "utf-8"));
+    tsconfig.exclude = [...(tsconfig.exclude || []), "src/worker.ts", "src/umbraco-api/api/client-fetch.ts"];
+    fs.writeFileSync(path.join(projectDir, "tsconfig.e2e.json"), JSON.stringify(tsconfig, null, 2));
+    execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.e2e.json"], {
       cwd: projectDir,
       encoding: "utf-8",
       timeout: 60_000,
@@ -887,6 +904,18 @@ describeOrSkip("CLI container mode E2E", () => {
     expect(fs.existsSync(path.join(projectDir, "package.json"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "src/index.ts"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "src/config/mcp-servers.ts"))).toBe(true);
+
+    // Rewrite deps to monorepo file: references (same as main E2E)
+    const monorepoRoot = path.resolve(__dirname, "../../../..");
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"));
+    if (pkg.dependencies?.["@umbraco-cms/mcp-server-sdk"]) {
+      pkg.dependencies["@umbraco-cms/mcp-server-sdk"] = `file:${path.join(monorepoRoot, "packages/mcp-server-sdk")}`;
+    }
+    if (pkg.dependencies?.["@umbraco-cms/mcp-hosted"]) {
+      pkg.dependencies["@umbraco-cms/mcp-hosted"] = `file:${path.join(monorepoRoot, "packages/hosted-mcp")}`;
+    }
+    fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+
     console.log("[Container E2E] Step 1 passed: project scaffolded");
   });
 
@@ -956,7 +985,11 @@ describeOrSkip("CLI container mode E2E", () => {
     });
 
     console.log("[Container E2E] Running TypeScript compile...");
-    execFileSync("npm", ["run", "compile"], {
+    // Exclude worker.ts — file: refs cause duplicate type issues (see Step 9)
+    const tsconfig = JSON.parse(fs.readFileSync(path.join(projectDir, "tsconfig.json"), "utf-8"));
+    tsconfig.exclude = [...(tsconfig.exclude || []), "src/worker.ts"];
+    fs.writeFileSync(path.join(projectDir, "tsconfig.e2e.json"), JSON.stringify(tsconfig, null, 2));
+    execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.e2e.json"], {
       cwd: projectDir,
       encoding: "utf-8",
       timeout: 60_000,
