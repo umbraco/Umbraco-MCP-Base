@@ -8,6 +8,7 @@ import {
   ExampleBuilder,
   ExampleTestHelper,
 } from "./setup.js";
+import { encodeCursor } from "@umbraco-cms/mcp-server-sdk";
 import listExamplesTool from "../get/list-examples.js";
 
 describe("list-examples", () => {
@@ -26,7 +27,7 @@ describe("list-examples", () => {
   it("should return paginated list", async () => {
     const context = createMockRequestHandlerExtra();
 
-    const result = await listExamplesTool.handler({ skip: 0, take: 100 }, context);
+    const result = await listExamplesTool.handler({}, context);
 
     expect(result.structuredContent).toBeDefined();
     const content = result.structuredContent as any;
@@ -35,15 +36,18 @@ describe("list-examples", () => {
     expect(Array.isArray(content.items)).toBe(true);
   });
 
-  it("should support pagination parameters", async () => {
+  it("should support cursor-based pagination", async () => {
     const context = createMockRequestHandlerExtra();
 
+    // Request 2 items via cursor encoding
+    const cursor = encodeCursor({ s: 0, t: 2 });
     const result = await listExamplesTool.handler(
-      { skip: 0, take: 2 },
+      { cursor },
       context
     );
 
     const content = result.structuredContent as any;
     expect(content.items.length).toBe(2);
+    expect(content.nextCursor).toBeDefined();
   });
 });

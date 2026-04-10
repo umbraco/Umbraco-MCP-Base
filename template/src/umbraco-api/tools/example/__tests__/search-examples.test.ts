@@ -36,7 +36,7 @@ describe("search-examples", () => {
     const context = createMockRequestHandlerExtra();
 
     const result = await searchExamplesTool.handler(
-      { query: "Search", skip: 0, take: 100 },
+      { query: "Search" },
       context
     );
 
@@ -50,7 +50,7 @@ describe("search-examples", () => {
     const context = createMockRequestHandlerExtra();
 
     const result = await searchExamplesTool.handler(
-      { query: "First item", skip: 0, take: 100 },
+      { query: "First item" },
       context
     );
 
@@ -62,7 +62,7 @@ describe("search-examples", () => {
     const context = createMockRequestHandlerExtra();
 
     const result = await searchExamplesTool.handler(
-      { query: "NonExistentQuery12345", skip: 0, take: 100 },
+      { query: "NonExistentQuery12345" },
       context
     );
 
