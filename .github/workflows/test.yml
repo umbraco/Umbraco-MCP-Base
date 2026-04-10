@@ -247,49 +247,51 @@ jobs:
         env:
           KEEP_E2E_ASSETS: 'true'
 
-      - name: Skill E2E (build tool + integration test)
-        if: >-
-          github.event.pull_request.base.ref == 'main' &&
-          startsWith(github.event.pull_request.head.ref, 'release/')
-        run: npm run test:e2e:skills -w packages/create-mcp-server
-        timeout-minutes: 10
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDECODE: ''
+      # Temporarily disabled — API credit balance exhausted
+      # - name: Skill E2E (build tool + integration test)
+      #   if: >-
+      #     github.event.pull_request.base.ref == 'main' &&
+      #     startsWith(github.event.pull_request.head.ref, 'release/')
+      #   run: npm run test:e2e:skills -w packages/create-mcp-server
+      #   timeout-minutes: 10
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #     CLAUDECODE: ''
 
       - name: Clean up E2E assets
         if: always()
         run: npm run test:e2e:cleanup -w packages/create-mcp-server || true
 
-  evals:
-    name: LLM Eval Tests
-    if: >-
-      github.event.pull_request.base.ref == 'main' &&
-      startsWith(github.event.pull_request.head.ref, 'release/')
-    runs-on: ubuntu-latest
-
-    env:
-      NODE_TLS_REJECT_UNAUTHORIZED: '0'
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Build SDK
-        run: npm run build
-
-      - name: Build template
-        run: npm run build -w template
-
-      - name: Run CLI eval tests
-        run: npm run test:cli:evals
+  # Temporarily disabled — API credit balance exhausted
+  # evals:
+  #   name: LLM Eval Tests
+  #   if: >-
+  #     github.event.pull_request.base.ref == 'main' &&
+  #     startsWith(github.event.pull_request.head.ref, 'release/')
+  #   runs-on: ubuntu-latest
+  #
+  #   env:
+  #     NODE_TLS_REJECT_UNAUTHORIZED: '0'
+  #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  #
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '22'
+  #         cache: 'npm'
+  #
+  #     - name: Install npm dependencies
+  #       run: npm ci
+  #
+  #     - name: Build SDK
+  #       run: npm run build
+  #
+  #     - name: Build template
+  #       run: npm run build -w template
+  #
+  #     - name: Run CLI eval tests
+  #       run: npm run test:cli:evals

@@ -167,13 +167,32 @@ describe("withCursorPagination", () => {
   });
 
   describe("output schema transformation", () => {
-    it("should add nextCursor to output schema", () => {
+    it("should add nextCursor to output schema (raw shape)", () => {
       const tool = createMockTool();
       const result = withCursorPagination(tool);
 
       expect(result.outputSchema).toHaveProperty("nextCursor");
       expect(result.outputSchema).toHaveProperty("total");
       expect(result.outputSchema).toHaveProperty("items");
+    });
+
+    it("should add nextCursor to output schema (ZodObject)", () => {
+      const tool = createMockTool({
+        outputSchema: z.object({
+          total: z.number(),
+          items: z.array(z.object({ id: z.string() })),
+        }),
+      });
+      const result = withCursorPagination(tool);
+
+      // Should be a ZodObject with nextCursor field
+      expect(result.outputSchema).toBeDefined();
+      const parsed = (result.outputSchema as z.ZodObject<any>).parse({
+        total: 10,
+        items: [],
+        nextCursor: "abc",
+      });
+      expect(parsed).toHaveProperty("nextCursor", "abc");
     });
   });
 

@@ -13,6 +13,7 @@ import { z, type ZodRawShape, type ZodType } from "zod";
 import type { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResultError } from "./tool-result.js";
 
+
 // ============================================================================
 // Cursor State
 // ============================================================================
@@ -145,7 +146,7 @@ export function withCursorPagination<
 >(
   tool: ToolDefinition<InputArgs, OutputArgs>,
   options?: CursorPaginationOptions
-): ToolDefinition<any, any> {
+): ToolDefinition<ZodRawShape, OutputArgs> {
   // Detection: only apply if inputSchema has both skip and take
   if (
     !tool.inputSchema ||
@@ -176,18 +177,28 @@ export function withCursorPagination<
   };
 
   // Build new output schema: add nextCursor
+  const nextCursorSchema = z
+    .string()
+    .nullish()
+    .describe(
+      "Cursor for the next page. Pass as the cursor parameter to fetch more results. Absent when on the last page."
+    );
+
   let newOutputSchema = tool.outputSchema;
-  if (tool.outputSchema && typeof tool.outputSchema === "object" && !("_def" in tool.outputSchema)) {
-    // It's a ZodRawShape (object shape), add nextCursor field
-    newOutputSchema = {
-      ...(tool.outputSchema as ZodRawShape),
-      nextCursor: z
-        .string()
-        .nullish()
-        .describe(
-          "Cursor for the next page. Pass as the cursor parameter to fetch more results. Absent when on the last page."
-        ),
-    } as any;
+  if (tool.outputSchema && typeof tool.outputSchema === "object") {
+    if ("_def" in tool.outputSchema) {
+      // It's a ZodType (e.g. z.object({...})) — extend it
+      const zodObj = tool.outputSchema as z.ZodObject<any>;
+      if (typeof zodObj.extend === "function") {
+        newOutputSchema = zodObj.extend({ nextCursor: nextCursorSchema }) as any;
+      }
+    } else {
+      // It's a ZodRawShape (plain object), add nextCursor field
+      newOutputSchema = {
+        ...(tool.outputSchema as ZodRawShape),
+        nextCursor: nextCursorSchema,
+      } as any;
+    }
   }
 
   return {
