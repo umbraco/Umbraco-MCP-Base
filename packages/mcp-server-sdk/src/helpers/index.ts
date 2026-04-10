@@ -103,4 +103,5 @@ export {
   decodeCursor,
   computeNextCursor,
   type CursorPaginationOptions,
+  type CursorPaginatedArgs,
 } from "./cursor-pagination.js";

@@ -121,6 +121,15 @@ export interface CursorPaginationOptions {
   defaultPageSize?: number;
 }
 
+/**
+ * Conditional type that reflects the schema transformation.
+ * If Args has both `skip` and `take`, replaces them with optional `cursor`.
+ * Otherwise returns Args unchanged.
+ */
+export type CursorPaginatedArgs<Args> = Args extends { skip: any; take: any }
+  ? Omit<Args, "skip" | "take"> & { cursor?: z.ZodOptional<z.ZodString> }
+  : Args;
+
 // ============================================================================
 // Decorator
 // ============================================================================
@@ -141,19 +150,19 @@ export interface CursorPaginationOptions {
  * @returns Transformed tool definition (or original if not paginated)
  */
 export function withCursorPagination<
-  InputArgs extends ZodRawShape,
-  OutputArgs extends undefined | ZodRawShape | ZodType,
+  Args extends undefined | ZodRawShape,
+  OutputArgs extends undefined | ZodRawShape | ZodType = undefined,
 >(
-  tool: ToolDefinition<InputArgs, OutputArgs>,
+  tool: ToolDefinition<Args, OutputArgs>,
   options?: CursorPaginationOptions
-): ToolDefinition<ZodRawShape, OutputArgs> {
+): ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs> {
   // Detection: only apply if inputSchema has both skip and take
   if (
     !tool.inputSchema ||
     !("skip" in tool.inputSchema) ||
     !("take" in tool.inputSchema)
   ) {
-    return tool;
+    return tool as ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs>;
   }
 
   const defaultPageSize = options?.defaultPageSize ?? DEFAULT_PAGE_SIZE;
@@ -205,7 +214,7 @@ export function withCursorPagination<
     ...tool,
     inputSchema: newInputSchema,
     outputSchema: newOutputSchema,
-    handler: async (args: any, extra: any) => {
+    handler: (async (args: any, extra: any) => {
       // Decode cursor or use defaults
       const { cursor, ...restArgs } = args;
       let skipVal = 0;
@@ -276,6 +285,6 @@ export function withCursorPagination<
       }
 
       return result;
-    },
-  };
+    }),
+  } as ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs>;
 }

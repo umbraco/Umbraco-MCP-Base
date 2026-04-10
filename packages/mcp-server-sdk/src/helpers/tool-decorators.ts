@@ -13,6 +13,7 @@ import { UmbracoApiError } from "./api-call-helpers.js";
 import { ToolValidationError } from "./tool-validation-error.js";
 import { withInputSanitization } from "./input-sanitizer.js";
 import { withDryRun } from "./dry-run.js";
+import { withCursorPagination, type CursorPaginatedArgs } from "./cursor-pagination.js";
 
 // Re-export everything from split modules for convenience
 export {
@@ -211,15 +212,28 @@ export function createToolAnnotations(tool: ToolDefinition<any, any>): ToolAnnot
 
 /**
  * Standard decorator composition for all tools.
- * Applies: withErrorHandling → withInputSanitization → withDryRun → withPreExecutionCheck → handler
+ * Applies: withErrorHandling → withCursorPagination → withInputSanitization → withDryRun → withPreExecutionCheck → handler
  *
- * Input sanitization runs before dry-run so agents get validation feedback even in dry-run mode.
+ * Cursor pagination is applied after the inner decorators but before error handling,
+ * so cursor decode errors are caught. Only affects tools with skip/take in their
+ * inputSchema — all others pass through unchanged.
+ *
+ * The return type reflects the schema transformation: tools with skip/take get
+ * CursorPaginatedArgs (skip/take replaced with optional cursor).
  *
  * @example
  * export default withStandardDecorators(myTool);
  */
 export function withStandardDecorators<Args extends undefined | ZodRawShape, OutputArgs extends undefined | ZodRawShape | ZodType = undefined>(
   tool: ToolDefinition<Args, OutputArgs>
-): ToolDefinition<Args, OutputArgs> {
-  return compose<Args, OutputArgs>(withErrorHandling, withInputSanitization, withDryRun, withPreExecutionCheck)(tool);
+): ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs> {
+  // Applied in three steps rather than a single compose() because
+  // withCursorPagination changes the type signature (skip/take → cursor),
+  // which compose() can't express since it requires uniform types throughout.
+  //
+  // Execution order (innermost → outermost):
+  //   1. preExecutionCheck → 2. dryRun → 3. inputSanitization → 4. cursorPagination → 5. errorHandling
+  const decorated = compose<Args, OutputArgs>(withInputSanitization, withDryRun, withPreExecutionCheck)(tool);
+  const paginated = withCursorPagination(decorated);
+  return withErrorHandling(paginated);
 }
