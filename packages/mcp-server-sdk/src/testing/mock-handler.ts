@@ -104,10 +104,21 @@ export function validateErrorResult(result: CallToolResult): z.infer<typeof prob
 export function validateToolResponse<T extends z.ZodRawShape>(
   tool: { outputSchema?: T },
   result: CallToolResult
-): z.infer<z.ZodObject<T>> {
+): z.infer<z.ZodObject<T>>;
+export function validateToolResponse<T extends ZodType>(
+  tool: { outputSchema?: T },
+  result: CallToolResult
+): z.infer<T>;
+export function validateToolResponse(
+  tool: { outputSchema?: z.ZodRawShape | ZodType },
+  result: CallToolResult
+): unknown {
   if (!tool.outputSchema) {
     throw new Error("Tool does not define outputSchema - cannot validate response");
   }
-  const schema = z.object(tool.outputSchema);
+  // If outputSchema is already a ZodType (e.g. z.object({...})), use it directly
+  const schema = tool.outputSchema instanceof ZodType
+    ? tool.outputSchema
+    : z.object(tool.outputSchema);
   return schema.parse(result.structuredContent);
 }
