@@ -121,6 +121,16 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 - Require `npm run build` first — evals run against `dist/index.js`, not source
 - Require `ANTHROPIC_API_KEY` environment variable or a Claude Code subscription
 
+## Pull Request CI Checks
+
+After creating or pushing to a PR, ask the user if they want you to monitor the CI build. If yes:
+
+1. Wait for the GitHub Actions workflow to complete: `gh pr checks <pr-number> --watch`
+2. If checks fail, inspect the failure: `gh run view <run-id> --log-failed`
+3. Fix the issue, push, and repeat until CI is green
+
+Do not just push a PR and walk away — the CI build includes tests that don't run locally (CLI E2E with SQL Server, Playwright E2E, scaffolding compilation checks). Always offer to follow through, but respect that sometimes the user doesn't need this.
+
 ## Self-Signed Certificates
 
 The local Umbraco instance uses HTTPS with self-signed certs. TLS rejection must be disabled in three places:

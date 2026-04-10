@@ -107,6 +107,7 @@ export {
   decodeCursor,
   computeNextCursor,
   type CursorPaginationOptions,
+  type CursorPaginatedArgs,
 } from "./helpers/cursor-pagination.js";
 
 // CLI Introspection & Context Generation
