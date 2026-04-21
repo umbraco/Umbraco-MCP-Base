@@ -295,7 +295,6 @@ export async function runDiscover(dir?: string): Promise<void> {
   console.log(pc.dim("  3. Run /build-tools to generate tool collections from .discover.json"));
   console.log(pc.dim("  4. Run /build-tools-tests to generate integration tests for the collections"));
   console.log(pc.dim("  5. Run `npm run build` to build the server"));
-  console.log(pc.dim("  6. Your tools are now callable in Claude Code via the shipped .mcp.json"));
   console.log();
 }
 
