@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "umbraco": {
+      "command": "node",
+      "args": ["--env-file=.env", "./dist/index.js"]
+    }
+  }
+}

@@ -156,4 +156,9 @@ export function scaffoldProject(options: ScaffoldOptions): void {
   console.log(pc.dim(`  cd ${path.basename(targetDir)}`));
   console.log(pc.dim("  npm install"));
   console.log(pc.dim("  npx @umbraco-cms/create-umbraco-mcp-server init"));
+  console.log(pc.dim("  npx @umbraco-cms/create-umbraco-mcp-server discover"));
+  console.log(pc.dim("  npm run build"));
+  console.log(pc.dim(""));
+  console.log(pc.dim("  Then open this folder in Claude Code — .mcp.json is ready to use:"));
+  console.log(pc.dim("  claude ."));
 }
