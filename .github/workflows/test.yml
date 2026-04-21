@@ -52,6 +52,15 @@ jobs:
       - name: Build CLI package
         run: npm run build -w packages/create-mcp-server
 
+      # Smoke-test the bundled CLI: if dist/index.js can't load (e.g. a
+      # relative-path require resolves differently after bundling), this
+      # fails in seconds rather than surfacing only after publish.
+      - name: CLI bundle smoke test
+        run: |
+          VERSION=$(node packages/create-mcp-server/dist/index.js --version)
+          echo "CLI reports version: $VERSION"
+          test -n "$VERSION"
+
       # ── Unit tests (no infrastructure) ──
 
       - name: SDK unit tests
