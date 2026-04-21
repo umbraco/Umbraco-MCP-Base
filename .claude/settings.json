@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run compile*)",
+      "Bash(npm run build*)",
+      "Bash(npm run generate*)",
+      "Bash(npm test*)",
+      "Bash(npx tsc*)",
+      "Bash(node *)",
+      "Bash(curl *)",
+      "Bash(mkdir *)",
+      "Bash(mkdir -p *)",
+      "Bash(ls *)",
+      "Bash(lsof -ti :*)",
+      "Bash(pkill -f 'dotnet.*demo-site'*)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet run *)"
+    ]
+  },
+  "hooks": {
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/worktree-create.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/worktree-remove.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
