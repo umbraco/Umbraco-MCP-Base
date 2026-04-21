@@ -157,8 +157,7 @@ export function scaffoldProject(options: ScaffoldOptions): void {
   console.log(pc.dim("  npm install"));
   console.log(pc.dim("  npx @umbraco-cms/create-umbraco-mcp-server init"));
   console.log(pc.dim("  npx @umbraco-cms/create-umbraco-mcp-server discover"));
-  console.log(pc.dim("  npm run build"));
   console.log(pc.dim(""));
-  console.log(pc.dim("  Then open this folder in Claude Code — .mcp.json is ready to use:"));
-  console.log(pc.dim("  claude ."));
+  console.log(pc.dim("  Then install the Claude Code plugin and run /build-tools and /build-tools-tests."));
+  console.log(pc.dim("  After that, `npm run build` and `claude .` will let you exercise your tools via the shipped .mcp.json."));
 }
