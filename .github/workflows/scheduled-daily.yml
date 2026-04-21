@@ -1,0 +1,145 @@
+name: Scheduled — Daily CLI checks
+
+# Runs daily to catch regressions that the PR suite can miss.
+#
+#   published-cli-smoke  — exercises the currently-published npm artifact
+#                          (catches bundle bugs, missing `files`, broken deps).
+#
+#   cli-e2e              — full 19-step deterministic CLI E2E
+#                          (scaffold → init → Umbraco → discover → generate →
+#                           compile → test → worker), same as runs on PRs but
+#                           scheduled so regressions in dev dependencies or
+#                           transitive tooling surface without waiting for a PR.
+#
+# Failure notifications: relies on GitHub's built-in emails for scheduled
+# workflows — the user who last modified this file receives an email when a
+# scheduled run fails (if Actions notifications are enabled in their GitHub
+# settings). No explicit notification job.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 06:00 UTC daily
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+jobs:
+  published-cli-smoke:
+    name: Scaffold from published npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Report published version
+        id: version
+        run: |
+          LATEST=$(npm view @umbraco-cms/create-umbraco-mcp-server version)
+          BETA=$(npm view @umbraco-cms/create-umbraco-mcp-server@beta version 2>/dev/null || echo "")
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "beta=$BETA" >> "$GITHUB_OUTPUT"
+          echo "Latest dist-tag: $LATEST"
+          echo "Beta dist-tag: $BETA"
+
+      - name: Scaffold project via npx (latest dist-tag)
+        working-directory: ${{ runner.temp }}
+        run: |
+          npx --yes @umbraco-cms/create-umbraco-mcp-server@latest smoke-latest
+          test -d smoke-latest
+          test -f smoke-latest/package.json
+          test -d smoke-latest/src
+
+      - name: Verify CLI reports a version
+        working-directory: ${{ runner.temp }}
+        run: |
+          VERSION=$(npx --yes @umbraco-cms/create-umbraco-mcp-server@latest --version)
+          test -n "$VERSION"
+
+      - name: Install dependencies in scaffolded project
+        working-directory: ${{ runner.temp }}/smoke-latest
+        run: npm install
+
+      - name: Typecheck scaffolded project
+        working-directory: ${{ runner.temp }}/smoke-latest
+        run: npm run compile
+
+      - name: Scaffold project via npx (beta dist-tag)
+        if: steps.version.outputs.beta != ''
+        working-directory: ${{ runner.temp }}
+        run: |
+          npx --yes @umbraco-cms/create-umbraco-mcp-server@beta smoke-beta
+          test -d smoke-beta
+          test -f smoke-beta/package.json
+
+      - name: Install dependencies in @beta scaffolded project
+        if: steps.version.outputs.beta != ''
+        working-directory: ${{ runner.temp }}/smoke-beta
+        run: npm install
+
+      - name: Typecheck @beta scaffolded project
+        if: steps.version.outputs.beta != ''
+        working-directory: ${{ runner.temp }}/smoke-beta
+        run: npm run compile
+
+  cli-e2e:
+    name: CLI full E2E (scheduled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Moloko99
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Moloko99 -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      TEST_SQL_CONNECTION_STRING: "Server=localhost,1433;User Id=sa;Password=Moloko99;TrustServerCertificate=True"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup .NET dev certs
+        run: dotnet dev-certs https
+
+      - name: Install PSW CLI
+        run: dotnet tool install -g PackageScriptWriter.Cli --prerelease
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build && npm run build -w packages/hosted-mcp && npm run build -w packages/create-mcp-server
+
+      - name: Run CLI E2E tests
+        run: npm run test:e2e -w packages/create-mcp-server
+        timeout-minutes: 20

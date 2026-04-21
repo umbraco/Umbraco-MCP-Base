@@ -17,6 +17,22 @@ const DEFAULT_CLIENT_SECRET = "1234567890";
 const DEFAULT_ADMIN_EMAIL = "admin@test.com";
 const DEFAULT_ADMIN_PASSWORD = "SecurePass1234";
 
+function getAdminCredentials(): { email: string; password: string; customized: boolean } {
+  const email = process.env.UMBRACO_ADMIN_EMAIL;
+  const password = process.env.UMBRACO_ADMIN_PASSWORD;
+  const customized = Boolean(email || password);
+  return {
+    email: email || DEFAULT_ADMIN_EMAIL,
+    password: password || DEFAULT_ADMIN_PASSWORD,
+    customized,
+  };
+}
+
+type AutoCreateFailure =
+  | { kind: "admin-login"; error: string }
+  | { kind: "bearer-token"; error: string }
+  | { kind: "other"; error: string };
+
 export interface ApiUserCheckResult {
   authenticated: boolean;
   created?: boolean;
@@ -42,21 +58,34 @@ export async function checkApiUser(baseUrl: string): Promise<ApiUserCheckResult>
     return { authenticated: true, created: true };
   }
 
+  const failure = createResult.failure!;
+
+  if (failure.kind === "admin-login") {
+    const creds = getAdminCredentials();
+    const hint = creds.customized
+      ? "  The UMBRACO_ADMIN_EMAIL / UMBRACO_ADMIN_PASSWORD env vars didn't match an admin account."
+      : "  Set UMBRACO_ADMIN_EMAIL and UMBRACO_ADMIN_PASSWORD to match an existing admin and re-run discover,\n  or create the API user manually (see instructions below).";
+    return {
+      authenticated: false,
+      error: `${failure.error}\n\n${hint}`,
+    };
+  }
+
   // WORKAROUND: Umbraco 17.3 regression — the umbraco-swagger OAuth client
   // is not registered after a fresh unattended install (first boot). The user
   // needs to restart Umbraco so BackOfficeApplicationManager registers it.
   // See: https://github.com/umbraco/Umbraco-CMS/issues/22356
-  if (createResult.error?.includes("Could not login") || createResult.error?.includes("bearer token")) {
+  if (failure.kind === "bearer-token") {
     return {
       authenticated: false,
-      error: createResult.error +
+      error: failure.error +
         "\n\n  This can happen if Umbraco was just installed for the first time." +
         "\n  Try restarting Umbraco and running discover again." +
         "\n  See: https://github.com/umbraco/Umbraco-CMS/issues/22356",
     };
   }
 
-  return { authenticated: false, error: createResult.error };
+  return { authenticated: false, error: failure.error };
 }
 
 async function tryClientCredentials(baseUrl: string): Promise<{ authenticated: boolean }> {
@@ -78,33 +107,38 @@ async function tryClientCredentials(baseUrl: string): Promise<{ authenticated: b
   }
 }
 
-async function tryCreateApiUser(baseUrl: string): Promise<{ created: boolean; error?: string }> {
+async function tryCreateApiUser(baseUrl: string): Promise<{ created: boolean; failure?: AutoCreateFailure }> {
   try {
+    const admin = getAdminCredentials();
+
     // Step 1: Login as admin to get auth cookie
     const loginResponse = await fetch(`${baseUrl}${LOGIN_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        username: DEFAULT_ADMIN_EMAIL,
-        password: DEFAULT_ADMIN_PASSWORD,
+        username: admin.email,
+        password: admin.password,
       }),
       signal: AbortSignal.timeout(10_000),
       redirect: "manual",
     });
 
     if (!loginResponse.ok) {
-      return { created: false, error: "Could not login as admin — credentials may have changed" };
+      const detail = admin.customized
+        ? `admin login rejected for ${admin.email} (HTTP ${loginResponse.status})`
+        : `admin login rejected for default credentials (HTTP ${loginResponse.status})`;
+      return { created: false, failure: { kind: "admin-login", error: `Could not login as admin — ${detail}` } };
     }
 
     const cookies = extractCookies(loginResponse);
     if (!cookies) {
-      return { created: false, error: "No auth cookie returned from login" };
+      return { created: false, failure: { kind: "admin-login", error: "No auth cookie returned from admin login" } };
     }
 
     // Step 2: Get a bearer token via OAuth authorization code flow with PKCE
     const bearerToken = await getBearerToken(baseUrl, cookies);
     if (!bearerToken) {
-      return { created: false, error: "Could not obtain bearer token from authorization flow" };
+      return { created: false, failure: { kind: "bearer-token", error: "Could not obtain bearer token from authorization flow" } };
     }
 
     // Step 3: Create a new API-type user (client credentials only work on API users, not regular users)
@@ -127,14 +161,14 @@ async function tryCreateApiUser(baseUrl: string): Promise<{ created: boolean; er
     if (!createUserResponse.ok) {
       const errorBody = await createUserResponse.json().catch(() => null) as { title?: string; detail?: string } | null;
       const detail = errorBody?.detail || errorBody?.title || `HTTP ${createUserResponse.status}`;
-      return { created: false, error: `Failed to create API user: ${detail}` };
+      return { created: false, failure: { kind: "other", error: `Failed to create API user: ${detail}` } };
     }
 
     // Extract the new user's ID from the Location header (e.g. /api/v1/user/{guid})
     const location = createUserResponse.headers.get("location");
     const userId = location?.split("/").pop();
     if (!userId) {
-      return { created: false, error: "Created API user but could not extract user ID from response" };
+      return { created: false, failure: { kind: "other", error: "Created API user but could not extract user ID from response" } };
     }
 
     // Step 4: Set client credentials on the new API user
@@ -160,10 +194,10 @@ async function tryCreateApiUser(baseUrl: string): Promise<{ created: boolean; er
 
     const credError = await credentialsResponse.json().catch(() => null) as { title?: string; detail?: string } | null;
     const credDetail = credError?.detail || credError?.title || `HTTP ${credentialsResponse.status}`;
-    return { created: false, error: `API user created but failed to set credentials: ${credDetail}` };
+    return { created: false, failure: { kind: "other", error: `API user created but failed to set credentials: ${credDetail}` } };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { created: false, error: message };
+    return { created: false, failure: { kind: "other", error: message } };
   }
 }
 

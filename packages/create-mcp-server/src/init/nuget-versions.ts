@@ -8,9 +8,7 @@
  * (e.g. 17.0.0-beta.8 → major 17) so it stays in sync automatically.
  */
 
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version: string };
+import pkg from "../../package.json" with { type: "json" };
 const MIN_MAJOR = parseInt(pkg.version.split(".")[0], 10);
 
 const NUGET_INDEX_URL =
