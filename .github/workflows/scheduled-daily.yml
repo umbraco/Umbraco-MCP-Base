@@ -11,12 +11,10 @@ name: Scheduled — Daily CLI checks
 #                           scheduled so regressions in dev dependencies or
 #                           transitive tooling surface without waiting for a PR.
 #
-# Failure notifications:
-#   On failure, the `notify-on-failure` job opens a GitHub issue tagged
-#   `scheduled-failure`. GitHub's notification system emails watchers of the
-#   repo when issues are opened, so whoever has Actions/Issues notifications
-#   enabled receives an email. GitHub also emails the user who last modified
-#   this workflow file whenever a scheduled run fails (default behaviour).
+# Failure notifications: relies on GitHub's built-in emails for scheduled
+# workflows — the user who last modified this file receives an email when a
+# scheduled run fails (if Actions notifications are enabled in their GitHub
+# settings). No explicit notification job.
 
 on:
   schedule:
@@ -145,43 +143,3 @@ jobs:
       - name: Run CLI E2E tests
         run: npm run test:e2e -w packages/create-mcp-server
         timeout-minutes: 20
-
-  notify-on-failure:
-    name: Open issue on failure
-    runs-on: ubuntu-latest
-    needs: [published-cli-smoke, cli-e2e]
-    if: always() && (needs.published-cli-smoke.result == 'failure' || needs.cli-e2e.result == 'failure')
-    permissions:
-      issues: write
-    steps:
-      - name: Open tracking issue
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SMOKE_RESULT: ${{ needs.published-cli-smoke.result }}
-          E2E_RESULT: ${{ needs.cli-e2e.result }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          TITLE="Scheduled daily CLI check failed ($(date -u +%Y-%m-%d))"
-          BODY=$(cat <<EOF
-          @hifi-phil the scheduled daily CLI workflow failed.
-
-          - published-cli-smoke: $SMOKE_RESULT
-          - cli-e2e: $E2E_RESULT
-
-          Run: $RUN_URL
-
-          Investigate and close this issue when resolved.
-          EOF
-          )
-          # Ensure the label exists (gh issue create fails if the label is unknown)
-          gh label create "scheduled-failure" \
-            --repo "$GITHUB_REPOSITORY" \
-            --color "D93F0B" \
-            --description "Created automatically when a scheduled workflow run fails" \
-            2>/dev/null || true
-
-          gh issue create \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TITLE" \
-            --body "$BODY" \
-            --label "scheduled-failure"
