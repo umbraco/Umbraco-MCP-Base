@@ -13,7 +13,7 @@ Monorepo for the Umbraco MCP (Model Context Protocol) Server SDK - infrastructur
 | `packages/mcp-server-sdk/` | Core npm package `@umbraco-cms/mcp-server-sdk` | Yes |
 | `packages/hosted-mcp/` | Hosted MCP on Cloudflare Workers `@umbraco-cms/mcp-hosted` | Yes |
 | `packages/create-mcp-server/` | CLI scaffolding tool `@umbraco-cms/create-umbraco-mcp-server` | Yes |
-| `template/` | Starter kit for new MCP server projects (copied by create-mcp-server) | No |
+| `template/` | Starter kit for new MCP server projects (copied by create-mcp-server); ships with `.mcp.json` for Claude Code | No |
 | `plugins/` | Claude Code plugins for SDK development (building, testing) | No |
 | `tests/cli/` | CLI integration tests and LLM eval tests | No |
 | `docs/` | CLI reference and planning docs | No |

@@ -43,6 +43,15 @@ function buildTemplateFsEntries(): Record<string, string> {
 
   files[path.join(TEMPLATE_DIR, ".env")] = "UMBRACO_BASE_URL=https://localhost:44391\n";
 
+  files[path.join(TEMPLATE_DIR, ".mcp.json")] = JSON.stringify({
+    mcpServers: {
+      umbraco: {
+        command: "node",
+        args: ["--env-file=.env", "./dist/index.js"],
+      },
+    },
+  }, null, 2) + "\n";
+
   files[path.join(TEMPLATE_DIR, "node_modules/fake/index.js")] = "// should be excluded";
 
   files[path.join(TEMPLATE_DIR, "dist/index.js")] = "// should be excluded";
@@ -152,6 +161,22 @@ describe("scaffoldProject", () => {
 
     const indexTs = mockFs.files.get(path.join(TARGET_DIR, "src/index.ts"))!;
     expect(indexTs).toBe('#!/usr/bin/env node\nimport "dotenv/config";\n');
+  });
+
+  it("should copy .mcp.json into the scaffolded project", () => {
+    scaffoldProject({
+      projectName: "test",
+      targetDir: TARGET_DIR,
+      sdkVersion: "^17.0.0",
+    });
+
+    const mcpJsonPath = path.join(TARGET_DIR, ".mcp.json");
+    expect(mockFs.writtenFiles.has(mcpJsonPath)).toBe(true);
+
+    const mcpJson = JSON.parse(mockFs.files.get(mcpJsonPath)!);
+    expect(mcpJson.mcpServers.umbraco.command).toBe("node");
+    expect(mcpJson.mcpServers.umbraco.args).toContain("./dist/index.js");
+    expect(mcpJson.mcpServers.umbraco.args).toContain("--env-file=.env");
   });
 
   it("should throw when template directory is missing", () => {
