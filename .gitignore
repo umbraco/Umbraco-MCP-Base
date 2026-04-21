@@ -12,6 +12,7 @@ junit.xml
 .DS_Store
 settings.local.json
 .claude/projects/
+.claude/worktrees/
 .worktrees/
 **/.wrangler/
 **/.dev.vars
