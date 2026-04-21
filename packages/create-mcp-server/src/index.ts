@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import pc from "picocolors";
+import pkg from "../package.json" with { type: "json" };
 import { runInit } from "./init/index.js";
 import { runDiscover } from "./discover/index.js";
 import { promptForProjectName } from "./prompts.js";
@@ -8,6 +9,11 @@ import { scaffoldProject } from "./scaffold.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  if (args[0] === "--version" || args[0] === "-v") {
+    console.log(pkg.version);
+    return;
+  }
 
   // Route to subcommands
   if (args[0] === "init") {
