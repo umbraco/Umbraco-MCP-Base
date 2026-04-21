@@ -71,7 +71,11 @@ const mockPromptUmbracoSetup = jest.fn<() => Promise<string>>();
 const mockPromptFeatureChoices = jest.fn<() => Promise<Record<string, boolean>>>();
 const mockPromptPackageSelection = jest.fn<() => Promise<string>>();
 const mockGetInstanceLocation = jest.fn<() => { path: string; label: string }>();
-const mockPromptSwaggerUrl = jest.fn<() => Promise<string>>();
+const mockPromptExistingInstance = jest.fn<() => Promise<{
+  baseUrl: string;
+  adminEmail: string;
+  adminPassword: string;
+}>>();
 const mockPromptConnectionString = jest.fn<() => Promise<string>>();
 const mockPromptInstallPsw = jest.fn<() => Promise<boolean>>();
 const mockPromptToolMode = jest.fn<() => Promise<string>>();
@@ -85,7 +89,7 @@ jest.unstable_mockModule("../prompts.js", () => ({
   promptPackageSelection: mockPromptPackageSelection,
   promptUmbracoVersion: mockPromptUmbracoVersion,
   getInstanceLocation: mockGetInstanceLocation,
-  promptSwaggerUrl: mockPromptSwaggerUrl,
+  promptExistingInstance: mockPromptExistingInstance,
   promptConnectionString: mockPromptConnectionString,
   promptInstallPsw: mockPromptInstallPsw,
 }));
@@ -99,6 +103,38 @@ jest.unstable_mockModule("../../discover/index.js", () => ({
   readLaunchSettingsUrl: mockReadLaunchSettingsUrl,
   updateEnvBaseUrl: mockUpdateEnvBaseUrl,
   updateEnvVar: mockUpdateEnvVar,
+}));
+
+// Mock the discover helpers used by init's existing-instance branch
+const mockCheckHealth = jest.fn<() => Promise<{ healthy: boolean; error?: string }>>();
+jest.unstable_mockModule("../../discover/health-check.js", () => ({
+  checkHealth: mockCheckHealth,
+}));
+
+const mockCheckApiUser = jest.fn<
+  (baseUrl: string, opts?: { adminEmail?: string; adminPassword?: string }) => Promise<{
+    authenticated: boolean;
+    created?: boolean;
+    error?: string;
+  }>
+>();
+jest.unstable_mockModule("../../discover/check-api-user.js", () => ({
+  checkApiUser: mockCheckApiUser,
+  printApiUserWarning: jest.fn(),
+}));
+
+const mockDiscoverSwaggerEndpoints = jest.fn<
+  () => Promise<Array<{ url: string; name: string }>>
+>();
+jest.unstable_mockModule("../../discover/discover-swagger.js", () => ({
+  discoverSwaggerEndpoints: mockDiscoverSwaggerEndpoints,
+}));
+
+const mockPromptApiSelection = jest.fn<
+  (endpoints: Array<{ url: string; name: string }>) => Promise<{ url: string; name: string }>
+>();
+jest.unstable_mockModule("../../discover/prompts.js", () => ({
+  promptApiSelection: mockPromptApiSelection,
 }));
 
 const { runInit } = await import("../index.js");
@@ -199,13 +235,87 @@ describe("runInit", () => {
     });
   });
 
-  describe("existing instance + swagger URL", () => {
-    it("should configure OpenAPI with provided URL", async () => {
+  describe("existing instance + {url, user, password}", () => {
+    it("drives health check, API user creation, swagger discovery, and .env writes", async () => {
       const swaggerUrl =
+        "https://localhost:44391/umbraco/swagger/management/swagger.json";
+
+      mockPromptUmbracoSetup.mockResolvedValue("existing");
+      mockPromptExistingInstance.mockResolvedValue({
+        baseUrl: "https://localhost:44391",
+        adminEmail: "admin@test.com",
+        adminPassword: "SecurePass1234",
+      });
+      mockCheckHealth.mockResolvedValue({ healthy: true });
+      mockCheckApiUser.mockResolvedValue({ authenticated: true, created: true });
+      mockDiscoverSwaggerEndpoints.mockResolvedValue([
+        { url: swaggerUrl, name: "Umbraco Management API" },
+      ]);
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+      mockUpdateEnvBaseUrl.mockReturnValue(true);
+      mockUpdateEnvVar.mockReturnValue(true);
+
+      await runInit(PROJECT_DIR);
+
+      // checkApiUser received the prompted credentials
+      expect(mockCheckApiUser).toHaveBeenCalledWith(
+        "https://localhost:44391",
+        { adminEmail: "admin@test.com", adminPassword: "SecurePass1234" },
+      );
+      expect(mockDiscoverSwaggerEndpoints).toHaveBeenCalledWith(
+        "https://localhost:44391",
+      );
+      // Single endpoint auto-selected, so promptApiSelection not called
+      expect(mockPromptApiSelection).not.toHaveBeenCalled();
+
+      const orvalConfig = mockFs.files.get(
+        path.resolve(PROJECT_DIR, "orval.config.ts"),
+      )!;
+      expect(orvalConfig).toContain(swaggerUrl);
+
+      expect(mockUpdateEnvBaseUrl).toHaveBeenCalledWith(
+        PROJECT_DIR,
+        "https://localhost:44391",
+      );
+      expect(mockUpdateEnvVar).toHaveBeenCalledWith(
+        PROJECT_DIR,
+        "UMBRACO_CLIENT_ID",
+        "umbraco-back-office-mcp",
+      );
+      expect(mockUpdateEnvVar).toHaveBeenCalledWith(
+        PROJECT_DIR,
+        "UMBRACO_CLIENT_SECRET",
+        "1234567890",
+      );
+    });
+
+    it("prompts to pick the API when multiple swaggers are present", async () => {
+      const managementUrl =
+        "https://localhost:44391/umbraco/swagger/management/swagger.json";
+      const commerceUrl =
         "https://localhost:44391/umbraco/swagger/commerce/swagger.json";
 
       mockPromptUmbracoSetup.mockResolvedValue("existing");
-      mockPromptSwaggerUrl.mockResolvedValue(swaggerUrl);
+      mockPromptExistingInstance.mockResolvedValue({
+        baseUrl: "https://localhost:44391",
+        adminEmail: "admin@test.com",
+        adminPassword: "SecurePass1234",
+      });
+      mockCheckHealth.mockResolvedValue({ healthy: true });
+      mockCheckApiUser.mockResolvedValue({ authenticated: true });
+      mockDiscoverSwaggerEndpoints.mockResolvedValue([
+        { url: managementUrl, name: "Umbraco Management API" },
+        { url: commerceUrl, name: "Umbraco Commerce API" },
+      ]);
+      mockPromptApiSelection.mockResolvedValue({
+        url: commerceUrl,
+        name: "Umbraco Commerce API",
+      });
       mockPromptFeatureChoices.mockResolvedValue({
         removeMocks: false,
         removeChaining: false,
@@ -215,11 +325,40 @@ describe("runInit", () => {
 
       await runInit(PROJECT_DIR);
 
-      // Verify orval.config.ts was updated with the swagger URL
+      expect(mockPromptApiSelection).toHaveBeenCalled();
       const orvalConfig = mockFs.files.get(
-        path.resolve(PROJECT_DIR, "orval.config.ts")
+        path.resolve(PROJECT_DIR, "orval.config.ts"),
       )!;
-      expect(orvalConfig).toContain(swaggerUrl);
+      expect(orvalConfig).toContain(commerceUrl);
+    });
+
+    it("skips discover work when the instance is unreachable", async () => {
+      mockPromptUmbracoSetup.mockResolvedValue("existing");
+      mockPromptExistingInstance.mockResolvedValue({
+        baseUrl: "https://localhost:44391",
+        adminEmail: "admin@test.com",
+        adminPassword: "SecurePass1234",
+      });
+      mockCheckHealth.mockResolvedValue({
+        healthy: false,
+        error: "connection refused",
+      });
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      expect(mockCheckApiUser).not.toHaveBeenCalled();
+      expect(mockDiscoverSwaggerEndpoints).not.toHaveBeenCalled();
+      const output = consoleLogSpy.mock.calls
+        .map((c: unknown[]) => c[0])
+        .join("\n");
+      expect(output).toContain("Could not reach Umbraco instance");
+      expect(output).toContain("Configuration complete");
     });
   });
 

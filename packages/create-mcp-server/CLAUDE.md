@@ -57,6 +57,14 @@ npm run test:e2e:cleanup -w packages/create-mcp-server
 
 Tests the container mode init flow (no API tools, keeps chaining). Runs as part of `npm run test:e2e`.
 
+### Existing-instance E2E
+
+Self-contained E2E for the `init` "Use existing instance" branch. Spawns a copy of `tests/umbraco-instance/` (SQLite, .NET 10) on a random port, scaffolds a project, runs the init pipeline against it, and asserts `.env`, `orval.config.ts`, and a real API call. No SQL Server required.
+
+```bash
+npm run test:e2e:existing -w packages/create-mcp-server
+```
+
 ## CLI Subcommands
 
 | Command | Description |

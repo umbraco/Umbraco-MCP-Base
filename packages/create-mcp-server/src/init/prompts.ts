@@ -232,21 +232,23 @@ export function getInstanceLocation(
   return { path: resolved, label: "demo-site" };
 }
 
-export async function promptSwaggerUrl(): Promise<string> {
-  const { url } = await prompts(
+export interface ExistingInstanceDetails {
+  baseUrl: string;
+  adminEmail: string;
+  adminPassword: string;
+}
+
+export async function promptExistingInstance(): Promise<ExistingInstanceDetails> {
+  const { baseUrl } = await prompts(
     {
       type: "text",
-      name: "url",
-      message: "Enter your Swagger JSON URL:",
-      initial:
-        "https://localhost:44331/umbraco/swagger/management/swagger.json",
+      name: "baseUrl",
+      message: "Umbraco base URL:",
+      initial: "https://localhost:44331",
       validate: (value) => {
         try {
           const parsed = new URL(value);
-          if (
-            parsed.protocol !== "http:" &&
-            parsed.protocol !== "https:"
-          ) {
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
             return "URL must start with http:// or https://";
           }
           return true;
@@ -255,10 +257,40 @@ export async function promptSwaggerUrl(): Promise<string> {
         }
       },
     },
-    { onCancel }
+    { onCancel },
   );
 
-  return url;
+  const { adminEmail } = await prompts(
+    {
+      type: "text",
+      name: "adminEmail",
+      message: "Admin email / username:",
+      validate: (value) =>
+        typeof value === "string" && value.trim().length > 0
+          ? true
+          : "Admin email is required",
+    },
+    { onCancel },
+  );
+
+  const { adminPassword } = await prompts(
+    {
+      type: "password",
+      name: "adminPassword",
+      message: "Admin password:",
+      validate: (value) =>
+        typeof value === "string" && value.length > 0
+          ? true
+          : "Admin password is required",
+    },
+    { onCancel },
+  );
+
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    adminEmail: adminEmail.trim(),
+    adminPassword,
+  };
 }
 
 export async function promptConnectionString(): Promise<string> {

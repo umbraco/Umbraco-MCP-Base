@@ -16,6 +16,7 @@
     "compile": "tsc --noEmit",
     "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand",
     "test:e2e": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/e2e/jest.config.ts --runInBand --forceExit --testPathPattern=cli-e2e",
+    "test:e2e:existing": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/e2e/jest.config.ts --runInBand --forceExit --testPathPattern=existing-instance-e2e",
     "test:e2e:skills": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --config tests/e2e/jest.config.ts --runInBand --forceExit --testPathPattern=skill-e2e",
     "test:e2e:cleanup": "npx tsx tests/e2e/cleanup-e2e.ts",
     "test:e2e:revert": "npx tsx tests/e2e/cleanup-e2e.ts --revert",
