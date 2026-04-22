@@ -256,6 +256,10 @@ jobs:
         env:
           KEEP_E2E_ASSETS: 'true'
 
+      - name: Run existing-instance E2E tests
+        run: npm run test:e2e:existing -w packages/create-mcp-server
+        timeout-minutes: 10
+
       - name: Skill E2E (build tool + integration test)
         if: >-
           github.event.pull_request.base.ref == 'main' &&
