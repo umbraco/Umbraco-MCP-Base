@@ -29,7 +29,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 import { getLatestStableVersion } from "../../src/init/nuget-versions.js";
 
 const resolvedVersion = process.env.TEST_UMBRACO_VERSION || await getLatestStableVersion();
-if (resolvedVersion) console.log(`[E2E] Using Umbraco ${resolvedVersion} (latest stable)`);
+if (resolvedVersion) console.log(`[new-instance-e2e] Using Umbraco ${resolvedVersion} (latest stable)`);
 const UMBRACO_VERSION = resolvedVersion;
 
 const BASE_CONNECTION_STRING = getBaseConnectionString();
@@ -119,7 +119,7 @@ const SKIP =
 
 const describeOrSkip = SKIP ? describe.skip : describe;
 
-describeOrSkip("CLI full E2E", () => {
+describeOrSkip("new-instance E2E", () => {
   let tempDir: string;
   let projectDir: string;
   let instanceDir: string;
@@ -131,15 +131,15 @@ describeOrSkip("CLI full E2E", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-e2e-"));
     projectDir = path.join(tempDir, "test-project");
 
-    console.log(`[E2E] Temp dir: ${tempDir}`);
-    console.log(`[E2E] DB name: ${DB_NAME}`);
+    console.log(`[new-instance-e2e] Temp dir: ${tempDir}`);
+    console.log(`[new-instance-e2e] DB name: ${DB_NAME}`);
 
     // Create the test database
     await execSql(
       buildConnectionString(),
       `CREATE DATABASE [${DB_NAME}]`,
     );
-    console.log(`[E2E] Database created: ${DB_NAME}`);
+    console.log(`[new-instance-e2e] Database created: ${DB_NAME}`);
   }, 60_000);
 
   // ── Teardown: kill Umbraco, drop database, remove temp dir ───────────────
@@ -166,15 +166,15 @@ describeOrSkip("CLI full E2E", () => {
         dbName: DB_NAME,
         umbracoProcessPid: umbracoProcess?.pid,
       }, null, 2));
-      console.log(`[E2E] Assets preserved — manifest: ${manifestPath}`);
-      console.log(`[E2E] Project: ${projectDir}`);
-      console.log(`[E2E] Umbraco: ${baseUrl} (PID ${umbracoProcess?.pid})`);
-      console.log(`[E2E] To clean up: kill ${umbracoProcess?.pid} && rm -rf ${tempDir}`);
+      console.log(`[new-instance-e2e] Assets preserved — manifest: ${manifestPath}`);
+      console.log(`[new-instance-e2e] Project: ${projectDir}`);
+      console.log(`[new-instance-e2e] Umbraco: ${baseUrl} (PID ${umbracoProcess?.pid})`);
+      console.log(`[new-instance-e2e] To clean up: kill ${umbracoProcess?.pid} && rm -rf ${tempDir}`);
       return; // Don't clean up
     }
 
     if (umbracoProcess) {
-      console.log("[E2E] Stopping Umbraco...");
+      console.log("[new-instance-e2e] Stopping Umbraco...");
       umbracoProcess.kill("SIGTERM");
       await new Promise((r) => setTimeout(r, 3000));
       if (!umbracoProcess.killed) {
@@ -187,14 +187,14 @@ describeOrSkip("CLI full E2E", () => {
         buildConnectionString(),
         `ALTER DATABASE [${DB_NAME}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [${DB_NAME}]`,
       );
-      console.log(`[E2E] Database dropped: ${DB_NAME}`);
+      console.log(`[new-instance-e2e] Database dropped: ${DB_NAME}`);
     } catch (err) {
-      console.warn(`[E2E] Failed to drop database: ${err}`);
+      console.warn(`[new-instance-e2e] Failed to drop database: ${err}`);
     }
 
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
-      console.log(`[E2E] Temp dir cleaned up`);
+      console.log(`[new-instance-e2e] Temp dir cleaned up`);
     } catch {
       // Ignore cleanup errors
     }
@@ -237,7 +237,7 @@ describeOrSkip("CLI full E2E", () => {
     }
     fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 
-    console.log("[E2E] Step 1 passed: project scaffolded");
+    console.log("[new-instance-e2e] Step 1 passed: project scaffolded");
   });
 
   // ── Step 2: Init — create Umbraco instance ──────────────────────────────
@@ -298,7 +298,7 @@ describeOrSkip("CLI full E2E", () => {
     expect(composer).toContain("catch");
 
     // Verify dotnet build succeeds
-    console.log("[E2E] Building Umbraco instance...");
+    console.log("[new-instance-e2e] Building Umbraco instance...");
     execFileSync("dotnet", ["build"], {
       cwd: instanceDir,
       encoding: "utf-8",
@@ -306,12 +306,12 @@ describeOrSkip("CLI full E2E", () => {
       stdio: "inherit",
     });
 
-    console.log("[E2E] Step 2 passed: instance created with correct config");
+    console.log("[new-instance-e2e] Step 2 passed: instance created with correct config");
   }, 300_000);
 
   // ── Step 3: Start Umbraco and wait for healthy ──────────────────────────
   test("Step 3: start Umbraco and wait for healthy", async () => {
-    console.log("[E2E] Starting Umbraco...");
+    console.log("[new-instance-e2e] Starting Umbraco...");
 
     umbracoProcess = spawn(
       "dotnet",
@@ -344,7 +344,7 @@ describeOrSkip("CLI full E2E", () => {
       const match = line.match(/Now listening on: (http:\/\/localhost:\d+)/);
       if (match && !detectedUrl) {
         detectedUrl = match[1];
-        console.log(`[E2E] Detected HTTP URL: ${detectedUrl}`);
+        console.log(`[new-instance-e2e] Detected HTTP URL: ${detectedUrl}`);
       }
     });
     umbracoProcess.stderr?.on("data", (chunk: Buffer) => {
@@ -365,7 +365,7 @@ describeOrSkip("CLI full E2E", () => {
     while (Date.now() - start < maxWait) {
       // Check if process died
       if (umbracoProcess.exitCode !== null) {
-        console.log(`[E2E] Umbraco process died with code ${umbracoProcess.exitCode}`);
+        console.log(`[new-instance-e2e] Umbraco process died with code ${umbracoProcess.exitCode}`);
         break;
       }
 
@@ -392,7 +392,7 @@ describeOrSkip("CLI full E2E", () => {
 
     expect(healthy).toBe(true);
     console.log(
-      `[E2E] Step 3 passed: Umbraco healthy at ${baseUrl} (${Math.round((Date.now() - start) / 1000)}s)`,
+      `[new-instance-e2e] Step 3 passed: Umbraco healthy at ${baseUrl} (${Math.round((Date.now() - start) / 1000)}s)`,
     );
 
     // WORKAROUND: Umbraco 17.3 regression — OAuth clients not registered after
@@ -400,7 +400,7 @@ describeOrSkip("CLI full E2E", () => {
     // RuntimeLevel < Upgrade (which is the case on first boot).
     // See: https://github.com/umbraco/Umbraco-CMS/issues/22356
     // Remove this restart when the issue is fixed upstream.
-    console.log("[E2E] Restarting Umbraco for OAuth client registration...");
+    console.log("[new-instance-e2e] Restarting Umbraco for OAuth client registration...");
     umbracoProcess.kill();
     await new Promise((r) => setTimeout(r, 2000));
 
@@ -424,7 +424,7 @@ describeOrSkip("CLI full E2E", () => {
       const urlMatch = line.match(/Now listening on: (http:\/\/localhost:\d+)/);
       if (urlMatch && !detectedUrl) {
         detectedUrl = urlMatch[1];
-        console.log(`[E2E] Restarted on: ${detectedUrl}`);
+        console.log(`[new-instance-e2e] Restarted on: ${detectedUrl}`);
       }
     });
     umbracoProcess.stderr?.on("data", () => {});
@@ -439,7 +439,7 @@ describeOrSkip("CLI full E2E", () => {
           });
           if (resp.ok) {
             baseUrl = detectedUrl;
-            console.log(`[E2E] Umbraco restarted at ${baseUrl}`);
+            console.log(`[new-instance-e2e] Umbraco restarted at ${baseUrl}`);
             break;
           }
         } catch {}
@@ -454,16 +454,16 @@ describeOrSkip("CLI full E2E", () => {
 
     const result = await checkApiUser(baseUrl);
 
-    console.log("[E2E] API user result:", result);
+    console.log("[new-instance-e2e] API user result:", result);
 
     expect(result.authenticated).toBe(true);
     if (result.created) {
-      console.log("[E2E] API user was auto-created");
+      console.log("[new-instance-e2e] API user was auto-created");
     } else {
-      console.log("[E2E] API user already existed");
+      console.log("[new-instance-e2e] API user already existed");
     }
 
-    console.log("[E2E] Step 4 passed: API user authenticated");
+    console.log("[new-instance-e2e] Step 4 passed: API user authenticated");
   }, 30_000);
 
   // ── Step 5: Verify API user with direct token request ───────────────────
@@ -490,7 +490,7 @@ describeOrSkip("CLI full E2E", () => {
     expect(typeof data.access_token).toBe("string");
     accessToken = data.access_token!;
 
-    console.log("[E2E] Step 5 passed: API user token obtained");
+    console.log("[new-instance-e2e] Step 5 passed: API user token obtained");
   }, 15_000);
 
   // ── Step 5b: Verify API user exists in Umbraco user list ────────────────
@@ -516,7 +516,7 @@ describeOrSkip("CLI full E2E", () => {
     expect(user.email).toBe("mcp-api@localhost");
     expect(user.isAdmin).toBe(true);
 
-    console.log(`[E2E] Step 5b passed: API user verified — ${user.name} (${user.email})`);
+    console.log(`[new-instance-e2e] Step 5b passed: API user verified — ${user.name} (${user.email})`);
   }, 15_000);
 
   // ── Step 6: Discover APIs and produce .discover.json ──────────────────
@@ -529,14 +529,14 @@ describeOrSkip("CLI full E2E", () => {
     // Discover swagger endpoints from the running instance
     const endpoints = await discoverSwaggerEndpoints(baseUrl);
     expect(endpoints.length).toBeGreaterThan(0);
-    console.log(`[E2E] Found ${endpoints.length} API(s): ${endpoints.map((e) => e.name).join(", ")}`);
+    console.log(`[new-instance-e2e] Found ${endpoints.length} API(s): ${endpoints.map((e) => e.name).join(", ")}`);
 
     // Verify Forms API was discovered (we installed Umbraco.Forms)
     const formsApi = endpoints.find((e) =>
       e.name.toLowerCase().includes("forms"),
     );
     expect(formsApi).toBeDefined();
-    console.log(`[E2E] Forms API found: ${formsApi!.name}`);
+    console.log(`[new-instance-e2e] Forms API found: ${formsApi!.name}`);
 
     // Pick the core Umbraco Management API (not Forms/Commerce management APIs)
     const managementApi = endpoints.find((e) =>
@@ -549,7 +549,7 @@ describeOrSkip("CLI full E2E", () => {
     const analysis = await analyzeApi(managementApi.url);
     expect(analysis.groups.length).toBeGreaterThan(0);
     expect(analysis.totalOperations).toBeGreaterThan(0);
-    console.log(`[E2E] API: ${analysis.title} — ${analysis.groups.length} groups, ${analysis.totalOperations} operations`);
+    console.log(`[new-instance-e2e] API: ${analysis.title} — ${analysis.groups.length} groups, ${analysis.totalOperations} operations`);
 
     // Update .env with base URL and credentials (as discover + init would)
     updateEnvBaseUrl(projectDir, baseUrl);
@@ -581,7 +581,7 @@ describeOrSkip("CLI full E2E", () => {
     const envContent = fs.readFileSync(path.join(projectDir, ".env"), "utf-8");
     expect(envContent).toContain(`UMBRACO_BASE_URL=${baseUrl}`);
 
-    console.log(`[E2E] Step 6 passed: .discover.json written with ${written.collections.length} collections`);
+    console.log(`[new-instance-e2e] Step 6 passed: .discover.json written with ${written.collections.length} collections`);
   }, 30_000);
 
   // ── Step 7: Health check function works ─────────────────────────────────
@@ -591,7 +591,7 @@ describeOrSkip("CLI full E2E", () => {
     const result = await checkHealth(baseUrl);
     expect(result.healthy).toBe(true);
 
-    console.log("[E2E] Step 7 passed: health check reports healthy");
+    console.log("[new-instance-e2e] Step 7 passed: health check reports healthy");
   }, 15_000);
 
   // ── Step 8: Generate API client from discovered API ──────────────────────
@@ -610,16 +610,16 @@ describeOrSkip("CLI full E2E", () => {
     configureOpenApi(projectDir, managementApi.url, managementApi.name);
 
     // Generate client (this also runs npm install if node_modules missing)
-    console.log("[E2E] Generating API client...");
+    console.log("[new-instance-e2e] Generating API client...");
     const result = generateClient(projectDir);
 
     expect(result.success).toBe(true);
-    console.log("[E2E] Step 8 passed: API client generated");
+    console.log("[new-instance-e2e] Step 8 passed: API client generated");
   }, 180_000);
 
   // ── Step 9: TypeScript compile on scaffolded project ────────────────────
   test("Step 9: scaffolded project TypeScript compiles cleanly", () => {
-    console.log("[E2E] Running TypeScript compile check...");
+    console.log("[new-instance-e2e] Running TypeScript compile check...");
     // Exclude worker.ts and client-fetch.ts — they import from @umbraco-cms/mcp-hosted
     // which via file: refs causes duplicate @modelcontextprotocol/sdk types.
     // Worker compilation is verified by Step 12 (wrangler build + start).
@@ -633,14 +633,14 @@ describeOrSkip("CLI full E2E", () => {
       stdio: "inherit",
     });
 
-    console.log("[E2E] Step 9 passed: TypeScript compiles cleanly");
+    console.log("[new-instance-e2e] Step 9 passed: TypeScript compiles cleanly");
   }, 120_000);
 
   // ── Step 10: Run scaffolded project unit tests ──────────────────────────
   test("Step 10: scaffolded project unit tests pass", () => {
     // Run only config/mock tests, not the example integration tests which
     // need a specific API that doesn't exist on a vanilla Umbraco instance
-    console.log("[E2E] Running scaffolded project unit tests...");
+    console.log("[new-instance-e2e] Running scaffolded project unit tests...");
     try {
       execFileSync(
         "node",
@@ -662,7 +662,7 @@ describeOrSkip("CLI full E2E", () => {
       throw err;
     }
 
-    console.log("[E2E] Step 10 passed: unit tests pass");
+    console.log("[new-instance-e2e] Step 10 passed: unit tests pass");
   }, 180_000);
 
   // ── Step 10b: Integration test against real Umbraco ─────────────────────
@@ -715,7 +715,7 @@ describe("real API integration", () => {
 `,
     );
 
-    console.log("[E2E] Running integration test against real Umbraco...");
+    console.log("[new-instance-e2e] Running integration test against real Umbraco...");
     try {
       execFileSync(
         "node",
@@ -741,7 +741,7 @@ describe("real API integration", () => {
       throw err;
     }
 
-    console.log("[E2E] Step 10b passed: integration test works against real Umbraco");
+    console.log("[new-instance-e2e] Step 10b passed: integration test works against real Umbraco");
   }, 60_000);
 
   // ── Step 11: Real API call with generated client against running Umbraco ─
@@ -766,7 +766,7 @@ describe("real API integration", () => {
 
     expect(info.version).toBeDefined();
     expect(typeof info.version).toBe("string");
-    console.log(`[E2E] Server version: ${info.version}`);
+    console.log(`[new-instance-e2e] Server version: ${info.version}`);
 
     // Also call a list endpoint to verify full API access with data
     const languageUrl = `${baseUrl}/umbraco/management/api/v1/language?skip=0&take=10`;
@@ -785,9 +785,9 @@ describe("real API integration", () => {
 
     expect(languages.total).toBeDefined();
     expect(languages.total).toBeGreaterThan(0); // At least the default language
-    console.log(`[E2E] Languages: ${languages.total}`);
+    console.log(`[new-instance-e2e] Languages: ${languages.total}`);
 
-    console.log("[E2E] Step 11 passed: real API calls succeed");
+    console.log("[new-instance-e2e] Step 11 passed: real API calls succeed");
   }, 15_000);
 
   // ── Step 12: Hosted worker starts and responds ──────────────────────────
@@ -825,7 +825,7 @@ describe("real API integration", () => {
 
     try {
       const workerUrl = `http://${worker.address}:${worker.port}`;
-      console.log(`[E2E] Worker started at ${workerUrl}`);
+      console.log(`[new-instance-e2e] Worker started at ${workerUrl}`);
 
       // Verify landing page loads
       const landing = await fetch(workerUrl, {
@@ -834,7 +834,7 @@ describe("real API integration", () => {
       expect(landing.ok).toBe(true);
       const html = await landing.text();
       expect(html.toLowerCase()).toContain("html");
-      console.log("[E2E] Landing page OK");
+      console.log("[new-instance-e2e] Landing page OK");
 
       // Verify OAuth discovery endpoint
       const discovery = await fetch(
@@ -850,7 +850,7 @@ describe("real API integration", () => {
       expect(oauthMeta.issuer).toBeDefined();
       expect(oauthMeta.authorization_endpoint).toBeDefined();
       expect(oauthMeta.token_endpoint).toBeDefined();
-      console.log("[E2E] OAuth discovery OK");
+      console.log("[new-instance-e2e] OAuth discovery OK");
 
       // Verify info endpoint returns server metadata
       const info = await fetch(`${workerUrl}/info`, {
@@ -859,9 +859,9 @@ describe("real API integration", () => {
       expect(info.ok).toBe(true);
       const infoData = (await info.json()) as Record<string, unknown>;
       expect(infoData).toBeDefined();
-      console.log("[E2E] Info endpoint OK");
+      console.log("[new-instance-e2e] Info endpoint OK");
 
-      console.log("[E2E] Step 12 passed: hosted worker responds correctly");
+      console.log("[new-instance-e2e] Step 12 passed: hosted worker responds correctly");
     } finally {
       await worker.stop();
     }
@@ -872,7 +872,7 @@ describe("real API integration", () => {
 // Container Mode E2E
 // =============================================================================
 
-describeOrSkip("CLI container mode E2E", () => {
+describeOrSkip("new-instance container mode E2E", () => {
   let tempDir: string;
   let projectDir: string;
 

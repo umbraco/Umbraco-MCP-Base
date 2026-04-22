@@ -5,11 +5,13 @@ name: Scheduled — Daily CLI checks
 #   published-cli-smoke  — exercises the currently-published npm artifact
 #                          (catches bundle bugs, missing `files`, broken deps).
 #
-#   cli-e2e              — full 19-step deterministic CLI E2E
-#                          (scaffold → init → Umbraco → discover → generate →
-#                           compile → test → worker), same as runs on PRs but
-#                           scheduled so regressions in dev dependencies or
-#                           transitive tooling surface without waiting for a PR.
+#   cli-e2e              — full 19-step new-instance CLI E2E
+#                          (scaffold → init's "create new" branch → Umbraco →
+#                           discover → generate → compile → test → worker),
+#                           plus the existing-instance E2E suite. Same as runs
+#                           on PRs but scheduled so regressions in dev
+#                           dependencies or transitive tooling surface without
+#                           waiting for a PR.
 #
 # Failure notifications: relies on GitHub's built-in emails for scheduled
 # workflows — the user who last modified this file receives an email when a
@@ -84,7 +86,7 @@ jobs:
         run: npm run compile
 
   cli-e2e:
-    name: CLI full E2E (scheduled)
+    name: New-instance & Existing-instance E2E (scheduled)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -140,6 +142,10 @@ jobs:
       - name: Build
         run: npm run build && npm run build -w packages/hosted-mcp && npm run build -w packages/create-mcp-server
 
-      - name: Run CLI E2E tests
+      - name: Run new-instance E2E tests
         run: npm run test:e2e -w packages/create-mcp-server
         timeout-minutes: 20
+
+      - name: Run existing-instance E2E tests
+        run: npm run test:e2e:existing -w packages/create-mcp-server
+        timeout-minutes: 10

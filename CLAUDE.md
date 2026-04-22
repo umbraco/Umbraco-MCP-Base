@@ -75,8 +75,8 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 
 | Command | What it tests | Tests |
 |---------|--------------|-------|
-| `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server` | Full CLI E2E — scaffold, init, Umbraco setup, discover, generate, compile, test | ~19 |
-| `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e:existing -w packages/create-mcp-server` | Existing-instance init E2E — spawns a copy of `tests/umbraco-instance/` on a random port against a per-test SQL Server DB, runs scaffold + init's "existing" branch, asserts `.env`, `orval.config.ts`, and a real API call | ~3 |
+| `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server` | New-instance CLI E2E — scaffold, init's "create new" branch (PSW), Umbraco setup, discover, generate, compile, test | ~19 |
+| `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e:existing -w packages/create-mcp-server` | Existing-instance CLI E2E — spawns a copy of `tests/umbraco-instance/` on a random port against a per-test SQL Server DB, runs scaffold + init's "use existing" branch, asserts `.env`, `orval.config.ts`, and a real API call | ~3 |
 
 ## SDK Package Exports
 
