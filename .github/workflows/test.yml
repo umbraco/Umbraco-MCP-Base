@@ -195,7 +195,7 @@ jobs:
           retention-days: 7
 
   cli-e2e:
-    name: CLI Scaffolding E2E
+    name: New-instance & Existing-instance E2E
     runs-on: ubuntu-latest
 
     services:
@@ -250,11 +250,15 @@ jobs:
       - name: Build
         run: npm run build && npm run build -w packages/hosted-mcp && npm run build -w packages/create-mcp-server
 
-      - name: Run CLI E2E tests
+      - name: Run new-instance E2E tests
         run: npm run test:e2e -w packages/create-mcp-server
         timeout-minutes: 15
         env:
           KEEP_E2E_ASSETS: 'true'
+
+      - name: Run existing-instance E2E tests
+        run: npm run test:e2e:existing -w packages/create-mcp-server
+        timeout-minutes: 10
 
       - name: Skill E2E (build tool + integration test)
         if: >-

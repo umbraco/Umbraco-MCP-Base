@@ -9,9 +9,9 @@
  * Uses a single small collection (culture) to keep run time reasonable (~8 min).
  *
  * Requires:
- *   - CLI E2E manifest (run CLI E2E with KEEP_E2E_ASSETS=true first)
+ *   - new-instance E2E manifest (run new-instance E2E with KEEP_E2E_ASSETS=true first)
  *   - Claude Code subscription or ANTHROPIC_API_KEY
- *   - Running Umbraco instance (from CLI E2E)
+ *   - Running Umbraco instance (from new-instance E2E)
  */
 
 import * as fs from "node:fs";
@@ -48,7 +48,7 @@ const SKIP = !manifest;
 const describeOrSkip = SKIP ? describe.skip : describe;
 
 if (!manifest) {
-  console.log("[Skill E2E] No manifest — run CLI E2E first with KEEP_E2E_ASSETS=true");
+  console.log("[Skill E2E] No manifest — run new-instance E2E first with KEEP_E2E_ASSETS=true");
 }
 
 describeOrSkip("Skill E2E — build tool and integration test", () => {

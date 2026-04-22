@@ -132,6 +132,22 @@ describe("my-tool", () => {
 });
 ```
 
+## Testing with Claude Code
+
+This project ships with a `.mcp.json` that registers the MCP server with Claude Code automatically. Once you have run `init`, `discover`, and `npm run build`, open the project directory in Claude Code and the server is available immediately — no manual `claude mcp add` required.
+
+```bash
+# One-time setup
+npx @umbraco-cms/create-umbraco-mcp-server init   # writes credentials to .env
+npx @umbraco-cms/create-umbraco-mcp-server discover # generates API client
+npm run build                                       # compiles dist/index.js
+
+# Open in Claude Code — .mcp.json is picked up automatically
+claude .
+```
+
+The server reads credentials from `.env` via `node --env-file=.env ./dist/index.js`, so no secrets are committed to source control.
+
 ## Publishing
 
 1. Update `package.json` with your package name and details

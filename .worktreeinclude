@@ -1,0 +1,5 @@
+# Files to copy into new worktrees
+# Processed by the worktree-create.sh script
+
+# Environment config (API credentials for MCP tools)
+.env

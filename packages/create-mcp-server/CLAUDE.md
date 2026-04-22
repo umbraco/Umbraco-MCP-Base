@@ -8,7 +8,8 @@ CLI scaffolding tool for creating Umbraco MCP server projects.
 npm run build           # Build CLI + copy template to dist/
 npm run compile         # Type-check only
 npm test                # Unit tests (121 tests)
-npm run test:e2e        # Full CLI E2E test (requires SQL Server + .NET 10)
+npm run test:e2e        # New-instance E2E test — PSW-driven fresh Umbraco (requires SQL Server + .NET 10)
+npm run test:e2e:existing # Existing-instance E2E test — points CLI at a running Umbraco (requires SQL Server + .NET 10)
 npm run test:e2e:skills # Skill E2E test (requires Claude Code subscription)
 npm run test:e2e:revert # Reset skill output for re-run
 npm run test:e2e:cleanup # Tear down preserved E2E assets
@@ -21,9 +22,9 @@ npm run test:e2e:cleanup # Tear down preserved E2E assets
 - .NET 10 SDK
 - PSW CLI (`dotnet tool install -g PackageScriptWriter.Cli`)
 
-### CLI E2E (deterministic, always passes)
+### New-instance E2E (deterministic, always passes)
 
-Tests the full CLI pipeline: scaffold → init → start Umbraco → discover → generate → compile → test → API calls → hosted worker.
+Tests the full CLI pipeline for the `init` "Create new instance" branch: scaffold → init → PSW-create Umbraco → start → discover → generate → compile → test → API calls → hosted worker.
 
 ```bash
 TEST_SQL_CONNECTION_STRING="Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True" \
@@ -57,6 +58,15 @@ npm run test:e2e:cleanup -w packages/create-mcp-server
 
 Tests the container mode init flow (no API tools, keeps chaining). Runs as part of `npm run test:e2e`.
 
+### Existing-instance E2E
+
+Self-contained E2E for the `init` "Use existing instance" branch. Spawns a copy of `tests/umbraco-instance/` (.NET 10) on a random port, overrides its connection string to use a per-test SQL Server database (so it aligns with the real-world setup tested in the new-instance E2E), scaffolds a project, runs the init pipeline against the running site, and asserts `.env`, `orval.config.ts`, and a real API call.
+
+```bash
+TEST_SQL_CONNECTION_STRING="Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True" \
+npm run test:e2e:existing -w packages/create-mcp-server
+```
+
 ## CLI Subcommands
 
 | Command | Description |
@@ -81,6 +91,7 @@ Tests the container mode init flow (no API tools, keeps chaining). Runs as part 
 | `src/init/remove-api-tools.ts` | Container mode: strips API generation layer |
 | `src/discover/index.ts` | Discover command orchestrator |
 | `src/discover/check-api-user.ts` | Auto-creates API user via OAuth + PKCE |
-| `tests/e2e/cli-e2e.test.ts` | CLI E2E test (19 deterministic steps) |
+| `tests/e2e/new-instance-e2e.test.ts` | New-instance E2E test — PSW-driven fresh Umbraco (19 deterministic steps) |
+| `tests/e2e/existing-instance-e2e.test.ts` | Existing-instance E2E test — points CLI at a running Umbraco (3 steps) |
 | `tests/e2e/skill-e2e.test.ts` | Skill E2E test (3 steps, uses Agent SDK) |
 | `tests/e2e/cleanup-e2e.ts` | Cleanup/revert script for preserved assets |

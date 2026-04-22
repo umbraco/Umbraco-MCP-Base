@@ -98,6 +98,12 @@ Custom fields defined in `config/server-config.ts`.
 
 ## Testing
 
+**Testing with Claude Code (`.mcp.json`):**
+- The project ships with `.mcp.json` which registers this MCP server in Claude Code automatically
+- After `init` + `discover` + `npm run build`, open the project directory in Claude Code — the server is immediately callable
+- `.mcp.json` uses `node --env-file=.env ./dist/index.js` so credentials stay in `.env` (gitignored)
+- No manual `claude mcp add` required
+
 **Integration tests (`__tests__/`):**
 - Run against the real Umbraco instance — no mocking
 - Require a running Umbraco instance with an API user configured (see below)

@@ -17,10 +17,19 @@ const DEFAULT_CLIENT_SECRET = "1234567890";
 const DEFAULT_ADMIN_EMAIL = "admin@test.com";
 const DEFAULT_ADMIN_PASSWORD = "SecurePass1234";
 
-function getAdminCredentials(): { email: string; password: string; customized: boolean } {
-  const email = process.env.UMBRACO_ADMIN_EMAIL;
-  const password = process.env.UMBRACO_ADMIN_PASSWORD;
-  const customized = Boolean(email || password);
+function getAdminCredentials(override?: CheckApiUserOptions): {
+  email: string;
+  password: string;
+  customized: boolean;
+} {
+  const email = override?.adminEmail ?? process.env.UMBRACO_ADMIN_EMAIL;
+  const password = override?.adminPassword ?? process.env.UMBRACO_ADMIN_PASSWORD;
+  const customized = Boolean(
+    override?.adminEmail ||
+      override?.adminPassword ||
+      process.env.UMBRACO_ADMIN_EMAIL ||
+      process.env.UMBRACO_ADMIN_PASSWORD,
+  );
   return {
     email: email || DEFAULT_ADMIN_EMAIL,
     password: password || DEFAULT_ADMIN_PASSWORD,
@@ -39,11 +48,19 @@ export interface ApiUserCheckResult {
   error?: string;
 }
 
+export interface CheckApiUserOptions {
+  adminEmail?: string;
+  adminPassword?: string;
+}
+
 /**
  * Check if the API user exists by attempting to authenticate with client credentials.
  * If authentication fails, attempt to create the API user automatically using admin credentials.
  */
-export async function checkApiUser(baseUrl: string): Promise<ApiUserCheckResult> {
+export async function checkApiUser(
+  baseUrl: string,
+  options?: CheckApiUserOptions,
+): Promise<ApiUserCheckResult> {
   // Step 1: Try authenticating with the API user credentials
   const tokenResult = await tryClientCredentials(baseUrl);
   if (tokenResult.authenticated) {
@@ -53,7 +70,7 @@ export async function checkApiUser(baseUrl: string): Promise<ApiUserCheckResult>
   // Step 2: API user doesn't exist — try to create it automatically
   console.log(pc.dim("  API user not found, attempting to create..."));
 
-  const createResult = await tryCreateApiUser(baseUrl);
+  const createResult = await tryCreateApiUser(baseUrl, options);
   if (createResult.created) {
     return { authenticated: true, created: true };
   }
@@ -61,9 +78,9 @@ export async function checkApiUser(baseUrl: string): Promise<ApiUserCheckResult>
   const failure = createResult.failure!;
 
   if (failure.kind === "admin-login") {
-    const creds = getAdminCredentials();
+    const creds = getAdminCredentials(options);
     const hint = creds.customized
-      ? "  The UMBRACO_ADMIN_EMAIL / UMBRACO_ADMIN_PASSWORD env vars didn't match an admin account."
+      ? "  The supplied admin credentials didn't match an admin account."
       : "  Set UMBRACO_ADMIN_EMAIL and UMBRACO_ADMIN_PASSWORD to match an existing admin and re-run discover,\n  or create the API user manually (see instructions below).";
     return {
       authenticated: false,
@@ -107,9 +124,12 @@ async function tryClientCredentials(baseUrl: string): Promise<{ authenticated: b
   }
 }
 
-async function tryCreateApiUser(baseUrl: string): Promise<{ created: boolean; failure?: AutoCreateFailure }> {
+async function tryCreateApiUser(
+  baseUrl: string,
+  options?: CheckApiUserOptions,
+): Promise<{ created: boolean; failure?: AutoCreateFailure }> {
   try {
-    const admin = getAdminCredentials();
+    const admin = getAdminCredentials(options);
 
     // Step 1: Login as admin to get auth cookie
     const loginResponse = await fetch(`${baseUrl}${LOGIN_PATH}`, {
