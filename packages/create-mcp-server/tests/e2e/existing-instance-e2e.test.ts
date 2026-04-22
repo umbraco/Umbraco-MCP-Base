@@ -1,19 +1,21 @@
 /**
  * Self-contained E2E for the "Use existing instance" init path.
  *
- * Spawns tests/umbraco-instance (SQLite, .NET 10), scaffolds a project,
- * drives the operations the init "existing" branch runs (the prompts
- * themselves are covered by unit tests), then asserts on .env,
- * orval.config.ts, a real API call, and TypeScript compilation.
+ * Spawns a copy of tests/umbraco-instance (.NET 10) configured against
+ * SQL Server on a random port, scaffolds a project, drives the operations
+ * the init "existing" branch runs (the prompts themselves are covered by
+ * unit tests), then asserts on .env, orval.config.ts, and a real API call.
  *
- * Requires: .NET 10 SDK. No SQL Server needed.
+ * Requires: TEST_SQL_CONNECTION_STRING + .NET 10 SDK.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { Connection, Request } from "tedious";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +27,83 @@ const UMBRACO_INSTANCE_DIR = path.join(MONOREPO_ROOT, "tests", "umbraco-instance
 const ADMIN_EMAIL = "admin@admin.com";
 const ADMIN_PASSWORD = "1234567890";
 
-const SKIP = !fs.existsSync(UMBRACO_INSTANCE_DIR);
+const DB_NAME = `umbraco_existing_e2e_${randomUUID().slice(0, 8)}`;
+
+function getBaseConnectionString(): string {
+  const raw = process.env.TEST_SQL_CONNECTION_STRING ?? "";
+  // Strip any Database= part to get the server-level connection string
+  return raw
+    .split(";")
+    .filter((part) => !part.trim().toLowerCase().startsWith("database="))
+    .join(";");
+}
+
+const BASE_CONNECTION_STRING = getBaseConnectionString();
+
+function buildConnectionString(dbName?: string): string {
+  return dbName ? `${BASE_CONNECTION_STRING};Database=${dbName}` : BASE_CONNECTION_STRING;
+}
+
+function parseTediousConfig(connStr: string) {
+  const parts = new Map<string, string>();
+  for (const segment of connStr.split(";")) {
+    const eqIdx = segment.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = segment.slice(0, eqIdx).trim().toLowerCase();
+    const value = segment.slice(eqIdx + 1).trim();
+    parts.set(key, value);
+  }
+
+  const serverRaw = parts.get("server") ?? "localhost";
+  const [host, portStr] = serverRaw.includes(",")
+    ? serverRaw.split(",")
+    : [serverRaw, "1433"];
+
+  const config: Record<string, unknown> = {
+    server: host,
+    options: {
+      port: parseInt(portStr, 10),
+      encrypt: false,
+      trustServerCertificate:
+        parts.get("trustservercertificate")?.toLowerCase() === "true",
+      database: parts.get("database") ?? "master",
+    },
+    authentication: {
+      type: "default",
+      options: {
+        userName: parts.get("user id"),
+        password: parts.get("password") ?? "",
+      },
+    },
+  };
+
+  return config;
+}
+
+function execSql(connStr: string, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const config = parseTediousConfig(connStr);
+    const connection = new Connection(config as Parameters<typeof Connection>[0]);
+
+    connection.on("connect", (err) => {
+      if (err) return reject(err);
+      const request = new Request(sql, (reqErr) => {
+        connection.close();
+        if (reqErr) return reject(reqErr);
+        resolve();
+      });
+      connection.execSql(request);
+    });
+
+    connection.connect();
+  });
+}
+
+const SKIP =
+  !process.env.TEST_SQL_CONNECTION_STRING ||
+  process.env.TEST_SQL_CONNECTION_STRING.includes("{changt-this}") ||
+  !fs.existsSync(UMBRACO_INSTANCE_DIR);
+
 const describeOrSkip = SKIP ? describe.skip : describe;
 
 describeOrSkip("existing-instance E2E", () => {
@@ -41,22 +119,25 @@ describeOrSkip("existing-instance E2E", () => {
     umbracoInstanceCopy = path.join(tempDir, "umbraco-instance");
 
     console.log(`[existing-e2e] Temp dir: ${tempDir}`);
-    console.log(`[existing-e2e] Copying ${UMBRACO_INSTANCE_DIR} → ${umbracoInstanceCopy}`);
+    console.log(`[existing-e2e] DB name: ${DB_NAME}`);
 
-    // Copy the instance so bin/, obj/, and umbraco/Data/ are isolated — otherwise
-    // a dev's own running instance holds the MainDom lock and the SQLite file open.
+    await execSql(buildConnectionString(), `CREATE DATABASE [${DB_NAME}]`);
+    console.log(`[existing-e2e] Database created`);
+
+    // Copy the instance so bin/ obj/ are isolated from any parallel build.
     fs.cpSync(UMBRACO_INSTANCE_DIR, umbracoInstanceCopy, {
       recursive: true,
       filter: (src) => {
         const base = path.basename(src);
         if (base === "bin" || base === "obj") return false;
-        // Skip the committed empty data dir so we start with a truly fresh SQLite
         if (src.endsWith(path.join("umbraco", "Data"))) return false;
         return true;
       },
     });
 
-    console.log(`[existing-e2e] Starting Umbraco from copy...`);
+    const umbracoConnStr = buildConnectionString(DB_NAME);
+    console.log(`[existing-e2e] Starting Umbraco (SQL Server) from copy...`);
+
     umbracoProcess = spawn(
       "dotnet",
       ["run", "--project", umbracoInstanceCopy, "--no-launch-profile"],
@@ -65,6 +146,9 @@ describeOrSkip("existing-instance E2E", () => {
           ...process.env,
           ASPNETCORE_ENVIRONMENT: "Development",
           ASPNETCORE_URLS: "http://127.0.0.1:0",
+          // Override the SQLite default to point at the per-test SQL Server DB.
+          ConnectionStrings__umbracoDbDSN: umbracoConnStr,
+          ConnectionStrings__umbracoDbDSN_ProviderName: "Microsoft.Data.SqlClient",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -85,7 +169,7 @@ describeOrSkip("existing-instance E2E", () => {
       process.stderr.write(`[umbraco err] ${chunk.toString()}`);
     });
 
-    const deadline = Date.now() + 180_000;
+    const deadline = Date.now() + 240_000;
     let lastError = "";
     while (Date.now() < deadline) {
       if (detectedUrl) {
@@ -106,9 +190,9 @@ describeOrSkip("existing-instance E2E", () => {
       await new Promise((r) => setTimeout(r, 2_000));
     }
     throw new Error(
-      `Umbraco did not become healthy within 3 minutes. Last error: ${lastError || "never detected listening URL"}`,
+      `Umbraco did not become healthy within 4 minutes. Last error: ${lastError || "never detected listening URL"}`,
     );
-  }, 240_000);
+  }, 300_000);
 
   afterAll(async () => {
     if (umbracoProcess && !umbracoProcess.killed) {
@@ -120,6 +204,16 @@ describeOrSkip("existing-instance E2E", () => {
       }
     }
 
+    try {
+      await execSql(
+        buildConnectionString(),
+        `ALTER DATABASE [${DB_NAME}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [${DB_NAME}]`,
+      );
+      console.log(`[existing-e2e] Database dropped`);
+    } catch (err) {
+      console.warn(`[existing-e2e] Failed to drop database: ${err}`);
+    }
+
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -127,7 +221,7 @@ describeOrSkip("existing-instance E2E", () => {
         // best-effort cleanup
       }
     }
-  }, 30_000);
+  }, 60_000);
 
   test("Step 1: scaffold a fresh project", () => {
     const cliBin = path.resolve(__dirname, "../../dist/index.js");
@@ -223,5 +317,4 @@ describeOrSkip("existing-instance E2E", () => {
     const user = (await currentUserRes.json()) as { name?: string };
     expect(user.name).toBe("MCP API User");
   }, 30_000);
-
 });

@@ -59,9 +59,10 @@ Tests the container mode init flow (no API tools, keeps chaining). Runs as part 
 
 ### Existing-instance E2E
 
-Self-contained E2E for the `init` "Use existing instance" branch. Spawns a copy of `tests/umbraco-instance/` (SQLite, .NET 10) on a random port, scaffolds a project, runs the init pipeline against it, and asserts `.env`, `orval.config.ts`, and a real API call. No SQL Server required.
+Self-contained E2E for the `init` "Use existing instance" branch. Spawns a copy of `tests/umbraco-instance/` (.NET 10) on a random port, overrides its connection string to use a per-test SQL Server database (so it aligns with the real-world setup tested in `cli-e2e`), scaffolds a project, runs the init pipeline against the running site, and asserts `.env`, `orval.config.ts`, and a real API call.
 
 ```bash
+TEST_SQL_CONNECTION_STRING="Server=localhost,1433;User Id=sa;Password=...;TrustServerCertificate=True" \
 npm run test:e2e:existing -w packages/create-mcp-server
 ```
 
