@@ -2,7 +2,7 @@
 /**
  * Clean up preserved E2E test assets.
  *
- * Reads the manifest written by cli-e2e.test.ts (KEEP_E2E_ASSETS=true),
+ * Reads the manifest written by new-instance-e2e.test.ts (KEEP_E2E_ASSETS=true),
  * kills the Umbraco process, drops the database, and removes the temp dir.
  *
  * Run: npm run test:e2e:cleanup -w packages/create-mcp-server
@@ -73,7 +73,7 @@ async function main() {
       }
     }
 
-    // Restore index.ts and collections.ts from snapshots (saved by CLI E2E)
+    // Restore index.ts and collections.ts from snapshots (saved by new-instance E2E)
     const snapshotDir = path.join(projectDir, ".e2e-snapshots");
     for (const file of ["src/index.ts", "src/collections.ts"]) {
       const snapshotPath = path.join(snapshotDir, file.replace(/\//g, "_"));

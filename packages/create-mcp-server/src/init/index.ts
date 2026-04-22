@@ -10,6 +10,10 @@ import { removeApiTools } from "./remove-api-tools.js";
 import { setupInstance } from "./setup-instance.js";
 import { detectPsw, installPsw, PSW_VERSION } from "./psw-cli.js";
 import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discover/index.js";
+import { checkHealth } from "../discover/health-check.js";
+import { checkApiUser } from "../discover/check-api-user.js";
+import { discoverSwaggerEndpoints } from "../discover/discover-swagger.js";
+import { promptApiSelection } from "../discover/prompts.js";
 import {
   promptUmbracoSetup,
   promptToolMode,
@@ -17,7 +21,7 @@ import {
   promptPackageSelection,
   promptUmbracoVersion,
   getInstanceLocation,
-  promptSwaggerUrl,
+  promptExistingInstance,
   promptConnectionString,
   promptInstallPsw,
 } from "./prompts.js";
@@ -99,7 +103,10 @@ export async function runInit(dir?: string): Promise<void> {
   // Step 4: Gather instance details
   let packageName: string | undefined;
   let instanceLocation: { path: string; label: string } | undefined;
-  let swaggerUrl: string | undefined;
+  let existingInstance:
+    | { baseUrl: string; adminEmail: string; adminPassword: string }
+    | undefined;
+  let selectedSwaggerUrl: string | undefined;
   let connectionString: string | undefined;
 
   let umbracoVersion: string | undefined;
@@ -110,7 +117,7 @@ export async function runInit(dir?: string): Promise<void> {
     umbracoVersion = await promptUmbracoVersion();
     instanceLocation = getInstanceLocation(projectDir);
   } else if (umbracoChoice === "existing") {
-    swaggerUrl = await promptSwaggerUrl();
+    existingInstance = await promptExistingInstance();
   }
 
   // Step 5: Tool mode — API tools or container?
@@ -170,11 +177,55 @@ export async function runInit(dir?: string): Promise<void> {
     }
   }
 
-  // Step 8: Apply OpenAPI configuration (skip for container mode)
-  if (swaggerUrl && !isContainerMode) {
-    const updated = configureOpenApi(projectDir, swaggerUrl);
-    if (updated) {
-      console.log(pc.green(`  OpenAPI target: ${swaggerUrl}`));
+  // Step 8: Existing-instance setup (skip for container mode)
+  if (existingInstance && !isContainerMode) {
+    const { baseUrl, adminEmail, adminPassword } = existingInstance;
+
+    const isLocalhost =
+      baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+    if (isLocalhost) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    }
+
+    console.log(pc.dim(`\nChecking ${baseUrl}...`));
+    const health = await checkHealth(baseUrl);
+    if (!health.healthy) {
+      console.log(
+        pc.red(`  Could not reach Umbraco instance: ${health.error ?? "unknown"}`),
+      );
+      console.log(pc.dim("  Start the instance and re-run init."));
+    } else {
+      console.log(pc.green("  Instance is running"));
+
+      const apiUser = await checkApiUser(baseUrl, { adminEmail, adminPassword });
+      if (apiUser.authenticated && apiUser.created) {
+        console.log(pc.green("  API user created and authenticated"));
+      } else if (apiUser.authenticated) {
+        console.log(pc.green("  API user authenticated"));
+      } else {
+        console.log(pc.yellow(`  ${apiUser.error ?? "Could not create API user"}`));
+      }
+
+      console.log(pc.dim("  Discovering APIs..."));
+      const endpoints = await discoverSwaggerEndpoints(baseUrl);
+      if (endpoints.length === 0) {
+        console.log(pc.yellow("  No Swagger endpoints found at this instance"));
+      } else {
+        const selected =
+          endpoints.length === 1 ? endpoints[0] : await promptApiSelection(endpoints);
+        selectedSwaggerUrl = selected.url;
+        const updated = configureOpenApi(projectDir, selected.url, selected.name);
+        if (updated) {
+          console.log(pc.green(`  orval.config.ts → ${selected.url}`));
+        }
+
+        updateEnvBaseUrl(projectDir, baseUrl);
+        updateEnvVar(projectDir, "UMBRACO_CLIENT_ID", "umbraco-back-office-mcp");
+        updateEnvVar(projectDir, "UMBRACO_CLIENT_SECRET", "1234567890");
+        console.log(pc.green(`  .env → UMBRACO_BASE_URL=${baseUrl}`));
+        console.log(pc.green("  .env → UMBRACO_CLIENT_ID=umbraco-back-office-mcp"));
+        console.log(pc.green("  .env → UMBRACO_CLIENT_SECRET=1234567890"));
+      }
     }
   }
 
@@ -209,8 +260,8 @@ export async function runInit(dir?: string): Promise<void> {
     console.log(pc.green("  [x] Umbraco instance created in demo-site/"));
   }
 
-  if (swaggerUrl && !isContainerMode) {
-    console.log(pc.green(`  [x] OpenAPI target: ${swaggerUrl}`));
+  if (selectedSwaggerUrl && !isContainerMode) {
+    console.log(pc.green(`  [x] OpenAPI target: ${selectedSwaggerUrl}`));
   } else if (!instanceCreated && !isContainerMode) {
     console.log(pc.dim("  [ ] OpenAPI target: not configured"));
   }
@@ -255,7 +306,7 @@ export async function runInit(dir?: string): Promise<void> {
   } else if (instanceCreated) {
     console.log(pc.dim(`  ${step++}. Start the Umbraco instance: npm run start:umbraco`));
     console.log(pc.dim(`  ${step++}. (in a separate terminal) npx @umbraco-cms/create-umbraco-mcp-server discover`));
-  } else if (swaggerUrl) {
+  } else if (selectedSwaggerUrl) {
     console.log(pc.dim(`  ${step++}. npm run generate`));
   }
   console.log();
