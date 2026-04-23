@@ -177,7 +177,7 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
     throw new Error("Missing required configuration: clientSecret");
   }
 
-  authConfig = config;
+  authConfig = { ...config, baseUrl: baseUrl.replace(/\/+$/, "") };
 }
 
 /**
@@ -555,7 +555,7 @@ export function createUmbracoFetchClient(
       if (!clientSecret && clientId !== "umbraco-swagger") {
         throw new Error("Missing required configuration: clientSecret");
       }
-      instanceAuthConfig = config;
+      instanceAuthConfig = { ...config, baseUrl: baseUrl.replace(/\/+$/, "") };
     },
     isInitialized: () => instanceAuthConfig !== null,
     clearToken: () => {

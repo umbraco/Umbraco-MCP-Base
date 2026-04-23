@@ -84,6 +84,26 @@ describe("createUmbracoFetchClient", () => {
       const [, options] = mockFetch.mock.calls[0];
       expect((options as RequestInit).body).toBeUndefined();
     });
+
+    it.each([
+      ["no trailing slash", "https://umbraco.example.com"],
+      ["one trailing slash", "https://umbraco.example.com/"],
+      ["multiple trailing slashes", "https://umbraco.example.com///"],
+    ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
+      mockFetch.mockResolvedValue(createJsonResponse(200, []));
+
+      const client = createUmbracoFetchClient({
+        baseUrl,
+        accessToken: "test-token-123",
+      });
+      await client(
+        { method: "get", url: "/umbraco/api/v1/items" },
+        CAPTURE_RAW_HTTP_RESPONSE
+      );
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://umbraco.example.com/umbraco/api/v1/items");
+    });
   });
 
   describe("query parameter serialization", () => {

@@ -104,6 +104,7 @@ export type UmbracoFetchClient = ReturnType<typeof createUmbracoFetchClient>;
 
 export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
   let currentToken = config.accessToken;
+  const normalizedBaseUrl = config.baseUrl.replace(/\/+$/, "");
 
   /**
    * The mutator function - compatible with Orval custom instance pattern.
@@ -119,7 +120,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     options?: FetchClientOptions
   ): Promise<HttpResponse<T> | T> {
     const queryString = serializeParams(requestConfig.params);
-    const fullUrl = `${config.baseUrl}${requestConfig.url}${queryString}`;
+    const fullUrl = `${normalizedBaseUrl}${requestConfig.url}${queryString}`;
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${currentToken}`,
