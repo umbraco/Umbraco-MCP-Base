@@ -1,5 +1,5 @@
 // packages/mcp-server-sdk/src/cli/__tests__/generate-tool-types.test.ts
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeAll } from "@jest/globals";
 import { z } from "zod";
 import type { ToolCollectionExport } from "../../types/tool-collection.js";
 import { runCodegen } from "../generate-tool-types.js";
@@ -158,22 +158,25 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe("umbraco-mcp-generate-types binary", () => {
-  it("runs end-to-end against a fixture and writes a valid .d.ts", () => {
-    const binPath = resolve(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "dist",
-      "cli",
-      "generate-tool-types.js",
-    );
+  const binPath = resolve(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "dist",
+    "cli",
+    "generate-tool-types.js",
+  );
+
+  beforeAll(() => {
     if (!existsSync(binPath)) {
       throw new Error(
         `Binary not built. Run \`npm run build -w packages/mcp-server-sdk\` first. Looked for ${binPath}`,
       );
     }
+  });
 
+  it("runs end-to-end against a fixture and writes a valid .d.ts", () => {
     const fixtureDir = resolve(__dirname, "fixtures");
     const fixturePath = join(fixtureDir, "codegen-collections.mjs");
     const outDir = mkdtempSync(join(tmpdir(), "tool-types-"));
@@ -201,15 +204,6 @@ describe("umbraco-mcp-generate-types binary", () => {
   });
 
   it("--help prints usage", () => {
-    const binPath = resolve(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "dist",
-      "cli",
-      "generate-tool-types.js",
-    );
     const out = execFileSync(process.execPath, [binPath, "--help"], {
       encoding: "utf8",
     });

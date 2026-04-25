@@ -167,7 +167,7 @@ export async function runCodegen(
 async function mainFromCli(argv: string[]): Promise<void> {
   const { parseArgs } = await import("node:util");
   const { resolve, dirname } = await import("node:path");
-  const { writeFileSync, mkdirSync } = await import("node:fs");
+  const { writeFileSync, mkdirSync, readFileSync } = await import("node:fs");
   const { pathToFileURL } = await import("node:url");
 
   const { values } = parseArgs({
@@ -203,7 +203,6 @@ async function mainFromCli(argv: string[]): Promise<void> {
   let registryName = values["registry-name"] as string | undefined;
   if (!registryName) {
     try {
-      const { readFileSync } = await import("node:fs");
       const pkg = JSON.parse(
         readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
       );
