@@ -5,6 +5,7 @@
  * Depends only on types/env.ts — no auth handler or consent dependencies.
  */
 
+import { normalizeBaseUrl } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 
 // ============================================================================
@@ -30,8 +31,8 @@ const BACKOFFICE_PATHS = {
  *   (e.g. workerd rejects self-signed certs) and an HTTP proxy is used.
  */
 export function getBackofficeEndpoints(baseUrl: string, serverBaseUrl?: string) {
-  const browserBase = baseUrl.replace(/\/$/, "");
-  const serverBase = serverBaseUrl ? serverBaseUrl.replace(/\/$/, "") : browserBase;
+  const browserBase = normalizeBaseUrl(baseUrl);
+  const serverBase = serverBaseUrl ? normalizeBaseUrl(serverBaseUrl) : browserBase;
   return {
     authorization_endpoint: `${browserBase}${BACKOFFICE_PATHS.authorize}`,
     token_endpoint: `${serverBase}${BACKOFFICE_PATHS.token}`,

@@ -3,7 +3,6 @@ import {
   initializeUmbracoFetch,
   UmbracoManagementClient,
   createUmbracoFetchClient,
-  clearUmbracoFetchToken,
 } from "../umbraco-fetch-client.js";
 
 const mockFetch = jest.fn<typeof fetch>();
@@ -32,8 +31,6 @@ describe("base URL trailing slash normalization", () => {
       ["one trailing slash", "https://example.com/"],
       ["multiple trailing slashes", "https://example.com///"],
     ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
-      clearUmbracoFetchToken();
-      mockFetch.mockReset();
       mockFetch
         .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
         .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
@@ -64,7 +61,6 @@ describe("base URL trailing slash normalization", () => {
       ["one trailing slash", "https://example.com/"],
       ["multiple trailing slashes", "https://example.com///"],
     ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
-      mockFetch.mockReset();
       mockFetch
         .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
         .mockResolvedValueOnce(jsonResponse(200, { ok: true }));

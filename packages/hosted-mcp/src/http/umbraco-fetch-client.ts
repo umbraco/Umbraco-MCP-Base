@@ -8,7 +8,7 @@
  * compatible with api-call-helpers' validation logic.
  */
 
-import type { HttpResponse } from "@umbraco-cms/mcp-server-sdk";
+import { normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import {
   getStoredUmbracoToken,
@@ -104,7 +104,7 @@ export type UmbracoFetchClient = ReturnType<typeof createUmbracoFetchClient>;
 
 export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
   let currentToken = config.accessToken;
-  const normalizedBaseUrl = config.baseUrl.replace(/\/+$/, "");
+  const normalizedBaseUrl = normalizeBaseUrl(config.baseUrl);
 
   /**
    * The mutator function - compatible with Orval custom instance pattern.

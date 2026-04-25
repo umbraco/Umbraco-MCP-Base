@@ -25,6 +25,7 @@
  */
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
+import { normalizeBaseUrl } from "../helpers/url.js";
 
 /**
  * Authentication configuration for Umbraco API.
@@ -177,7 +178,8 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
     throw new Error("Missing required configuration: clientSecret");
   }
 
-  authConfig = { ...config, baseUrl: baseUrl.replace(/\/+$/, "") };
+  authConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
+  clearUmbracoFetchToken();
 }
 
 /**
@@ -555,7 +557,7 @@ export function createUmbracoFetchClient(
       if (!clientSecret && clientId !== "umbraco-swagger") {
         throw new Error("Missing required configuration: clientSecret");
       }
-      instanceAuthConfig = { ...config, baseUrl: baseUrl.replace(/\/+$/, "") };
+      instanceAuthConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
     },
     isInitialized: () => instanceAuthConfig !== null,
     clearToken: () => {
