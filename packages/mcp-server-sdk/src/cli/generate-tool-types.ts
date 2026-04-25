@@ -72,20 +72,27 @@ export async function runCodegen(
   ];
   const registryEntries: string[] = [];
   const skipped: SkippedSchema[] = [];
-  const seenTypeNames = new Set<string>();
+  const seenTypeNames = new Map<string, string>();
 
   for (const tool of tools) {
     const inputTypeName = `${pascal(tool.name)}Input`;
     const outputTypeName = `${pascal(tool.name)}Output`;
 
-    if (seenTypeNames.has(inputTypeName) || seenTypeNames.has(outputTypeName)) {
+    const collidingName = seenTypeNames.has(inputTypeName)
+      ? inputTypeName
+      : seenTypeNames.has(outputTypeName)
+        ? outputTypeName
+        : null;
+    if (collidingName !== null) {
+      const previousTool = seenTypeNames.get(collidingName)!;
       throw new Error(
-        `[tool-types] Type name collision for tool "${tool.name}". ` +
-          `Two tools produce the same PascalCase type name. Rename one or prefix with collection.`,
+        `[tool-types] Type name collision for tool "${tool.name}": ` +
+          `produces "${collidingName}", already claimed by "${previousTool}". ` +
+          `Rename one or prefix with collection.`,
       );
     }
-    seenTypeNames.add(inputTypeName);
-    seenTypeNames.add(outputTypeName);
+    seenTypeNames.set(inputTypeName, tool.name);
+    seenTypeNames.set(outputTypeName, tool.name);
 
     let inputTs = "Record<string, unknown>";
     let outputTs = "unknown";

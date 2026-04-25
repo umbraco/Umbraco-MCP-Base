@@ -53,6 +53,9 @@ describe("runCodegen", () => {
     expect(result.output).toContain("export interface UpdateThingInput");
     expect(result.output).toContain("export interface TestTools {");
     expect(result.output).toContain('"get-thing": { input: GetThingInput; output: GetThingOutput };');
+    expect(result.output).toContain(
+      '"update-thing": { input: UpdateThingInput; output: unknown };',
+    );
     expect(result.output).toContain("export type TestToolsName = keyof TestTools;");
   });
 
@@ -86,6 +89,7 @@ describe("runCodegen", () => {
 
     expect(result.toolsProcessed).toBe(1);
     expect(result.skipped.map((s) => s.tool)).toContain("broken-tool");
+    expect(result.skipped[0]?.field).toBe("input");
     expect(result.output).toContain('"broken-tool": { input: Record<string, unknown>; output: unknown };');
   });
 
@@ -111,7 +115,7 @@ describe("runCodegen", () => {
 
     await expect(
       runCodegen({ collections, registryName: "X" }),
-    ).rejects.toThrow(/Type name collision/);
+    ).rejects.toThrow(/already claimed by "get-document"/);
   });
 
   it("calls collection.tools with the permissive user", async () => {
