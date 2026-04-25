@@ -1,5 +1,4 @@
 // packages/mcp-server-sdk/src/cli/permissive-user.ts
-import type { UserModel } from "../types/tool-definition.js";
 
 /**
  * Returns a synthetic user that passes every authorization check that
@@ -8,8 +7,21 @@ import type { UserModel } from "../types/tool-definition.js";
  *
  * Used only by `umbraco-mcp-generate-types` to walk every tool exported from
  * `availableCollections` so the generated `.d.ts` covers the full surface.
+ *
+ * **Contract:** the returned object is only safe to pass to
+ * `collection.tools(user)` — do **not** read its properties directly.
+ * Every property access returns an array-proxy, not the scalar value
+ * (`user.id` is not a string). The return type is `unknown` to force
+ * callers through the only intended use.
+ *
+ * **Supported array predicates** (always succeed): `includes`, `some`,
+ * `every`, `find`, `findIndex`, `indexOf`, `Symbol.iterator`. Other
+ * iteration methods (`filter`, `map`, `reduce`, `forEach`) fall through
+ * to a real empty array and may return falsy results — if a tool's
+ * `enabled(user)` predicate uses those methods, the tool may be dropped
+ * from the generated types.
  */
-export function createPermissiveCodegenUser(): UserModel {
+export function createPermissiveCodegenUser(): unknown {
   // Array predicates always succeed; index/find/indexOf return a non-empty
   // proxy so chained calls like `.find(...).id.toUpperCase()` work.
   const arrayProxyHandler: ProxyHandler<unknown[]> = {
@@ -53,5 +65,5 @@ export function createPermissiveCodegenUser(): UserModel {
     },
   };
 
-  return new Proxy({}, userProxyHandler) as UserModel;
+  return new Proxy({}, userProxyHandler);
 }

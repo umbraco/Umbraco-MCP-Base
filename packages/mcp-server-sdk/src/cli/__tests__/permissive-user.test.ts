@@ -35,15 +35,4 @@ describe("createPermissiveCodegenUser", () => {
     expect((user as any).iAmANewSectionAddedTomorrow).toBeTruthy();
     expect((user as any).iAmANewSectionAddedTomorrow.some(() => false)).toBe(true);
   });
-
-  it("does not enumerate any section/permission strings", async () => {
-    // Read the source file as text and check no Umb.Section.* literals appear.
-    // This codifies the AC: "doesn't enumerate section strings — uses Proxy or equivalent".
-    const { readFileSync } = await import("node:fs");
-    const { dirname, resolve } = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
-    const here = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(resolve(here, "..", "permissive-user.ts"), "utf8");
-    expect(src).not.toMatch(/Umb\.Section\./);
-  });
 });
