@@ -21,3 +21,7 @@ export {
   handleCliCommands,
   type HandleCliCommandsOptions,
 } from "./handle-cli-commands.js";
+
+export {
+  createPermissiveCodegenUser,
+} from "./permissive-user.js";
