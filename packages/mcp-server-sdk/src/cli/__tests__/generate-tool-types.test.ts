@@ -148,3 +148,71 @@ describe("runCodegen", () => {
     expect(result.output).toContain('"gated-tool"');
   });
 });
+
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+describe("umbraco-mcp-generate-types binary", () => {
+  it("runs end-to-end against a fixture and writes a valid .d.ts", () => {
+    const binPath = resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "dist",
+      "cli",
+      "generate-tool-types.js",
+    );
+    if (!existsSync(binPath)) {
+      throw new Error(
+        `Binary not built. Run \`npm run build -w packages/mcp-server-sdk\` first. Looked for ${binPath}`,
+      );
+    }
+
+    const fixtureDir = resolve(__dirname, "fixtures");
+    const fixturePath = join(fixtureDir, "codegen-collections.mjs");
+    const outDir = mkdtempSync(join(tmpdir(), "tool-types-"));
+    const outPath = join(outDir, "tool-types.d.ts");
+
+    execFileSync(
+      process.execPath,
+      [
+        binPath,
+        "--collections",
+        fixturePath,
+        "--out",
+        outPath,
+        "--registry-name",
+        "FixtureTools",
+      ],
+      { stdio: "pipe" },
+    );
+
+    const dts = readFileSync(outPath, "utf8");
+    expect(dts).toContain("export interface FixtureTools {");
+    expect(dts).toContain('"get-thing"');
+    expect(dts).toContain("export interface GetThingInput");
+    expect(dts).toContain("export type FixtureToolsName = keyof FixtureTools;");
+  });
+
+  it("--help prints usage", () => {
+    const binPath = resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "dist",
+      "cli",
+      "generate-tool-types.js",
+    );
+    const out = execFileSync(process.execPath, [binPath, "--help"], {
+      encoding: "utf8",
+    });
+    expect(out).toMatch(/Usage:\s+umbraco-mcp-generate-types/);
+  });
+});

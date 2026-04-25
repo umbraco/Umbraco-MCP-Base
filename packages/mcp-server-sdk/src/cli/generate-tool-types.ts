@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // packages/mcp-server-sdk/src/cli/generate-tool-types.ts
 import { z } from "zod";
 import { compile } from "json-schema-to-typescript";
@@ -157,4 +158,109 @@ export async function runCodegen(
     toolsProcessed: tools.length,
     skipped,
   };
+}
+
+// ---------------------------------------------------------------------------
+// CLI entry-point
+// ---------------------------------------------------------------------------
+
+async function mainFromCli(argv: string[]): Promise<void> {
+  const { parseArgs } = await import("node:util");
+  const { resolve, dirname } = await import("node:path");
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  const { pathToFileURL } = await import("node:url");
+
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      collections: { type: "string", default: "./dist/collections.js" },
+      out: { type: "string", default: "./dist/tool-types.d.ts" },
+      "registry-name": { type: "string" },
+      help: { type: "boolean", short: "h", default: false },
+    },
+    strict: true,
+  });
+
+  if (values.help) {
+    console.log(
+      [
+        "Usage: umbraco-mcp-generate-types [options]",
+        "",
+        "Options:",
+        "  --collections <path>    Path to compiled collections module (default ./dist/collections.js)",
+        "  --out <path>            Output .d.ts path (default ./dist/tool-types.d.ts)",
+        "  --registry-name <name>  Registry interface name (default derived from package.json name)",
+        "  -h, --help              Show this help",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const collectionsPath = resolve(process.cwd(), values.collections as string);
+  const outPath = resolve(process.cwd(), values.out as string);
+
+  // Resolve registry name. Priority: --registry-name > deriving from package.json.
+  let registryName = values["registry-name"] as string | undefined;
+  if (!registryName) {
+    try {
+      const { readFileSync } = await import("node:fs");
+      const pkg = JSON.parse(
+        readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+      );
+      // "@umbraco-cms/mcp-cms" → "McpCmsTools" — strip scope, PascalCase, append Tools.
+      const baseName = String(pkg.name ?? "Mcp").replace(/^@[^/]+\//, "");
+      registryName = `${pascal(baseName)}Tools`;
+    } catch {
+      registryName = "Tools";
+    }
+  }
+
+  // Dynamic import of the consumer's compiled collections.
+  const mod = await import(pathToFileURL(collectionsPath).href);
+  const collections =
+    (mod as { collections?: unknown; default?: unknown }).collections ??
+    (mod as { default?: unknown }).default;
+
+  if (!Array.isArray(collections)) {
+    throw new Error(
+      `[tool-types] ${collectionsPath} must export a "collections" array (or default-export one). ` +
+        `Got: ${typeof collections}`,
+    );
+  }
+
+  const result = await runCodegen({
+    collections: collections as ToolCollectionExport[],
+    registryName,
+  });
+
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, result.output, "utf8");
+
+  if (result.skipped.length > 0) {
+    console.warn(
+      `[tool-types] ${result.skipped.length} schema(s) fell back to generic types:`,
+    );
+    for (const s of result.skipped) {
+      console.warn(`  - ${s.tool} (${s.field}): ${s.err}`);
+    }
+  }
+  console.log(
+    `[tool-types] Wrote ${result.toolsProcessed} tools → ${outPath}`,
+  );
+}
+
+// Detect "called as a binary" without breaking when the file is imported
+// for testing. `process.argv[1]` is the script path Node was started with;
+// `pathToFileURL` normalises it to compare with `import.meta.url`.
+import { pathToFileURL as _pathToFileURL } from "node:url";
+
+const _isMain =
+  !!process.argv[1] &&
+  import.meta.url === _pathToFileURL(process.argv[1]).href;
+
+if (_isMain) {
+  mainFromCli(process.argv.slice(2)).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }

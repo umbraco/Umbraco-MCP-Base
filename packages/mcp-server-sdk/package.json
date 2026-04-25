@@ -5,6 +5,9 @@
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
