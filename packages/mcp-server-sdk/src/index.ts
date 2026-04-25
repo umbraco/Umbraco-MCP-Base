@@ -110,6 +110,9 @@ export {
   type CursorPaginatedArgs,
 } from "./helpers/cursor-pagination.js";
 
+// URL helpers
+export { normalizeBaseUrl } from "./helpers/url.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,
