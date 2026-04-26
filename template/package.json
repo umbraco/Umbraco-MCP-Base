@@ -1,12 +1,13 @@
 {
   "name": "@umbraco-cms/mcp-template",
-  "version": "17.0.0-beta.14",
+  "version": "17.0.0-beta.15",
   "type": "module",
   "description": "MCP server for my Umbraco add-on",
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./collections": "./dist/collections.js"
+    "./collections": "./dist/collections.js",
+    "./tool-types": { "types": "./dist/tool-types.d.ts" }
   },
   "bin": {
     "my-umbraco-mcp": "dist/index.js"
@@ -14,6 +15,7 @@
   "scripts": {
     "clean": "rimraf dist",
     "build": "tsup --config tsup.config.ts",
+    "postbuild": "umbraco-mcp-generate-types",
     "compile": "tsc --noEmit",
     "watch": "tsup --config tsup.config.ts --watch",
     "generate": "orval --config orval.config.ts",

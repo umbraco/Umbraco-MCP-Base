@@ -110,6 +110,9 @@ export {
   type CursorPaginatedArgs,
 } from "./helpers/cursor-pagination.js";
 
+// URL helpers
+export { normalizeBaseUrl } from "./helpers/url.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,
@@ -117,6 +120,7 @@ export {
   formatToolTable,
   generateContextFile,
   handleCliCommands,
+  createPermissiveCodegenUser,
   type ToolSummary,
   type GenerateContextOptions,
   type HandleCliCommandsOptions,

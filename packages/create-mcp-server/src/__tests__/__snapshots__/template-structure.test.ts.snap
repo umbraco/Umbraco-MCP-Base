@@ -259,7 +259,10 @@ exports[`template structure should produce expected package.json for sample proj
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./collections": "./dist/collections.js"
+    "./collections": "./dist/collections.js",
+    "./tool-types": {
+      "types": "./dist/tool-types.d.ts"
+    }
   },
   "bin": {
     "my-commerce-mcp": "./dist/index.js"
@@ -267,6 +270,7 @@ exports[`template structure should produce expected package.json for sample proj
   "scripts": {
     "clean": "rimraf dist",
     "build": "tsup --config tsup.config.ts",
+    "postbuild": "umbraco-mcp-generate-types",
     "compile": "tsc --noEmit",
     "watch": "tsup --config tsup.config.ts --watch",
     "generate": "orval --config orval.config.ts",
