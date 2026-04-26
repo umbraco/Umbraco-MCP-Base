@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-hosted",
-  "version": "17.0.0-beta.15",
+  "version": "17.0.0-beta.16",
   "description": "Hosted MCP server infrastructure for Umbraco on Cloudflare Workers",
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,9 @@
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:integration": "npm run test:integration --prefix ../..",
-    "test:e2e": "npm run test:e2e --prefix ../.."
+    "test:e2e": "npm run test:e2e --prefix ../..",
+    "prepack": "node ../../scripts/rewrite-file-deps.mjs",
+    "postpack": "node ../../scripts/restore-package-json.mjs"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
