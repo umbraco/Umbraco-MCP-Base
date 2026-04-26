@@ -181,9 +181,15 @@ gh pr create --base dev --title "Merge main into dev after <version> release"
 - Prerelease: `17.0.0-beta.N` (published with `--tag beta` dist-tag)
 - Stable: `17.0.0` (published with `--tag latest` dist-tag)
 
-### Template `file:` references
+### Internal cross-package dependencies
 
-The template's `package.json` uses `file:` references to `mcp-server-sdk` and `mcp-hosted` for monorepo development. The `create-mcp-server` scaffold tool (`src/scaffold.ts`) rewrites these to published npm versions when users create new projects.
+Cross-package deps inside the monorepo (`hosted-mcp` → `mcp-server-sdk`, `template` → both) use `file:../<sibling>` references in source. This keeps local development simple — npm workspaces auto-link siblings by name, and you can bump any package's version mid-flight without breaking workspace links.
+
+`npm publish` does **not** rewrite `file:` references in published manifests. Shipping `mcp-hosted` with a literal `"file:../mcp-server-sdk"` corrupts consumer node_modules state (npm resolves the dangling path by linking the nested SDK to the top-level one, which silently prevents creation of bin shims for the SDK package — e.g. `umbraco-mcp-generate-types`).
+
+`mcp-hosted` runs `prepack` / `postpack` scripts (`scripts/rewrite-file-deps.mjs`, `scripts/restore-package-json.mjs`) that rewrite `file:` deps to the sibling's actual version just before the tarball is built, then restore the source after. Source stays workspace-friendly; published artifacts carry real version strings.
+
+The `create-mcp-server` scaffold tool (`src/scaffold.ts`) further rewrites these deps to the SDK's `package.json` version when users create new projects, regardless of starting state.
 
 ## Requirements
 
