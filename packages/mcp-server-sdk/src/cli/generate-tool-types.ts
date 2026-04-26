@@ -1,5 +1,22 @@
 #!/usr/bin/env node
-// packages/mcp-server-sdk/src/cli/generate-tool-types.ts
+/**
+ * Tool-types codegen — both a library function and a CLI binary.
+ *
+ * Library: {@link runCodegen} walks an array of `ToolCollectionExport`,
+ * runs each tool's input/output Zod schema through `z.toJSONSchema()` and
+ * `json-schema-to-typescript`, and returns a single `.d.ts` blob plus a
+ * list of any schemas that fell back to generic types.
+ *
+ * Binary: when invoked directly (`umbraco-mcp-generate-types`), the file
+ * dynamic-imports the consumer's compiled `dist/collections.js`, calls
+ * `runCodegen`, and writes the output to `dist/tool-types.d.ts`. The
+ * shebang on line 1 + `bin` entry in package.json make this runnable
+ * via `npx umbraco-mcp-generate-types`.
+ *
+ * See `docs/plans/mcp-server-sdk/tool-types-codegen.md` and
+ * `17/umbraco-in-ai/mcp/base-mcp/sdk/tool-types.md` (UmbracoDocs) for
+ * full usage, options, and consumer wiring.
+ */
 import { z } from "zod";
 import { compile } from "json-schema-to-typescript";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
