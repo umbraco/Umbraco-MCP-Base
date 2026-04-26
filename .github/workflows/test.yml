@@ -43,6 +43,13 @@ jobs:
       - name: Build SDK
         run: npm run build
 
+      # Refresh workspace bin symlinks so umbraco-mcp-generate-types (shipped
+      # by the SDK as a `bin`) is reachable from the template's postbuild
+      # step. npm ci ran before dist/cli/generate-tool-types.js existed, so
+      # the symlink wasn't created at install time.
+      - name: Refresh workspace bin symlinks
+        run: npm rebuild
+
       - name: Build template
         run: npm run build -w template
 
@@ -300,6 +307,13 @@ jobs:
 
       - name: Build SDK
         run: npm run build
+
+      # Refresh workspace bin symlinks so umbraco-mcp-generate-types (shipped
+      # by the SDK as a `bin`) is reachable from the template's postbuild
+      # step. npm ci ran before dist/cli/generate-tool-types.js existed, so
+      # the symlink wasn't created at install time.
+      - name: Refresh workspace bin symlinks
+        run: npm rebuild
 
       - name: Build template
         run: npm run build -w template
