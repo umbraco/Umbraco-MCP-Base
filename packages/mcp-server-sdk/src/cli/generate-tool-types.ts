@@ -266,13 +266,22 @@ async function mainFromCli(argv: string[]): Promise<void> {
 }
 
 // Detect "called as a binary" without breaking when the file is imported
-// for testing. `process.argv[1]` is the script path Node was started with;
-// `pathToFileURL` normalises it to compare with `import.meta.url`.
+// for testing. `process.argv[1]` is the script path Node was started with —
+// when invoked via an npm bin shim it's the symlink path, while
+// `import.meta.url` is the resolved physical path. Resolve symlinks before
+// comparing or the CLI silently no-ops under `node_modules/.bin/`.
 import { pathToFileURL as _pathToFileURL } from "node:url";
+import { realpathSync as _realpathSync } from "node:fs";
 
-const _isMain =
-  !!process.argv[1] &&
-  import.meta.url === _pathToFileURL(process.argv[1]).href;
+const _isMain = (() => {
+  const arg = process.argv[1];
+  if (!arg) return false;
+  try {
+    return import.meta.url === _pathToFileURL(_realpathSync(arg)).href;
+  } catch {
+    return false;
+  }
+})();
 
 if (_isMain) {
   mainFromCli(process.argv.slice(2)).catch((err) => {
