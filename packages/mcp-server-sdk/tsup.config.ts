@@ -9,6 +9,7 @@ export default defineConfig({
     "src/helpers/index.ts",
     "src/types/index.ts",
     "src/constants/index.ts",
+    "src/cli/generate-tool-types.ts",
   ],
   format: ["esm"],
   dts: true,

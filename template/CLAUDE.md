@@ -134,6 +134,18 @@ Integration tests require an API user in Umbraco. **You must create this manuall
    UMBRACO_CLIENT_SECRET=1234567890
    ```
 
+## Tool Types Codegen
+
+`npm run build` runs `umbraco-mcp-generate-types` as a `postbuild` step. This walks the compiled `dist/collections.js`, runs every tool's input/output Zod schema through codegen, and writes a typed registry to `dist/tool-types.d.ts`. The `./tool-types` subpath in `package.json#exports` makes this importable by anyone who depends on this package and wants to chain to it with type safety:
+
+```ts
+import type { McpTemplateTools } from "@umbraco-cms/mcp-template/tool-types";
+```
+
+If your MCP is private/internal and no other MCP will chain to it, you can remove the `postbuild` script and the `./tool-types` export — neither is required for the server to run.
+
+See the [SDK docs](../packages/mcp-server-sdk/README.md) and the published [Tool Types Codegen guide](https://docs.umbraco.com/) for full usage.
+
 ## API Client
 
 Uses Orval to generate typed client from OpenAPI spec:

@@ -120,6 +120,7 @@ export {
   formatToolTable,
   generateContextFile,
   handleCliCommands,
+  createPermissiveCodegenUser,
   type ToolSummary,
   type GenerateContextOptions,
   type HandleCliCommandsOptions,
