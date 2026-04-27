@@ -16,7 +16,7 @@ npm run test:verbose   # Run with verbose output (E2E_VERBOSITY=verbose)
 ## Structure
 
 ```
-plugins/
+plugins/umbraco-mcp-skills/
 ├── skills/
 │   ├── mcp-patterns/
 │   │   └── SKILL.md       # MCP development patterns reference

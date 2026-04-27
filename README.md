@@ -118,8 +118,13 @@ Umbraco-MCP-Base/
 │           └── discover/      # Phase 3: API discovery, client generation
 │
 ├── plugins/                   # Claude Code skills & agents (not published)
-│   ├── skills/                # /build-tools, /build-evals, /mcp-patterns, etc.
-│   └── agents/                # mcp-tool-creator, mcp-tool-reviewer, etc.
+│   └── umbraco-mcp-skills/
+│       ├── skills/            # /build-tools, /build-evals, /mcp-patterns, etc.
+│       └── agents/            # mcp-tool-creator, mcp-tool-reviewer, etc.
+│
+├── plugins-server/            # Claude Code plugin for MCP server CLI operation
+│   └── umbraco-mcp-server/
+│       └── skills/            # /mcp-cli, etc.
 │
 ├── template/                  # Starter kit bundled by create-mcp-server
 │   ├── src/
