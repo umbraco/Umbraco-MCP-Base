@@ -2,7 +2,9 @@ import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals
 import {
   initializeUmbracoFetch,
   UmbracoManagementClient,
+  UmbracoManagementFetchClient,
   createUmbracoFetchClient,
+  clearUmbracoFetchToken,
 } from "../umbraco-fetch-client.js";
 
 const mockFetch = jest.fn<typeof fetch>();
@@ -45,6 +47,30 @@ describe("base URL trailing slash normalization", () => {
         { method: "get", url: "/umbraco/management/api/v1/item" },
         { returnFullResponse: true }
       );
+
+      const [tokenUrl] = mockFetch.mock.calls[0];
+      const [apiUrl] = mockFetch.mock.calls[1];
+      expect(tokenUrl).toBe(
+        "https://example.com/umbraco/management/api/v1/security/back-office/token"
+      );
+      expect(apiUrl).toBe("https://example.com/umbraco/management/api/v1/item");
+    });
+  });
+
+  describe("UmbracoManagementFetchClient (fetch-shape singleton)", () => {
+    it.each([
+      ["no trailing slash", "https://example.com"],
+      ["one trailing slash", "https://example.com/"],
+      ["multiple trailing slashes", "https://example.com///"],
+    ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
+        .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      initializeUmbracoFetch({ baseUrl, clientId: "cid", clientSecret: "sec" });
+      clearUmbracoFetchToken();
+
+      await UmbracoManagementFetchClient("/umbraco/management/api/v1/item", { method: "GET" });
 
       const [tokenUrl] = mockFetch.mock.calls[0];
       const [apiUrl] = mockFetch.mock.calls[1];

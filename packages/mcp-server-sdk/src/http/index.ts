@@ -10,6 +10,7 @@ export {
   isUmbracoFetchInitialized,
   clearUmbracoFetchToken,
   UmbracoManagementClient,
+  UmbracoManagementFetchClient,
   // Custom transport for specialized environments
   setCustomTransport,
   // Factory for advanced use cases

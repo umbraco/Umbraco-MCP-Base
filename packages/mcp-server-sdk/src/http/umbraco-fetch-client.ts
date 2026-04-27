@@ -370,6 +370,80 @@ export const UmbracoManagementClient = <T>(
 };
 
 // ============================================================================
+// Fetch-shape Orval Mutator
+// ============================================================================
+
+/**
+ * Orval fetch-shape mutator for Umbraco Management API.
+ *
+ * Use this with `client: "fetch"` in your Orval config:
+ * ```typescript
+ * // orval.config.ts
+ * output: {
+ *   client: "fetch",
+ *   override: {
+ *     mutator: {
+ *       path: "@umbraco-cms/mcp-server-sdk",
+ *       name: "UmbracoManagementFetchClient",
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * Unlike {@link UmbracoManagementClient} which accepts an axios-style config object,
+ * this mutator uses the native fetch signature `(url, init)` matching Orval's
+ * `client: "fetch"` code-generation mode. This lets consumers drop any implied
+ * axios dependency from their orval config while keeping SDK-managed OAuth token flow.
+ *
+ * @param url - Request path (without base URL; base URL comes from initializeUmbracoFetch)
+ * @param init - Native RequestInit options (method, headers, body, signal, etc.)
+ * @returns Promise resolving to response data
+ */
+export const UmbracoManagementFetchClient = async <T>(
+  url: string,
+  init: RequestInit = {},
+): Promise<T> => {
+  if (!authConfig) {
+    throw new Error(
+      "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
+    );
+  }
+
+  const token = await getToken();
+  const fullUrl = `${authConfig.baseUrl}${url}`;
+
+  const headers = new Headers(init.headers);
+  if (!headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  const resp = await fetch(fullUrl, { ...init, headers });
+
+  let data: T;
+  const contentType = resp.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    data = (await resp.json()) as T;
+  } else {
+    const text = await resp.text();
+    data = (text || undefined) as T;
+  }
+
+  if (resp.status >= 400) {
+    console.error(`HTTP Error: ${resp.status}`, data);
+    const error = new Error(
+      `Request failed with status ${resp.status}: ${resp.statusText}`
+    );
+    (error as any).response = { status: resp.status, data };
+    throw error;
+  }
+
+  return data;
+};
+
+// ============================================================================
 // Factory (for advanced use cases)
 // ============================================================================
 
