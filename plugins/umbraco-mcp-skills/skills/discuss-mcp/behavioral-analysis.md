@@ -46,8 +46,8 @@ Read `docs/analysis/IGNORED_ENDPOINTS.md` if it exists. This file lists API endp
 Skim key tool files to assess description quality. Look at the `name`, `description`, `slices`, and `annotations` fields.
 
 **Key source files:**
-- `plugins/skills/count-mcp-tools/scripts/count-tools.ts` — reused for data
-- `plugins/skills/_shared/endpoint-analysis.ts` — shared endpoint discovery utilities
+- `plugins/umbraco-mcp-skills/skills/count-mcp-tools/scripts/count-tools.ts` — reused for data
+- `plugins/umbraco-mcp-skills/skills/_shared/endpoint-analysis.ts` — shared endpoint discovery utilities
 
 ## Analysis Dimensions
 

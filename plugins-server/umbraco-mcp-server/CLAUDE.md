@@ -9,7 +9,7 @@ Claude Code plugin providing skills for configuring, running, and debugging Umbr
 ## Structure
 
 ```
-plugins-server/
+plugins-server/umbraco-mcp-server/
 └── skills/
     └── mcp-cli/
         ├── SKILL.md              # CLI configuration and usage guide
