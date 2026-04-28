@@ -24,7 +24,6 @@ export default defineConfig({
     "dotenv",
     "yargs",
     "yargs/helpers",
-    "axios",
     "qs",
     "https",
   ],

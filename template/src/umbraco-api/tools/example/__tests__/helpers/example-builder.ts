@@ -98,8 +98,8 @@ export class ExampleBuilder {
 
     // Call API to create
     const client = getClient();
-    // Note: customInstance returns AxiosResponse type but actually returns data when returnFullResponse is not set
-    // We use returnFullResponse to get the full response with headers
+    // returnFullResponse gets the full HttpResponse (status + headers); without it
+    // customInstance just returns parsed data.
     const response: any = await client.createItem(payload, {
       returnFullResponse: true,
     } as any);

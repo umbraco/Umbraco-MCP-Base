@@ -47,7 +47,7 @@ npm run inspect
 ```
 ├── src/
 │   ├── api/
-│   │   ├── client.ts           # Axios client configuration
+│   │   ├── client.ts           # API client configuration
 │   │   └── generated/          # Orval-generated API code
 │   ├── tools/
 │   │   └── example/            # Example tool collection

@@ -14,7 +14,7 @@
  *
  * This package provides:
  * - Auth handlers (Umbraco OAuth flow, consent screen)
- * - Fetch-based API client (replaces Axios for Workers runtime)
+ * - Fetch-based API client for the Workers runtime
  * - Per-request McpServer factory (tool registration, filtering)
  * - Worker config loader (env bindings to SDK config)
  * - Default route handler (callback, landing page)

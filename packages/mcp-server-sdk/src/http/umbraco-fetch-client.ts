@@ -7,7 +7,7 @@
  * - Query string serialization for arrays
  * - Error logging
  *
- * Replaces the Axios-based client. Works in Node.js 22+ and Cloudflare Workers.
+ * Works in Node.js 22+ and Cloudflare Workers.
  *
  * @example
  * ```typescript
@@ -161,7 +161,6 @@ const getToken = async (): Promise<string> => {
  *
  * In non-production environments, automatically disables TLS certificate
  * verification to support self-signed certificates during local development.
- * This matches the behavior of the previous Axios-based client.
  *
  * @param config - Authentication configuration
  */
@@ -390,10 +389,9 @@ export const UmbracoManagementClient = <T>(
  * }
  * ```
  *
- * Unlike {@link UmbracoManagementClient} which accepts an axios-style config object,
+ * Unlike {@link UmbracoManagementClient} which accepts a config-object,
  * this mutator uses the native fetch signature `(url, init)` matching Orval's
- * `client: "fetch"` code-generation mode. This lets consumers drop any implied
- * axios dependency from their orval config while keeping SDK-managed OAuth token flow.
+ * `client: "fetch"` code-generation mode, while keeping SDK-managed OAuth token flow.
  *
  * @param url - Request path (without base URL; base URL comes from initializeUmbracoFetch)
  * @param init - Native RequestInit options (method, headers, body, signal, etc.)

@@ -4,7 +4,7 @@
  * Tests for the API call helper functions:
  * - UmbracoApiError - Custom error class
  * - configureApiClient / getApiClient - Client configuration
- * - CAPTURE_RAW_HTTP_RESPONSE - Axios options constant
+ * - CAPTURE_RAW_HTTP_RESPONSE - HTTP client options constant
  * - processVoidResponse - Void response handler
  * - executeVoidApiCall - Void API executor
  * - executeGetApiCall - GET API executor
@@ -622,7 +622,7 @@ describe("API Call Helpers", () => {
       )).toBe(true);
     });
 
-    it("should not warn for valid AxiosResponse", async () => {
+    it("should not warn for valid HttpResponse", async () => {
       const { configureApiClient, executeGetApiCall } = await getApiHelpersModule();
 
       const mockClient = new MockApiClient();

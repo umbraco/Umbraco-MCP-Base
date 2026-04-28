@@ -80,9 +80,8 @@ export interface CreateServerOptions {
    * The `client` is whatever this factory returns (via `configureApiClient`).
    *
    * If not provided, the Orval-generated client is used automatically via
-   * `setCustomTransport()` — the fetch client replaces Axios as the transport
-   * so the Orval client's named methods (e.g., `client.getTreeDataTypeRoot()`)
-   * work in the Workers runtime.
+   * `setCustomTransport()` so the Orval client's named methods (e.g.,
+   * `client.getTreeDataTypeRoot()`) work in the Workers runtime.
    *
    * Only provide this if you need a custom client setup beyond the Orval client.
    */
@@ -272,9 +271,9 @@ export async function createPerRequestServer(
   }
 
   // Set the fetch client as the transport for UmbracoManagementClient.
-  // This makes the Orval-generated API client (with named methods like
-  // client.getTreeDataTypeRoot()) use fetch instead of Axios, enabling
-  // it to work in the Cloudflare Workers runtime.
+  // This routes the Orval-generated API client (with named methods like
+  // client.getTreeDataTypeRoot()) through the Workers-compatible fetch
+  // transport configured by the host worker.
   setCustomTransport(fetchClient as any);
 
   // Configure the API client for tool handlers.
