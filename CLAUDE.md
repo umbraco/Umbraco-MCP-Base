@@ -152,11 +152,11 @@ All packages are versioned together and published from the `main` branch via Azu
    - `packages/hosted-mcp/package.json`
    - `packages/create-mcp-server/package.json`
    - `template/package.json`
-   - `plugins/package.json`
-   - `plugins/.claude-plugin/plugin.json`
+   - `plugins/umbraco-mcp-skills/package.json`
+   - `plugins/umbraco-mcp-skills/.claude-plugin/plugin.json`
    - `.claude-plugin/marketplace.json` (`metadata.version` and each `plugins[].version`)
 3. Run `npm install --package-lock-only` to update `package-lock.json`
-4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/package.json plugins/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
+4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/umbraco-mcp-skills/package.json plugins/umbraco-mcp-skills/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
 5. Commit, push, and create a PR from the release branch into `main`
 6. CI runs all tests including LLM evals and skill E2E (release PRs only)
 7. Merge when all checks pass — Azure Pipelines publishes packages to npm

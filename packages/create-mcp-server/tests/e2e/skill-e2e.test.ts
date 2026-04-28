@@ -64,7 +64,7 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     // Copy skills into the project
     const skillsDir = path.join(projectDir, ".claude", "skills");
     fs.mkdirSync(skillsDir, { recursive: true });
-    const pluginsDir = path.resolve(__dirname, "../../../../plugins/skills");
+    const pluginsDir = path.resolve(__dirname, "../../../../plugins/umbraco-mcp-skills/skills");
     for (const skill of ["build-tools", "build-tools-tests"]) {
       const src = path.join(pluginsDir, skill);
       const dest = path.join(skillsDir, skill);
