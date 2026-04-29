@@ -27,7 +27,11 @@ import {
   createLogoutCallbackHandler,
 } from "../auth/umbraco-handler.js";
 import type { ConsentModeOption, ConsentToolConfig } from "../auth/consent.js";
-import { type CreateServerOptions, type SiteResolver } from "./create-server.js";
+import {
+  type CreateServerOptions,
+  type InstructionsResolver,
+  type SiteResolver,
+} from "./create-server.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
 
 /**
@@ -67,6 +71,11 @@ export interface HostedMcpServerOptions {
   allSliceNames: readonly string[];
   /** Optional factory to create the API client (see CreateServerOptions.clientFactory) */
   clientFactory?: () => unknown;
+  /**
+   * Optional server-level instructions sent to clients on `initialize`.
+   * See `CreateServerOptions.instructions` for details.
+   */
+  instructions?: InstructionsResolver;
   /** Umbraco OAuth handler options */
   authOptions?: UmbracoAuthHandlerOptions;
   /** Enable tool selection on consent screen (auto-generates from mode registry) */
@@ -97,6 +106,9 @@ export function getServerOptions(
     clientFactory: options.clientFactory,
     multiSite: options.multiSite,
     resolveSite: options.resolveSite,
+    ...(options.instructions !== undefined
+      ? { instructions: options.instructions }
+      : {}),
   };
 }
 

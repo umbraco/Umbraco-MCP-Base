@@ -47,6 +47,7 @@ export {
   mergeConsentChoices,
   resolveRequestSite,
   type CreateServerOptions,
+  type InstructionsResolver,
   type SiteResolver,
 } from "./server/create-server.js";
 
