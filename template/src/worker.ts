@@ -78,6 +78,13 @@ const options = {
   enableConsentToolSelection: true,
   // Show "Log in as different user" button on the consent screen after first auth
   authOptions: { showReauthButton: true },
+  // Optional server-level instructions sent to clients on `initialize`. Most
+  // clients fold this into the model's system prompt, so it applies implicitly
+  // without per-tool repetition. Can also be a `(props, env) => string` callback
+  // for per-site / per-user guidance in multi-site deployments.
+  //
+  // instructions: "When summarising results, refer to items by name, not by ID.",
+  //
   // Uncomment for in-process chaining — adds chained server modes to consent screen:
   // chainedServers: [cmsChainedServer],
 };
