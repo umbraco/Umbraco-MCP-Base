@@ -124,13 +124,14 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 
 ## Pull Request CI Checks
 
-After creating or pushing to a PR, ask the user if they want you to monitor the CI build. If yes:
+**Always watch CI after creating or pushing to a PR. Be proactive — don't wait to be asked.**
 
-1. Wait for the GitHub Actions workflow to complete: `gh pr checks <pr-number> --watch`
-2. If checks fail, inspect the failure: `gh run view <run-id> --log-failed`
-3. Fix the issue, push, and repeat until CI is green
+1. Immediately after `gh pr create` or `git push` to a PR branch, run `gh pr checks <pr-number> --watch`
+2. If any check fails, inspect the failure: `gh run view <run-id> --log-failed`
+3. Fix the root cause, push, and re-watch until CI is green
+4. Only report the PR as done once CI is green (or explicitly call out which checks failed and why)
 
-Do not just push a PR and walk away — the CI build includes tests that don't run locally (CLI E2E with SQL Server, Playwright E2E, scaffolding compilation checks). Always offer to follow through, but respect that sometimes the user doesn't need this.
+Do not just push a PR and walk away — the CI build includes tests that don't run locally (CLI E2E with SQL Server, Playwright E2E, scaffolding compilation checks). The user should never have to ask "did CI pass?" — you should already be watching.
 
 ## Self-Signed Certificates
 
@@ -152,11 +153,11 @@ All packages are versioned together and published from the `main` branch via Azu
    - `packages/hosted-mcp/package.json`
    - `packages/create-mcp-server/package.json`
    - `template/package.json`
-   - `plugins/package.json`
-   - `plugins/.claude-plugin/plugin.json`
+   - `plugins/umbraco-mcp-skills/package.json`
+   - `plugins/umbraco-mcp-skills/.claude-plugin/plugin.json`
    - `.claude-plugin/marketplace.json` (`metadata.version` and each `plugins[].version`)
 3. Run `npm install --package-lock-only` to update `package-lock.json`
-4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/package.json plugins/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
+4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/umbraco-mcp-skills/package.json plugins/umbraco-mcp-skills/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
 5. Commit, push, and create a PR from the release branch into `main`
 6. CI runs all tests including LLM evals and skill E2E (release PRs only)
 7. Merge when all checks pass — Azure Pipelines publishes packages to npm

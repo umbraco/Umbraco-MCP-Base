@@ -24,7 +24,7 @@ The TypeScript script analyzes:
 From the consumer project root, run:
 
 ```bash
-npx tsx plugins/skills/update-ignored-endpoints/scripts/update-ignored-endpoints.ts
+npx tsx plugins/umbraco-mcp-skills/skills/update-ignored-endpoints/scripts/update-ignored-endpoints.ts
 ```
 
 Or use the skill through Claude Code:
@@ -87,7 +87,7 @@ Customize behavior with environment variables:
 
 Example:
 ```bash
-PROJECT_ROOT=/path/to/project npx tsx plugins/skills/update-ignored-endpoints/scripts/update-ignored-endpoints.ts
+PROJECT_ROOT=/path/to/project npx tsx plugins/umbraco-mcp-skills/skills/update-ignored-endpoints/scripts/update-ignored-endpoints.ts
 ```
 
 ## Implementation Details
