@@ -57,7 +57,17 @@ configureApiClient(() => getExampleUmbracoAddOnAPI());
 // MCP Server Setup
 // ============================================================================
 
-// Create MCP server
+// Create MCP server.
+// Pass an optional `instructions` string in the second argument to send
+// server-level guidance to clients during `initialize`. Most clients fold
+// this into the model's system prompt, so it applies implicitly without
+// per-tool repetition. Mirror the same value in `worker.ts` so stdio and
+// hosted deployments behave consistently.
+//
+// const server = new McpServer(
+//   { name: "my-umbraco-mcp", version: packageJson.version },
+//   { instructions: "When summarising results, refer to items by name, not by ID." },
+// );
 const server = new McpServer({
   name: "my-umbraco-mcp",
   version: packageJson.version,
