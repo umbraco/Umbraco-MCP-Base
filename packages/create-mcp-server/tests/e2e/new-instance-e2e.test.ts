@@ -237,6 +237,13 @@ describeOrSkip("new-instance E2E", () => {
     }
     fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 
+    // Force npm to copy file: deps instead of symlinking. Without this, file: refs
+    // symlink back to the monorepo, so SDK type imports (e.g. `import { ZodRawShape } from "zod"`)
+    // resolve against the workspace's zod, while consumer code resolves against the scaffold's zod.
+    // Different minor versions then trigger zod 4.4's _zod.version stamp mismatch and tsc fails.
+    // install-links makes file: deps install as full copies (matching real-npm behavior).
+    fs.writeFileSync(path.join(projectDir, ".npmrc"), "install-links=true\n");
+
     console.log("[new-instance-e2e] Step 1 passed: project scaffolded");
   });
 
@@ -915,6 +922,9 @@ describeOrSkip("new-instance container mode E2E", () => {
       pkg.dependencies["@umbraco-cms/mcp-hosted"] = `file:${path.join(monorepoRoot, "packages/hosted-mcp")}`;
     }
     fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+
+    // Force install-links so file: refs are copied (not symlinked) — see main E2E Step 1.
+    fs.writeFileSync(path.join(projectDir, ".npmrc"), "install-links=true\n");
 
     console.log("[Container E2E] Step 1 passed: project scaffolded");
   });
