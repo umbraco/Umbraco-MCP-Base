@@ -136,30 +136,6 @@ export default {
 };
 ```
 
-#### `UmbracoManagementFetchClient`
-
-Orval mutator with the native fetch signature `(url, init)`. Use with `client: "fetch"` for a pure-fetch toolchain — no implied axios shape anywhere in your generated code.
-
-```typescript
-// orval.config.ts
-export default {
-  myApi: {
-    output: {
-      client: 'fetch',
-      target: './src/api/client.ts',
-      override: {
-        mutator: {
-          path: '@umbraco-cms/mcp-server-sdk',
-          name: 'UmbracoManagementFetchClient',
-        }
-      }
-    }
-  }
-};
-```
-
-This variant throws on 4xx/5xx and returns parsed data; it does not support `returnFullResponse`. If you rely on the SDK's `executeGetApiCall` / `executeVoidApiCall` helpers and `CAPTURE_RAW_HTTP_RESPONSE`, use `UmbracoManagementClient` instead.
-
 #### `createUmbracoFetchClient(options)`
 
 Factory for creating isolated client instances (advanced use cases like testing or multiple Umbraco instances).

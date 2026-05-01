@@ -69,8 +69,7 @@ src/
 
 **HTTP Client:**
 - `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
-- `UmbracoManagementClient` - Orval mutator (config-object shape, for `client: "axios"`)
-- `UmbracoManagementFetchClient` - Orval mutator (native fetch shape, for `client: "fetch"`)
+- `UmbracoManagementClient` - Orval mutator for generated API clients
 - `createUmbracoFetchClient` - Factory for custom client instances (advanced)
 
 **CLI Helpers:**
