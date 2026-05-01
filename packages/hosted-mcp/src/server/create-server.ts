@@ -248,7 +248,7 @@ export async function createPerRequestServer(
       // Use Workers-compatible JSON Schema validator instead of Ajv.
       // Ajv uses new Function() which is blocked in Cloudflare Workers.
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
-      ...(instructions !== undefined ? { instructions } : {}),
+      instructions,
     },
   );
 

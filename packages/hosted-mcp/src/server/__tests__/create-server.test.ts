@@ -850,6 +850,12 @@ describe("createPerRequestServer", () => {
 });
 
 describe("createPerRequestServer with instructions", () => {
+  // Inspect the server-level `instructions` value that the MCP SDK sends
+  // to clients on `initialize`. The SDK keeps it in a private `_instructions`
+  // field on the underlying `Server`, so reach for it directly here.
+  const getInstructions = (server: { server: unknown }): string | undefined =>
+    (server.server as { _instructions?: string })._instructions;
+
   // Stub OAUTH_KV.get to return null so createFetchClientFromKV returns null
   // and we get the early "degraded server" path. The McpServer is constructed
   // before that early-return, so its _instructions field is observable.
@@ -887,8 +893,7 @@ describe("createPerRequestServer with instructions", () => {
       mockProps,
     );
 
-    expect((server.server as unknown as { _instructions?: string })._instructions)
-      .toBe("Refer to items by name, never by ID.");
+    expect(getInstructions(server)).toBe("Refer to items by name, never by ID.");
   });
 
   it("resolves a synchronous callback and forwards the result", async () => {
@@ -902,8 +907,7 @@ describe("createPerRequestServer with instructions", () => {
       mockProps,
     );
 
-    expect((server.server as unknown as { _instructions?: string })._instructions)
-      .toBe("Hello, Test User.");
+    expect(getInstructions(server)).toBe("Hello, Test User.");
   });
 
   it("awaits an async callback before constructing the Server", async () => {
@@ -917,16 +921,14 @@ describe("createPerRequestServer with instructions", () => {
       mockProps,
     );
 
-    expect((server.server as unknown as { _instructions?: string })._instructions)
-      .toBe("base=https://example.com");
+    expect(getInstructions(server)).toBe("base=https://example.com");
   });
 
   it("leaves instructions unset when the option is omitted", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     const server = await createPerRequestServer(baseOptions, mockEnv, mockProps);
 
-    expect((server.server as unknown as { _instructions?: string })._instructions)
-      .toBeUndefined();
+    expect(getInstructions(server)).toBeUndefined();
   });
 });
 

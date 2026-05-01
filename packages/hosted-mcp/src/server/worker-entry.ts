@@ -106,9 +106,7 @@ export function getServerOptions(
     clientFactory: options.clientFactory,
     multiSite: options.multiSite,
     resolveSite: options.resolveSite,
-    ...(options.instructions !== undefined
-      ? { instructions: options.instructions }
-      : {}),
+    instructions: options.instructions,
   };
 }
 
