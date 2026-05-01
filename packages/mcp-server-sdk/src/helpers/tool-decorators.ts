@@ -46,7 +46,7 @@ export {
  * Error handling priority:
  * 1. ToolValidationError - Business logic validation errors with context
  * 2. UmbracoApiError - API errors with ProblemDetails (from helpers)
- * 3. Axios errors - Network/HTTP errors with response data
+ * 3. HTTP errors - Network/transport errors with response data attached
  * 4. Standard errors - JavaScript errors with message
  * 5. Unknown errors - Anything else
  */
@@ -73,7 +73,7 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
         else if (error instanceof UmbracoApiError) {
           errorResult = createToolResultError(error.problemDetails);
         }
-        // Axios error with response data (network succeeded but got error response)
+        // HTTP error with response data attached (network succeeded but got error response)
         else if (error instanceof Error && (error as any).response?.data) {
           errorResult = createToolResultError((error as any).response.data);
         }

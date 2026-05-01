@@ -27,7 +27,7 @@ npm run clean          # Remove dist/
 ```
 src/
 ├── helpers/           # Tool result formatting, API call helpers, decorators
-├── http/              # Axios client, OAuth auth, Orval mutator
+├── http/              # Fetch client, OAuth auth, Orval mutators
 ├── types/             # ToolDefinition, ToolCollectionExport, etc.
 ├── config/            # Server configuration loading (getServerConfig)
 ├── tool-filtering/    # Mode/slice/collection filtering logic
@@ -68,10 +68,9 @@ src/
 - `configureApiClient` - Set up the API client provider
 
 **HTTP Client:**
-- `UmbracoAxios` - Pre-configured Axios instance with OAuth
-- `initializeUmbracoAxios` - Initialize with baseUrl, clientId, clientSecret
+- `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
 - `UmbracoManagementClient` - Orval mutator for generated API clients
-- `createUmbracoAxiosClient` - Factory for custom client instances (advanced)
+- `createUmbracoFetchClient` - Factory for custom client instances (advanced)
 
 **CLI Helpers:**
 - `handleCliCommands` - One-call handler for `--list-tools`, `--describe-tool`, `--generate-context` (prints + exits if a flag is set)

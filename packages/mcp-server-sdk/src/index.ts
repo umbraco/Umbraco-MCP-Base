@@ -279,20 +279,12 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
-  // Backwards-compatible aliases (deprecated — use Fetch variants)
-  initializeUmbracoAxios,
-  isUmbracoAxiosInitialized,
-  clearUmbracoAxiosToken,
-  createUmbracoAxiosClient,
   // Orval helpers
   orvalImportFixer,
   // Types
   type UmbracoFetchAuthConfig,
-  type UmbracoAxiosAuthConfig,
   type UmbracoManagementClientOptions,
   type CustomTransport,
   type CreateUmbracoFetchClientOptions,
-  type CreateUmbracoAxiosClientOptions,
   type UmbracoFetchClientResult,
-  type UmbracoAxiosClientResult,
 } from "./http/index.js";

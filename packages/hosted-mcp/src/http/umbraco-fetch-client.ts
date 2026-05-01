@@ -1,8 +1,7 @@
 /**
  * Umbraco Fetch Client
  *
- * A fetch-based API client for Cloudflare Workers runtime.
- * Replaces the Axios-based client used in stdio mode.
+ * A fetch-based API client for the Cloudflare Workers runtime.
  *
  * Returns responses matching the HttpResponse interface from the SDK,
  * compatible with api-call-helpers' validation logic.
@@ -80,8 +79,8 @@ export interface UmbracoFetchClientConfig {
 /**
  * Creates a fetch-based Umbraco API client for use in Workers.
  *
- * The returned function matches the Orval mutator signature so it can be
- * used as a drop-in replacement for the Axios-based UmbracoManagementClient.
+ * The returned function matches the Orval mutator signature, so it can serve
+ * as the transport behind UmbracoManagementClient (via setCustomTransport).
  *
  * @param config - Client configuration with base URL and access token
  * @returns A mutator function compatible with Orval-generated API clients

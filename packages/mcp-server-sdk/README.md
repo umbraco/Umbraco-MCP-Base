@@ -92,46 +92,38 @@ export default collection;
 
 ### HTTP Client
 
-The SDK provides a pre-configured Axios client for Umbraco Management API with OAuth authentication.
+The SDK provides a fetch-based client for the Umbraco Management API with OAuth authentication. Works in Node.js 22+ and Cloudflare Workers — no extra HTTP client dependency required.
 
-#### `initializeUmbracoAxios(config)`
+#### `initializeUmbracoFetch(config)`
 
 Initialize the HTTP client at application startup. Must be called before making API requests.
 
 ```typescript
-import { initializeUmbracoAxios } from '@umbraco-cms/mcp-server-sdk';
+import { initializeUmbracoFetch } from '@umbraco-cms/mcp-server-sdk';
 
-initializeUmbracoAxios({
+initializeUmbracoFetch({
   baseUrl: 'https://localhost:44391',
   clientId: 'my-client-id',
   clientSecret: 'my-client-secret'
 });
 ```
 
-#### `UmbracoAxios`
-
-Pre-configured Axios instance with:
+Features:
 - Automatic OAuth token refresh
 - Self-signed certificate support in development
-- Query string serialization for arrays
+- Repeat-style query string serialization for array params
 - Error logging
-
-```typescript
-import { UmbracoAxios } from '@umbraco-cms/mcp-server-sdk';
-
-// Direct use (after initialization)
-const response = await UmbracoAxios.get('/umbraco/management/api/v1/document');
-```
 
 #### `UmbracoManagementClient`
 
-Orval mutator for generated API clients. Configure in your Orval config:
+Orval mutator for generated API clients. Use with `client: "axios"` in your Orval config — the mutator accepts a config-object shape `{ url, method, params, data, headers }` and supports `returnFullResponse` for the SDK's `CAPTURE_RAW_HTTP_RESPONSE` helpers.
 
 ```typescript
 // orval.config.ts
 export default {
   myApi: {
     output: {
+      client: 'axios',
       target: './src/api/client.ts',
       override: {
         mutator: {
@@ -144,14 +136,14 @@ export default {
 };
 ```
 
-#### `createUmbracoAxiosClient(options)`
+#### `createUmbracoFetchClient(options)`
 
 Factory for creating isolated client instances (advanced use cases like testing or multiple Umbraco instances).
 
 ```typescript
-import { createUmbracoAxiosClient } from '@umbraco-cms/mcp-server-sdk';
+import { createUmbracoFetchClient } from '@umbraco-cms/mcp-server-sdk';
 
-const { client, mutator, initialize, clearToken } = createUmbracoAxiosClient();
+const { mutator, initialize, clearToken } = createUmbracoFetchClient();
 initialize({ baseUrl, clientId, clientSecret });
 ```
 

@@ -7,7 +7,7 @@
  * - Query string serialization for arrays
  * - Error logging
  *
- * Replaces the Axios-based client. Works in Node.js 22+ and Cloudflare Workers.
+ * Works in Node.js 22+ and Cloudflare Workers.
  *
  * @example
  * ```typescript
@@ -161,7 +161,6 @@ const getToken = async (): Promise<string> => {
  *
  * In non-production environments, automatically disables TLS certificate
  * verification to support self-signed certificates during local development.
- * This matches the behavior of the previous Axios-based client.
  *
  * @param config - Authentication configuration
  */

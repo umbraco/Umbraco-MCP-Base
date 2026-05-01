@@ -848,3 +848,127 @@ describe("createPerRequestServer", () => {
     expect(typeof createPerRequestServer).toBe("function");
   });
 });
+
+describe("createPerRequestServer with instructions", () => {
+  // Inspect the server-level `instructions` value that the MCP SDK sends
+  // to clients on `initialize`. The SDK keeps it in a private `_instructions`
+  // field on the underlying `Server`, so reach for it directly here.
+  const getInstructions = (server: { server: unknown }): string | undefined =>
+    (server.server as { _instructions?: string })._instructions;
+
+  // Stub OAUTH_KV.get to return null so createFetchClientFromKV returns null
+  // and we get the early "degraded server" path. The McpServer is constructed
+  // before that early-return, so its _instructions field is observable.
+  const mockEnv = {
+    UMBRACO_BASE_URL: "https://example.com",
+    UMBRACO_OAUTH_CLIENT_ID: "test-client",
+    COOKIE_ENCRYPTION_KEY: "0".repeat(64),
+    OAUTH_KV: {
+      get: async () => null,
+      put: async () => undefined,
+      delete: async () => undefined,
+    },
+  } as unknown as HostedMcpEnv;
+
+  const mockProps: AuthProps = {
+    userId: "user-1",
+    userName: "Test User",
+    umbracoTokenKey: "token-key",
+  };
+
+  const baseOptions = {
+    name: "test-server",
+    version: "1.0.0",
+    collections: [],
+    modeRegistry: [],
+    allModeNames: [],
+    allSliceNames: [],
+  };
+
+  it("forwards a static instructions string to the underlying Server", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, instructions: "Refer to items by name, never by ID." },
+      mockEnv,
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toBe("Refer to items by name, never by ID.");
+  });
+
+  it("resolves a synchronous callback and forwards the result", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      {
+        ...baseOptions,
+        instructions: (props) => `Hello, ${props.userName}.`,
+      },
+      mockEnv,
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toBe("Hello, Test User.");
+  });
+
+  it("awaits an async callback before constructing the Server", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      {
+        ...baseOptions,
+        instructions: async (_props, env) => `base=${env.UMBRACO_BASE_URL}`,
+      },
+      mockEnv,
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toBe("base=https://example.com");
+  });
+
+  it("leaves instructions unset when the option is omitted", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, mockEnv, mockProps);
+
+    expect(getInstructions(server)).toBeUndefined();
+  });
+});
+
+describe("getServerOptions with instructions", () => {
+  it("forwards a static instructions string", () => {
+    const hostedOptions: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: [],
+      instructions: "Be concise.",
+    };
+    expect(getServerOptions(hostedOptions).instructions).toBe("Be concise.");
+  });
+
+  it("forwards an instructions callback by reference", () => {
+    const fn = (props: AuthProps) => `Hi ${props.userName}`;
+    const hostedOptions: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: [],
+      instructions: fn,
+    };
+    expect(getServerOptions(hostedOptions).instructions).toBe(fn);
+  });
+
+  it("does not include instructions when not set", () => {
+    const hostedOptions: HostedMcpServerOptions = {
+      name: "test",
+      version: "1.0.0",
+      collections: [],
+      modeRegistry: [],
+      allModeNames: [],
+      allSliceNames: [],
+    };
+    expect(getServerOptions(hostedOptions).instructions).toBeUndefined();
+  });
+});

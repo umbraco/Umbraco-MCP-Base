@@ -42,7 +42,7 @@ This package provides **library code** that consumers use in their `worker.ts`. 
 - `mergeConsentChoices()` - Narrow admin config with user consent choices
 - `loadSiteConfig()` - Merge site-specific filter overrides
 - Auth handlers (Umbraco OAuth flow, consent screen with tool selection)
-- Fetch-based API client (replaces Axios for Workers)
+- Fetch-based API client for the Workers runtime
 - Worker config loader (env bindings to SDK config)
 - Type definitions (`HostedMcpEnv`, `AuthProps`, `ConsentChoices`, `SiteConfig`, `MultiSiteConfig`)
 

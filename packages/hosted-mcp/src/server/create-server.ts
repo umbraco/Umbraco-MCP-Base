@@ -58,6 +58,19 @@ export type SiteResolver = (
 ) => SiteConfig | null | Promise<SiteConfig | null>;
 
 /**
+ * Resolves to a server-level `instructions` string that the MCP server sends
+ * to clients during the `initialize` handshake. Most clients fold this into
+ * the model's system prompt, so it applies implicitly without per-tool repetition.
+ *
+ * Pass a string for a constant instruction, or a callback to compute one
+ * per-request — useful for multi-site deployments where each site wants its
+ * own editorial guidance, or for personalising guidance based on the user.
+ */
+export type InstructionsResolver =
+  | string
+  | ((props: AuthProps, env: HostedMcpEnv) => string | Promise<string>);
+
+/**
  * Options for creating a per-request McpServer.
  */
 export interface CreateServerOptions {
@@ -74,15 +87,20 @@ export interface CreateServerOptions {
   /** All valid slice names */
   allSliceNames: readonly string[];
   /**
+   * Optional server-level instructions sent to clients on `initialize`.
+   * Pass a string, or a callback that receives the per-request `AuthProps`
+   * and `env` (e.g. for site- or user-specific guidance).
+   */
+  instructions?: InstructionsResolver;
+  /**
    * Optional factory to create the API client used by tool handlers.
    *
    * Tool handlers call `executeGetApiCall((client) => client.someMethod(...))`.
    * The `client` is whatever this factory returns (via `configureApiClient`).
    *
    * If not provided, the Orval-generated client is used automatically via
-   * `setCustomTransport()` — the fetch client replaces Axios as the transport
-   * so the Orval client's named methods (e.g., `client.getTreeDataTypeRoot()`)
-   * work in the Workers runtime.
+   * `setCustomTransport()` so the Orval client's named methods (e.g.,
+   * `client.getTreeDataTypeRoot()`) work in the Workers runtime.
    *
    * Only provide this if you need a custom client setup beyond the Orval client.
    */
@@ -218,12 +236,18 @@ export async function createPerRequestServer(
   env: HostedMcpEnv,
   props: AuthProps
 ): Promise<McpServer> {
+  const instructions =
+    typeof options.instructions === "function"
+      ? await options.instructions(props, env)
+      : options.instructions;
+
   const server = new McpServer(
     { name: options.name, version: options.version },
     {
       // Use Workers-compatible JSON Schema validator instead of Ajv.
       // Ajv uses new Function() which is blocked in Cloudflare Workers.
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+      instructions,
     },
   );
 
@@ -272,9 +296,9 @@ export async function createPerRequestServer(
   }
 
   // Set the fetch client as the transport for UmbracoManagementClient.
-  // This makes the Orval-generated API client (with named methods like
-  // client.getTreeDataTypeRoot()) use fetch instead of Axios, enabling
-  // it to work in the Cloudflare Workers runtime.
+  // This routes the Orval-generated API client (with named methods like
+  // client.getTreeDataTypeRoot()) through the Workers-compatible fetch
+  // transport configured by the host worker.
   setCustomTransport(fetchClient as any);
 
   // Configure the API client for tool handlers.
