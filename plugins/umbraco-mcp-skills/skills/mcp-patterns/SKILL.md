@@ -114,7 +114,7 @@ Tools are categorized by operation type:
 ```
 src/
 ├── api/
-│   ├── client.ts           # Axios client with mock support
+│   ├── client.ts           # API client with mock support
 │   ├── openapi.yaml        # OpenAPI spec
 │   └── generated/          # Orval-generated client + Zod schemas
 ├── tools/
@@ -135,7 +135,7 @@ npm run generate
 ```
 
 Configuration in `orval.config.ts`:
-- Generates TypeScript client with Axios
+- Generates TypeScript client (configurable via `client` option)
 - Generates Zod schemas for validation
 - Uses custom mutator for authentication
 

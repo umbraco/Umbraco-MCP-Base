@@ -40,11 +40,8 @@ import { pickFields, omitFields } from "./response-trimmer.js";
 
 /**
  * Transport-agnostic HTTP response interface.
- * Compatible with AxiosResponse, native fetch Response wrappers,
- * and any other HTTP client that provides status, statusText, and data.
- *
- * Use this type when building transport-independent code (e.g., hosted MCP
- * servers using fetch instead of Axios).
+ * Compatible with native fetch Response wrappers and any other HTTP client
+ * that provides status, statusText, and data.
  */
 export interface HttpResponse<T = unknown> {
   status: number;
@@ -304,8 +301,8 @@ export function processVoidResponse(
  * 4. Returns MCP-formatted response with ProblemDetails on error
  *
  * ## IMPORTANT: You MUST pass CAPTURE_RAW_HTTP_RESPONSE
- * Without it, Axios throws on 400+ errors instead of returning them,
- * breaking the status code handling in this function.
+ * Without it, the underlying transport throws on 400+ errors instead of
+ * returning them, breaking the status code handling in this function.
  *
  * @param apiCall - Function receiving the client and returning the API promise
  * @returns MCP tool result with success (empty) or ProblemDetails error
@@ -334,8 +331,8 @@ export function executeVoidApiCall<TClient = any>(
  * 4. Returns MCP-formatted response with data on success, ProblemDetails on error
  *
  * ## IMPORTANT: You MUST pass CAPTURE_RAW_HTTP_RESPONSE
- * Without it, Axios throws on 400+ errors instead of returning them,
- * breaking the status code handling in this function.
+ * Without it, the underlying transport throws on 400+ errors instead of
+ * returning them, breaking the status code handling in this function.
  *
  * @typeParam T - The expected response data type on success
  * @param apiCall - Function receiving the client and returning the API promise
@@ -418,8 +415,8 @@ export function executeVoidApiCallWithOptions<TClient = any>(
  * for tree operations, collection endpoints, and search results.
  *
  * ## IMPORTANT: You MUST pass CAPTURE_RAW_HTTP_RESPONSE
- * Without it, Axios throws on 400+ errors instead of returning them,
- * breaking the status code handling in this function.
+ * Without it, the underlying transport throws on 400+ errors instead of
+ * returning them, breaking the status code handling in this function.
  *
  * @typeParam T - The expected response data type (usually an array or collection)
  * @param apiCall - Function receiving the client and returning the API promise
