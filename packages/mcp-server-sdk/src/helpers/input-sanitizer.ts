@@ -43,19 +43,22 @@ export function rejectControlCharacters(value: string, fieldName: string): void 
 }
 
 /**
- * Reject path traversal sequences (../, ..\) and Windows absolute paths.
- * Prevents agents from hallucinating file system paths into API parameters.
+ * Reject path traversal sequences (`../`, `..\`).
  *
- * Note: Paths starting with `/` are allowed because Umbraco uses `/`-prefixed
- * paths as identifiers for stylesheets, scripts, partial views, and static files.
+ * Absolute paths (POSIX `/...`, Windows `C:\...`, UNC `\\server\share`) are
+ * intentionally allowed: whether a given absolute path is permitted is a
+ * policy decision (e.g. an allowlist with `fs.realpathSync`) that belongs to
+ * the consumer, not to a generic input sanitiser. Absolute paths on their own
+ * are not a traversal attack — `path.resolve("/etc/passwd")` is just
+ * `/etc/passwd`. See https://github.com/umbraco/Umbraco-MCP-Base/issues/86.
  *
- * @throws ToolValidationError if path traversal is detected
+ * @throws ToolValidationError if a `..` traversal segment is detected
  */
 export function rejectPathTraversal(value: string, fieldName: string): void {
-  if (/\.\.[\\/]/.test(value) || /^[\\]/.test(value) || /^[a-zA-Z]:[\\/]/.test(value)) {
+  if (/\.\.[\\/]/.test(value)) {
     throw new ToolValidationError({
       title: "Invalid Input",
-      detail: `Field '${fieldName}' contains a path traversal or absolute path. Use a relative identifier (e.g., a name or UUID), not a file system path.`,
+      detail: `Field '${fieldName}' contains a path traversal sequence ('../' or '..\\'). Remove the parent-directory segment and provide a direct path or identifier.`,
       extensions: { field: fieldName },
     });
   }
