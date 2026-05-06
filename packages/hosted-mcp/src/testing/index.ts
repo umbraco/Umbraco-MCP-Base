@@ -7,8 +7,12 @@ export {
 
 export {
   handleOAuthFlow,
+  authenticateUmbracoCloudSso,
+  handleUmbracoCloudOAuthFlow,
   type ConsentOptions,
   type OAuthCredentials,
+  type OAuthFlowOptions,
+  type UmbracoCloudSsoOptions,
 } from "./oauth-flow.js";
 
 export {

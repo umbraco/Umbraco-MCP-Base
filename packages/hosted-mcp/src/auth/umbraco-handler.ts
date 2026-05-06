@@ -22,9 +22,13 @@
  */
 
 import type { HostedMcpEnv, OAuthAuthRequest } from "../types/env.js";
-import type { SiteConfig } from "../types/multi-site.js";
+import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { consentResponse, type ConsentScreenOptions, type ConsentToolConfig } from "./consent.js";
+import {
+  buildPrefixRegex,
+  extractSiteIdFromResource,
+} from "../site-routing/path-prefix.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -202,6 +206,73 @@ export function createAuthorizeHandler(
 ) {
   const scopes = options?.scopes ?? ["openid", "offline_access"];
 
+  // Pre-compile prefix regex once when site routing is configured.
+  const siteRouting = options?.siteRouting;
+  const sitePrefixRegex = siteRouting
+    ? buildPrefixRegex(siteRouting.pathPrefix)
+    : null;
+
+  /**
+   * Resolve the site for a given OAuth `resource` parameter using the
+   * configured siteRouting. Returns:
+   * - `{ ok: true, site }` on success
+   * - `{ ok: false, response }` when the request should be rejected (with the
+   *   response to return)
+   */
+  const resolveSiteFromResource = async (
+    resource: OAuthAuthRequest["resource"]
+  ): Promise<
+    | { ok: true; site: SiteConfig }
+    | { ok: false; response: Response }
+  > => {
+    if (!siteRouting || !sitePrefixRegex) {
+      throw new Error("resolveSiteFromResource called without siteRouting");
+    }
+    const siteId = extractSiteIdFromResource(resource, sitePrefixRegex);
+    if (!siteId) {
+      return {
+        ok: false,
+        response: new Response(
+          JSON.stringify({
+            error: "invalid_request",
+            error_description:
+              "OAuth `resource` parameter is required for URL-based site routing",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        ),
+      };
+    }
+    let site: SiteConfig | null;
+    try {
+      site = await siteRouting.resolveSite(siteId, env);
+    } catch (err) {
+      console.error(`siteRouting.resolveSite threw for "${siteId}":`, err);
+      return {
+        ok: false,
+        response: new Response(
+          JSON.stringify({
+            error: "bad_gateway",
+            error_description: "Failed to resolve site",
+          }),
+          { status: 502, headers: { "Content-Type": "application/json" } }
+        ),
+      };
+    }
+    if (!site) {
+      return {
+        ok: false,
+        response: new Response(
+          JSON.stringify({
+            error: "invalid_request",
+            error_description: `Unknown site: ${siteId}`,
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        ),
+      };
+    }
+    return { ok: true, site };
+  };
+
   return async (
     request: Request,
     authRequest: OAuthAuthRequest
@@ -239,10 +310,25 @@ export function createAuthorizeHandler(
       }
 
       // User approved or wants to reauth — extract consent choices from form
-      const consentChoices = parseConsentChoices(formData);
+      let consentChoices = parseConsentChoices(formData);
 
-      // Resolve site-specific config if multi-site
-      const site = resolveSite(consentChoices?.siteId, options?.sites);
+      // Resolve site-specific config.
+      // - URL-based site routing: read siteId from authRequest.resource
+      //   (set by the MCP client per the spec) and call resolveSite.
+      // - Static multi-site: read siteId from the consent form.
+      // - Single-site: fall back to env vars.
+      let site: SiteConfig | undefined;
+      if (siteRouting) {
+        const result = await resolveSiteFromResource(authRequest.resource);
+        if (!result.ok) return result.response;
+        site = result.site;
+        // Carry siteId through consentChoices so the per-request server can
+        // look up the site again with the same resolveSite callback.
+        consentChoices = { ...(consentChoices ?? {}), siteId: result.site.id };
+      } else {
+        site = resolveSite(consentChoices?.siteId, options?.sites);
+      }
+
       const siteBaseUrl = site?.baseUrl ?? env.UMBRACO_BASE_URL;
       const siteServerUrl = site?.serverUrl ?? env.UMBRACO_SERVER_URL;
       const siteClientId = site?.oauthClientId ?? env.UMBRACO_OAUTH_CLIENT_ID;
@@ -306,12 +392,32 @@ export function createAuthorizeHandler(
       clientId: authRequest.clientId,
     });
 
-    // Build sites list for consent screen (simplified to what the UI needs)
-    const consentSites = options?.sites?.map((s) => ({
-      id: s.id,
-      displayName: s.displayName,
-      baseUrl: s.baseUrl,
-    }));
+    // Resolve the site at consent-render time when URL-based site routing is on.
+    // This both validates the resource parameter early and lets us show the
+    // resolved site's display name + base URL on the consent screen.
+    let routedSite: SiteConfig | undefined;
+    if (siteRouting) {
+      const result = await resolveSiteFromResource(authRequest.resource);
+      if (!result.ok) return result.response;
+      routedSite = result.site;
+    }
+
+    // Build sites list for consent screen.
+    // - URL-based routing: single resolved site (renders as a hidden input, no picker).
+    // - Static multi-site: the configured list (renders as a radio picker).
+    const consentSites = routedSite
+      ? [
+          {
+            id: routedSite.id,
+            displayName: routedSite.displayName,
+            baseUrl: routedSite.baseUrl,
+          },
+        ]
+      : options?.sites?.map((s) => ({
+          id: s.id,
+          displayName: s.displayName,
+          baseUrl: s.baseUrl,
+        }));
 
     // Show reauth button only when the operator enabled it AND this client
     // has completed at least one auth flow before (KV marker exists)
@@ -322,7 +428,7 @@ export function createAuthorizeHandler(
 
     return consentResponse({
       clientName: authRequest.clientId,
-      umbracoBaseUrl: env.UMBRACO_BASE_URL,
+      umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
       scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
       redirectUri: authRequest.redirectUri,
       actionUrl: url.toString(),

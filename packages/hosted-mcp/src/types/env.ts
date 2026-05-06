@@ -111,6 +111,10 @@ export interface HostedMcpEnv {
   /** Set to "true" to enable tool selection on the consent screen */
   ENABLE_CONSENT_TOOL_SELECTION?: string;
 
+  // Umbraco Cloud (optional, used by `umbracoCloudSiteRouting`)
+  /** Cloud region used for `{alias}.{region}.umbraco.io` URL composition (default "euwest01"). */
+  UMBRACO_CLOUD_REGION?: string;
+
   // Diagnostic (optional)
   /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
   ENABLE_INFO_ENDPOINT?: string;

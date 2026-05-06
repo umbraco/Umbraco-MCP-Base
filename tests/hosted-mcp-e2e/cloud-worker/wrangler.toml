@@ -1,0 +1,20 @@
+# Wrangler config for the Cloud-routing E2E worker.
+# Spawned by tests/hosted-mcp-e2e/e2e/helpers/cloud-worker-setup.ts.
+
+name = "umbraco-cloud-routing-e2e"
+main = "./worker.ts"
+compatibility_date = "2025-02-24"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "cloud-e2e-test-kv"
+
+[durable_objects]
+bindings = [
+  { name = "MCP_AGENT", class_name = "UmbracoMcpAgent" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UmbracoMcpAgent"]
