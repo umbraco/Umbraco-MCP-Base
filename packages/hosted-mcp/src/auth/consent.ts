@@ -434,7 +434,10 @@ if (form) {
 function renderSiteSelection(
   sites: { id: string; displayName: string; baseUrl: string }[]
 ): string {
-  // Single site: hidden field (no need for user to choose)
+  // Single site: hidden field (no need for user to choose).
+  // This branch covers both the operator-configured single-site case and
+  // URL-based site routing, where the authorize handler resolves the site
+  // from the OAuth `resource` parameter and passes a 1-element list.
   if (sites.length === 1) {
     const site = sites[0];
     return `<input type="hidden" name="siteId" value="${escapeHtml(site.id)}" />

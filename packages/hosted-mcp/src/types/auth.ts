@@ -6,7 +6,7 @@
  * pulling in auth implementation code.
  */
 
-import type { SiteConfig } from "./multi-site.js";
+import type { SiteConfig, SiteRoutingConfig } from "./multi-site.js";
 import type { ConsentToolConfig, ConsentScreenOptions } from "../auth/consent.js";
 
 /**
@@ -72,6 +72,12 @@ export interface UmbracoAuthHandlerOptions {
   renderConsent?: (options: ConsentScreenOptions) => string;
   /** Available sites for multi-site deployments (shown as a picker on consent screen) */
   sites?: SiteConfig[];
+  /**
+   * URL-based site routing config. When provided, the authorize handler reads
+   * the site identifier from the OAuth `resource` parameter and resolves it
+   * via `siteRouting.resolveSite` rather than presenting a site picker.
+   */
+  siteRouting?: SiteRoutingConfig;
   /** Show a "Log in as different user" button on the consent screen (uses RP-Initiated Logout) */
   showReauthButton?: boolean;
 }
