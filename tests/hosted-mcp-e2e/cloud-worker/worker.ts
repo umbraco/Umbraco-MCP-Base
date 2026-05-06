@@ -15,6 +15,7 @@ import {
   createDefaultHandler,
   createWorkerExport,
   createPerRequestServer,
+  createSiteRoutingApiHandler,
   getServerOptions,
   type HostedMcpEnv,
   type AuthProps,
@@ -73,35 +74,17 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const options = buildOptions(env);
-    const baseApiHandler = UmbracoMcpAgent.serve("/mcp", {
-      binding: "MCP_AGENT",
-    });
     const provider = new OAuthProvider({
-      // Include both `/mcp` and `/at/` so OAuthProvider validates the access
-      // token audience against the original site-routed URL before the rewrite.
       apiRoute: ["/mcp", "/at/"],
-      apiHandler: {
-        async fetch(
-          req: Request,
-          e: CloudWorkerEnv,
-          c: ExecutionContext,
-        ) {
-          const url = new URL(req.url);
-          if (url.pathname.startsWith("/at/")) {
-            const rewritten = new URL(req.url);
-            rewritten.pathname = "/mcp";
-            req = new Request(rewritten.toString(), req);
-          }
-          return (baseApiHandler as any).fetch(req, e, c);
-        },
-      } as any,
+      apiHandler: createSiteRoutingApiHandler(
+        UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }) as { fetch: (r: Request, e: CloudWorkerEnv, c: ExecutionContext) => Promise<Response> }
+      ) as any,
       defaultHandler: createDefaultHandler(options) as any,
       authorizeEndpoint: "/authorize",
       tokenEndpoint: "/token",
       clientRegistrationEndpoint: "/register",
     });
 
-    const worker = createWorkerExport(provider as any, options);
-    return worker.fetch(request, env, ctx);
+    return createWorkerExport(provider as any, options).fetch(request, env, ctx);
   },
 };

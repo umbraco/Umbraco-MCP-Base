@@ -25,6 +25,7 @@ import {
   createDefaultHandler,
   createWorkerExport,
   createPerRequestServer,
+  createSiteRoutingApiHandler,
   getServerOptions,
   type HostedMcpEnv,
   type AuthProps,
@@ -172,25 +173,11 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
  * `/at/{alias}/` → `/mcp` rewrite happens INSIDE `apiHandler` below, after
  * token validation.
  */
-const baseApiHandler = UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" });
-
 const provider = new OAuthProvider({
   apiRoute: ["/mcp", "/at/"],
-  apiHandler: {
-    async fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext) {
-      const url = new URL(request.url);
-      // siteRouting URLs reach apiHandler unchanged so the audience check
-      // above sees them. Rewrite to /mcp internally so McpAgent.serve("/mcp")
-      // dispatches the request.
-      if (url.pathname.startsWith("/at/")) {
-        const rewritten = new URL(request.url);
-        rewritten.pathname = "/mcp";
-        request = new Request(rewritten.toString(), request);
-      }
-      return (baseApiHandler as { fetch: (r: Request, e: HostedMcpEnv, c: ExecutionContext) => Promise<Response> })
-        .fetch(request, env, ctx);
-    },
-  } as any,
+  apiHandler: createSiteRoutingApiHandler(
+    UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }) as { fetch: (r: Request, e: HostedMcpEnv, c: ExecutionContext) => Promise<Response> }
+  ) as any,
   defaultHandler: createDefaultHandler(options) as any,
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
