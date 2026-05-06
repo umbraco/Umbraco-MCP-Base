@@ -81,6 +81,7 @@ exports[`template structure should match the expected file listing 1`] = `
   "tests/hosted-e2e/wrangler.e2e.toml",
   "tsconfig.json",
   "tsup.config.ts",
+  "umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs",
   "umbraco/McpOAuthComposer.cs",
   "umbraco/ProgramSnippet.cs",
   "wrangler.toml",
