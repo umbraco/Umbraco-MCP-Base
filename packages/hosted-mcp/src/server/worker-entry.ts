@@ -19,8 +19,12 @@ import type {
   ToolModeDefinition,
 } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
-import type { MultiSiteConfig } from "../types/multi-site.js";
+import type {
+  MultiSiteConfig,
+  SiteRoutingConfig,
+} from "../types/multi-site.js";
 import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
+import { createSiteRouter } from "../site-routing/site-router.js";
 import {
   createAuthorizeHandler,
   createCallbackHandler,
@@ -80,11 +84,19 @@ export interface HostedMcpServerOptions {
   authOptions?: UmbracoAuthHandlerOptions;
   /** Enable tool selection on consent screen (auto-generates from mode registry) */
   enableConsentToolSelection?: boolean;
-  /** Multi-site deployment configuration */
+  /** Multi-site deployment configuration (static list with consent-screen picker). */
   multiSite?: MultiSiteConfig;
   /** Dynamic site resolver for URL-based site routing.
    *  See CreateServerOptions.resolveSite for details. */
   resolveSite?: SiteResolver;
+  /**
+   * URL-based site routing — encodes the target site in the MCP endpoint URL
+   * (e.g. `/at/{alias}/`) instead of asking the user to pick on the consent screen.
+   *
+   * Mutually exclusive with `multiSite`. When provided, supersedes `resolveSite`
+   * for both the worker entry rewrite and per-request site lookup.
+   */
+  siteRouting?: SiteRoutingConfig;
   /** Chained MCP servers to include on consent screen and /info endpoint */
   chainedServers?: ChainedServerConsentConfig[];
 }
@@ -92,10 +104,18 @@ export interface HostedMcpServerOptions {
 /**
  * Extracts CreateServerOptions from HostedMcpServerOptions.
  * Used internally to pass to createPerRequestServer.
+ *
+ * Throws when mutually-exclusive site configurations are combined.
  */
 export function getServerOptions(
   options: HostedMcpServerOptions
 ): CreateServerOptions {
+  if (options.siteRouting && options.multiSite) {
+    throw new Error(
+      "siteRouting and multiSite are mutually exclusive — choose one."
+    );
+  }
+
   return {
     name: options.name,
     version: options.version,
@@ -105,7 +125,7 @@ export function getServerOptions(
     allSliceNames: options.allSliceNames,
     clientFactory: options.clientFactory,
     multiSite: options.multiSite,
-    resolveSite: options.resolveSite,
+    resolveSite: options.siteRouting?.resolveSite ?? options.resolveSite,
     instructions: options.instructions,
   };
 }
@@ -217,6 +237,7 @@ export function createDefaultHandler(options: HostedMcpServerOptions) {
         ...options.authOptions,
         ...(consentToolConfig ? { consentToolConfig } : {}),
         ...(options.multiSite ? { sites: options.multiSite.sites } : {}),
+        ...(options.siteRouting ? { siteRouting: options.siteRouting } : {}),
       };
 
       return handleDefaultRequest(request, env, options, effectiveAuthOptions);
@@ -250,28 +271,74 @@ export function createWorkerExport(
   oauthProvider: OAuthProviderLike,
   options: HostedMcpServerOptions,
 ) {
+  // Validate mutual exclusivity early — fail at boot, not at first request.
+  if (options.siteRouting && options.multiSite) {
+    throw new Error(
+      "siteRouting and multiSite are mutually exclusive — choose one."
+    );
+  }
+
+  // When URL-based site routing is configured, build a router that VALIDATES
+  // the site (returns 404 / 502 for unknown / errored siteIds) and passes the
+  // original request through to OAuthProvider unchanged. The URL must reach
+  // OAuthProvider with the `/{pathPrefix}/{siteId}` path intact so the
+  // resource-indicator audience check on the issued access token validates
+  // correctly. The consumer's `apiHandler` does the internal `/at/<alias>/` →
+  // `/mcp` rewrite after token validation.
+  const siteRouter = options.siteRouting
+    ? createSiteRouter(
+        options.siteRouting,
+        {},
+        async (request, env, ctx) => oauthProvider.fetch(request, env, ctx)
+      )
+    : null;
+
   return {
     async fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext): Promise<Response> {
-      // Fix protocol behind reverse proxies / tunnels (e.g. cloudflared).
-      // The proxy→worker hop is plain HTTP, but OAuthProvider derives
-      // discovery-document URLs from the request origin. Without this,
-      // they end up as http:// which clients like ChatGPT reject.
-      const proto = request.headers.get("x-forwarded-proto");
-      if (proto === "https" && new URL(request.url).protocol === "http:") {
-        const url = new URL(request.url);
+      let url = new URL(request.url);
+
+      // Proxies/tunnels (cloudflared) hop to the worker over plain HTTP, but
+      // OAuthProvider derives discovery URLs from the request origin — so
+      // upgrade the protocol when x-forwarded-proto says https.
+      if (
+        request.headers.get("x-forwarded-proto") === "https" &&
+        url.protocol === "http:"
+      ) {
         url.protocol = "https:";
         request = new Request(url.toString(), request);
+        url = new URL(request.url);
       }
 
-      const url = new URL(request.url);
+      const pathname = url.pathname;
 
-      if (url.pathname === "/") {
-        const method = request.method;
+      if (siteRouter) {
+        // RFC 9728 protected resource metadata, scoped per site.
+        const opmPrefix = "/.well-known/oauth-protected-resource";
+        if (pathname.startsWith(opmPrefix + "/")) {
+          const resourcePath = pathname.slice(opmPrefix.length);
+          if (siteRouter.prefixRegex.test(resourcePath)) {
+            return renderProtectedResourceMetadata(request, url, resourcePath);
+          }
+        }
+
+        if (siteRouter.prefixRegex.test(pathname)) {
+          return siteRouter.fetch(request, env, ctx);
+        }
+      }
+
+      if (pathname === "/") {
         const hasAuth = request.headers.has("Authorization");
         const acceptsSSE = request.headers.get("Accept")?.includes("text/event-stream");
 
         // Browser visit: plain GET with no auth and not SSE → landing page
-        if (method === "GET" && !hasAuth && !acceptsSSE) {
+        if (request.method === "GET" && !hasAuth && !acceptsSSE) {
+          if (options.siteRouting) {
+            return renderSiteRoutingLandingResponse(
+              options.name,
+              options.version,
+              options.siteRouting.pathPrefix
+            );
+          }
           if (options.multiSite) {
             return renderMultiSiteLandingResponse(options.name, options.version, options.multiSite);
           }
@@ -279,10 +346,8 @@ export function createWorkerExport(
         }
 
         // MCP request: rewrite / → /mcp so OAuthProvider routes it correctly
-        const rewrittenUrl = new URL(request.url);
-        rewrittenUrl.pathname = "/mcp";
-        const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-        return oauthProvider.fetch(rewrittenRequest, env, ctx);
+        url.pathname = "/mcp";
+        return oauthProvider.fetch(new Request(url.toString(), request), env, ctx);
       }
 
       // All other paths pass through to OAuthProvider unchanged
@@ -303,6 +368,12 @@ async function handleDefaultRequest(
 ): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // URL-based site routing — uses the same /callback/:siteId pattern as multi-site
+  // since the OAuth callback handling is identical.
+  if (options.siteRouting) {
+    return handleSiteRoutingRequest(request, env, options, effectiveAuthOptions, path);
+  }
 
   // Multi-site routing
   if (options.multiSite) {
@@ -394,6 +465,77 @@ async function handleMultiSiteRequest(
   return new Response("Not Found", { status: 404 });
 }
 
+async function handleSiteRoutingRequest(
+  request: Request,
+  env: HostedMcpEnv,
+  options: HostedMcpServerOptions,
+  authOptions: UmbracoAuthHandlerOptions,
+  path: string,
+): Promise<Response> {
+  // Authorize — site is determined by the OAuth `resource` parameter, not a picker.
+  if (path === "/authorize") {
+    return handleAuthorize(request, env, authOptions);
+  }
+
+  // Callback — `/callback/:siteId` mirrors the multi-site shape; the siteId
+  // came from the resource parameter and was used as the redirect_uri suffix
+  // when redirecting to Umbraco. No need to re-validate here — the callback
+  // handler reads site credentials from KV state stored during authorize.
+  const callbackMatch = path.match(/^\/callback\/([^/]+)$/);
+  if (callbackMatch) {
+    return handleCallback(request, env);
+  }
+
+  // Also handle /callback without siteId (fallback for clients that don't
+  // include it).
+  if (path === "/callback") {
+    return handleCallback(request, env);
+  }
+
+  if (path === "/logout-callback") {
+    return handleLogoutCallback(request, env);
+  }
+
+  if (path === "/info" && env.ENABLE_INFO_ENDPOINT === "true") {
+    return renderInfoResponse(options, env);
+  }
+
+  return new Response("Not Found", { status: 404 });
+}
+
+function renderProtectedResourceMetadata(
+  request: Request,
+  url: URL,
+  resourcePath: string,
+): Response {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+  const issuer = `${url.protocol}//${url.host}`;
+  return new Response(
+    JSON.stringify({
+      resource: `${issuer}${resourcePath}`,
+      authorization_servers: [issuer],
+      bearer_methods_supported: ["header"],
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    }
+  );
+}
+
 // ============================================================================
 // Authorize / Callback Handlers
 // ============================================================================
@@ -483,6 +625,22 @@ function renderMultiSiteLandingResponse(
 ): Response {
   return new Response(
     renderMultiSiteLandingPage(name, version, multiSite),
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "DENY",
+      },
+    }
+  );
+}
+
+function renderSiteRoutingLandingResponse(
+  name: string,
+  version: string,
+  pathPrefix: string
+): Response {
+  return new Response(
+    renderSiteRoutingLandingPage(name, version, pathPrefix),
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
@@ -601,6 +759,59 @@ function renderMultiSiteLandingPage(
       </tbody>
     </table>
     <div class="note">Site selection happens during authorization.</div>
+    <div class="transport">Streamable HTTP (MCP 2025-03-26)</div>
+  </div>
+</body>
+</html>`;
+}
+
+function renderSiteRoutingLandingPage(
+  name: string,
+  version: string,
+  pathPrefix: string
+): string {
+  // Render `:siteId` in the path as italic so it's clear it's a placeholder.
+  const exampleEndpoint = pathPrefix
+    .replace(/:[A-Za-z_][A-Za-z0-9_]*/, (m) => `<em>{${m.slice(1)}}</em>`);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(name)} - Hosted MCP Server</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5; display: flex; align-items: center;
+      justify-content: center; min-height: 100vh; margin: 0;
+    }
+    .card {
+      background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 560px; width: 100%; padding: 2rem; text-align: center;
+    }
+    h1 { color: #1b264f; font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .version { color: #666; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .info { text-align: left; font-size: 0.9rem; color: #444; }
+    .info dt { font-weight: 600; margin-top: 0.75rem; }
+    .info dd { margin-left: 0; color: #666; }
+    code { background: #f0f0f0; padding: 0.15rem 0.35rem; border-radius: 3px; font-size: 0.85rem; }
+    em { color: #888; font-style: italic; }
+    .note { margin-top: 0.75rem; font-size: 0.8rem; color: #888; font-style: italic; }
+    .transport { margin-top: 1rem; font-size: 0.8rem; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${escapeHtml(name)}</h1>
+    <div class="version">v${escapeHtml(version)}</div>
+    <dl class="info">
+      <dt>MCP Endpoint</dt>
+      <dd><code>${exampleEndpoint}/</code></dd>
+      <dt>Per-project URLs</dt>
+      <dd>Each Umbraco project has its own MCP endpoint; the project alias is encoded in the URL path.</dd>
+    </dl>
+    <div class="note">Connect your MCP client to the endpoint for the specific project you want to access.</div>
     <div class="transport">Streamable HTTP (MCP 2025-03-26)</div>
   </div>
 </body>

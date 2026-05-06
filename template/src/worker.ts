@@ -25,6 +25,7 @@ import {
   createDefaultHandler,
   createWorkerExport,
   createPerRequestServer,
+  createSiteRoutingApiHandler,
   getServerOptions,
   type HostedMcpEnv,
   type AuthProps,
@@ -32,6 +33,10 @@ import {
   // registerChainedTools,
   // type ChainedServerConsentConfig,
 } from "@umbraco-cms/mcp-hosted";
+
+// Uncomment to host this MCP across multiple Umbraco Cloud projects from a
+// single Worker (`/at/{project-alias}/`):
+// import { umbracoCloudSiteRouting } from "@umbraco-cms/mcp-hosted/cloud";
 
 // Import tool collections and registries (shared with stdio mode via collections.ts)
 import { collections, allModes, allModeNames, allSliceNames } from "./collections.js";
@@ -87,6 +92,23 @@ const options = {
   //
   // Uncomment for in-process chaining — adds chained server modes to consent screen:
   // chainedServers: [cmsChainedServer],
+  //
+  // Uncomment to host one Worker that serves every Umbraco Cloud project the
+  // standardised MCP client is registered in. MCP clients connect to
+  // `https://<your-worker-host>/at/<project-alias>/` and the worker resolves
+  // each project on demand.
+  //
+  // Each Cloud project must:
+  //   1. Register an OAuth client with this client_id (public/PKCE
+  //      recommended) — see umbraco/McpOAuthComposer.cs.
+  //   2. Add the Cloud-only short-circuit composer that lets cold-start MCP
+  //      clients reach Umbraco ID SSO — see
+  //      umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs.
+  //
+  // siteRouting: umbracoCloudSiteRouting({
+  //   oauthClientId: "mcp-cms-editor",  // the client_id registered in each project
+  //   // region: "euwest01",              // or set env.UMBRACO_CLOUD_REGION
+  // }),
 };
 
 const serverOptions = getServerOptions(options);
@@ -143,10 +165,19 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
  * createWorkerExport() wraps the provider so that the MCP endpoint is
  * externally accessible at `/` (browser visits get the landing page,
  * MCP requests are rewritten from `/` to `/mcp` for OAuthProvider).
+ *
+ * apiRoute also includes `/at/` so per-project URLs like `/at/{alias}/` work
+ * when `siteRouting` is enabled. The OAuth access token's `aud` claim is bound
+ * to the original `/at/{alias}` URL (per the MCP spec's resource-indicator
+ * requirement); OAuthProvider must see that URL to validate the token. The
+ * `/at/{alias}/` → `/mcp` rewrite happens INSIDE `apiHandler` below, after
+ * token validation.
  */
 const provider = new OAuthProvider({
-  apiRoute: "/mcp",
-  apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
+  apiRoute: ["/mcp", "/at/"],
+  apiHandler: createSiteRoutingApiHandler(
+    UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }) as { fetch: (r: Request, e: HostedMcpEnv, c: ExecutionContext) => Promise<Response> }
+  ) as any,
   defaultHandler: createDefaultHandler(options) as any,
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",

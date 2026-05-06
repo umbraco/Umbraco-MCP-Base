@@ -1300,3 +1300,194 @@ describe("createLogoutCallbackHandler", () => {
     expect(body).toEqual({ error: "Invalid or expired logout state" });
   });
 });
+
+// ============================================================================
+// Authorize Handler — URL-based site routing
+// ============================================================================
+
+describe("Authorize Handler — siteRouting (URL-based)", () => {
+  const cloudSite: SiteConfig = {
+    id: "my-project",
+    displayName: "my-project",
+    baseUrl: "https://my-project.euwest01.umbraco.io",
+    oauthClientId: "mcp-cms-editor",
+  };
+
+  const siteRouting = {
+    pathPrefix: "/at/:siteId",
+    resolveSite: jest.fn<(siteId: string) => SiteConfig | null>(),
+  };
+
+  beforeEach(() => {
+    siteRouting.resolveSite.mockReset();
+    siteRouting.resolveSite.mockImplementation((siteId: string) =>
+      siteId === "my-project" ? cloudSite : null
+    );
+  });
+
+  describe("GET — consent screen", () => {
+    it("renders consent for a valid resource → site mapping", async () => {
+      const env = createMockEnv();
+      mockConsentResponse.mockReturnValue(
+        new Response("consent-html", { status: 200 })
+      );
+
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project/",
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(siteRouting.resolveSite).toHaveBeenCalledWith(
+        "my-project",
+        env
+      );
+
+      // Consent screen receives a single-element sites list (no picker rendered).
+      const consentArgs = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(consentArgs.sites).toEqual([
+        {
+          id: "my-project",
+          displayName: "my-project",
+          baseUrl: "https://my-project.euwest01.umbraco.io",
+        },
+      ]);
+      expect(consentArgs.umbracoBaseUrl).toBe(
+        "https://my-project.euwest01.umbraco.io"
+      );
+    });
+
+    it("returns 400 when the OAuth resource parameter is missing", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest()
+      );
+
+      expect(response.status).toBe(400);
+      expect(siteRouting.resolveSite).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when resolveSite returns null (unknown project)", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/unknown/",
+        })
+      );
+
+      expect(response.status).toBe(404);
+      const body = (await response.json()) as { error_description: string };
+      expect(body.error_description).toContain("unknown");
+    });
+
+    it("returns 502 when resolveSite throws (upstream error)", async () => {
+      const env = createMockEnv();
+      siteRouting.resolveSite.mockImplementation(() => {
+        throw new Error("DNS lookup failed");
+      });
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project/",
+        })
+      );
+
+      expect(response.status).toBe(502);
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("POST — approve", () => {
+    it("uses resolved site's baseUrl + clientId in the Umbraco redirect", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project/",
+        })
+      );
+
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.origin).toBe("https://my-project.euwest01.umbraco.io");
+      expect(location.searchParams.get("client_id")).toBe("mcp-cms-editor");
+      expect(location.searchParams.get("redirect_uri")).toBe(
+        "https://worker.example.com/callback/my-project"
+      );
+    });
+
+    it("stores siteId in consentChoices for downstream per-request lookup", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project/",
+        })
+      );
+
+      const stateCall = mockStoreOAuthState.mock.calls[0] as [
+        unknown,
+        string,
+        Record<string, unknown>,
+      ];
+      const data = stateCall[2];
+      const choices = data.consentChoices as ConsentChoices;
+      expect(choices.siteId).toBe("my-project");
+    });
+
+    it("returns 400 when resource is missing on POST", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest()
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when the resolved site is unknown on POST", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/unknown/",
+        })
+      );
+
+      expect(response.status).toBe(404);
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+  });
+});

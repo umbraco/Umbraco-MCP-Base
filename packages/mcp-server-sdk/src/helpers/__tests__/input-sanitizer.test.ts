@@ -64,16 +64,28 @@ describe("rejectPathTraversal", () => {
     expect(() => rejectPathTraversal("..\\windows\\system32", "field")).toThrow(ToolValidationError);
   });
 
-  it("should allow absolute paths starting with /", () => {
+  it("should allow POSIX absolute paths", () => {
     // Umbraco uses /-prefixed paths as identifiers for stylesheets, scripts, etc.
     expect(() => rejectPathTraversal("/stylesheet.css", "field")).not.toThrow();
     expect(() => rejectPathTraversal("/scripts/app.js", "field")).not.toThrow();
     expect(() => rejectPathTraversal("/Views/Partials/header.cshtml", "field")).not.toThrow();
+    // Filesystem paths are not traversal — allowlist policy is the consumer's job.
+    expect(() => rejectPathTraversal("/Users/me/photo.png", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("/tmp/upload.jpg", "field")).not.toThrow();
   });
 
-  it("should reject UNC paths and Windows absolute paths", () => {
-    expect(() => rejectPathTraversal("\\\\server\\share", "field")).toThrow(ToolValidationError);
-    expect(() => rejectPathTraversal("C:\\Windows", "field")).toThrow(ToolValidationError);
+  it("should allow Windows absolute paths (drive-rooted and UNC)", () => {
+    // Absolute paths aren't traversal — allowlist policy belongs to the consumer.
+    // See https://github.com/umbraco/Umbraco-MCP-Base/issues/86
+    expect(() => rejectPathTraversal("C:\\Windows\\image.png", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("D:\\some\\folder\\image.webp", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("c:/users/me/file.txt", "field")).not.toThrow();
+    expect(() => rejectPathTraversal("\\\\server\\share\\file.txt", "field")).not.toThrow();
+  });
+
+  it("should reject traversal sequences inside otherwise-absolute paths", () => {
+    expect(() => rejectPathTraversal("C:\\Windows\\..\\Users", "field")).toThrow(ToolValidationError);
+    expect(() => rejectPathTraversal("/Users/me/../../etc/passwd", "field")).toThrow(ToolValidationError);
   });
 });
 
