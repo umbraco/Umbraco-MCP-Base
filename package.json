@@ -21,7 +21,7 @@
     "test:integration:chained": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/hosted-chained-mcp-e2e/integration/jest.config.ts --runInBand --forceExit",
     "test:e2e": "npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts",
     "test:e2e:chained": "npx playwright test --config tests/hosted-chained-mcp-e2e/e2e/playwright.config.ts",
-    "test:e2e:cloud": "npx playwright test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts cloud-mcp-inspector.test.ts",
+    "test:e2e:cloud": "node --env-file-if-exists=.env.test.cloud ./node_modules/@playwright/test/cli.js test --config tests/hosted-mcp-e2e/e2e/playwright.config.ts cloud-mcp-inspector.test.ts",
     "test:template": "USE_MOCK_API=true node --experimental-vm-modules node_modules/jest/bin/jest.js --config template/jest.config.ts --testPathPattern=__tests__ --runInBand",
     "test:cli": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config integration/jest.config.ts --runInBand --forceExit",
     "test:cli:evals": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config evals/jest.config.ts --runInBand --forceExit"

@@ -4,6 +4,7 @@ build/*
 !build/azure-pipelines.yml
 coverage/
 .env
+.env.test.cloud
 .dev.vars
 !tests/hosted-mcp-e2e/.dev.vars
 !tests/hosted-chained-mcp-e2e/.dev.vars

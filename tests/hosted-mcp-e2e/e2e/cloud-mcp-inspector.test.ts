@@ -29,6 +29,7 @@ import {
   connectInspector,
   handleUmbracoCloudOAuthFlow,
   getToolNames,
+  callTool,
   type InspectorHandle,
 } from "@umbraco-cms/mcp-hosted/testing";
 
@@ -44,7 +45,7 @@ const haveCredentials = Boolean(
 
 const skipReason = haveCredentials
   ? ""
-  : "Set UMBRACO_CLOUD_TEST_PROJECT, UMBRACO_CLOUD_TEST_USER, UMBRACO_CLOUD_TEST_PASSWORD, UMBRACO_CLOUD_OAUTH_CLIENT_ID to run this test.";
+  : "Cloud E2E credentials missing. Copy .env.test.cloud.example to .env.test.cloud and fill in the values, or pass UMBRACO_CLOUD_TEST_PROJECT/USER/PASSWORD/OAUTH_CLIENT_ID inline.";
 
 // Cloud's login API rejects headless browsers via Cloudflare bot management.
 // Force this test file to run headed — every other E2E in this directory
@@ -142,9 +143,8 @@ test.describe("Cloud MCP Inspector E2E", () => {
       .waitFor({ state: "visible", timeout: 90_000 });
 
     // The cloud-worker reuses the template's collections, so we check the
-    // template tools are listed — proves the full chain (siteRouting → SSO
-    // pre-auth → consent → silent project authorize → token exchange →
-    // per-request server → MCP request) works against the real project.
+    // template tools are listed — proves siteRouting → SSO → consent →
+    // project authorize → token exchange → per-request server is wired up.
     const tools = await getToolNames(page, [
       "get-example",
       "list-examples",
@@ -152,5 +152,13 @@ test.describe("Cloud MCP Inspector E2E", () => {
       "get-server-info",
     ]);
     expect(tools).toContain("get-server-info");
+
+    // Actually invoke a tool against the real Cloud project so we exercise
+    // the audience-validated MCP request path end-to-end. `get-server-info`
+    // hits Umbraco's /server/information endpoint and returns the project's
+    // assembly version — proves the access token is accepted, the worker
+    // dispatches to McpAgent, and the tool's outbound API call succeeds.
+    const result = await callTool(page, "get-server-info", "assemblyVersion");
+    expect(result).toContain("assemblyVersion");
   });
 });
