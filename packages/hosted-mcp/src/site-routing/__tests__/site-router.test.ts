@@ -191,36 +191,14 @@ describe("createSiteRouter", () => {
     });
   });
 
-  it("resolveForRequest returns matched=false when path doesn't match", async () => {
+  it("exposes the compiled prefixRegex for callers that probe the path cheaply", () => {
     const config: SiteRoutingConfig = {
       pathPrefix: "/at/:siteId",
       resolveSite: () => sampleSite,
     };
-    const router = createSiteRouter(config, { rewriteTo: "/mcp" }, async () => new Response());
+    const router = createSiteRouter(config, {}, async () => new Response());
 
-    const result = await router.resolveForRequest(
-      new Request("https://host/authorize"),
-      env
-    );
-
-    expect(result).toEqual({ matched: false });
-  });
-
-  it("resolveForRequest returns site when path matches and resolver returns config", async () => {
-    const config: SiteRoutingConfig = {
-      pathPrefix: "/at/:siteId",
-      resolveSite: (siteId) => ({ ...sampleSite, id: siteId }),
-    };
-    const router = createSiteRouter(config, { rewriteTo: "/mcp" }, async () => new Response());
-
-    const result = await router.resolveForRequest(
-      new Request("https://host/at/foo/"),
-      env
-    );
-
-    expect(result.matched).toBe(true);
-    if (result.matched) {
-      expect(result.site?.id).toBe("foo");
-    }
+    expect(router.prefixRegex.test("/at/foo/")).toBe(true);
+    expect(router.prefixRegex.test("/authorize")).toBe(false);
   });
 });

@@ -128,90 +128,12 @@ export async function handleOAuthFlow(
   await loginButton.click();
 }
 
-export interface UmbracoCloudSsoOptions {
-  /** Email of the Umbraco ID / Azure B2C account. */
-  email: string;
-  /** Password of the Umbraco ID / Azure B2C account. */
-  password: string;
-}
-
 /**
- * Pre-authenticate against an Umbraco Cloud project using Umbraco ID SSO.
- *
- * The project's OAuth backoffice authorize endpoint shows a local login form
- * with no external-provider button. To use SSO we instead drive the project's
- * regular `/umbraco` route, which auto-redirects to `identity.umbraco.com` →
- * Azure B2C. Once we authenticate there, the project's session cookie is set
- * and any subsequent OAuth flow completes silently (no login UI).
- *
- * Call this before initiating the OAuth flow (e.g. before `connectInspector`).
- *
- * @returns the page after returning to the project, ready to be closed.
- */
-export async function authenticateUmbracoCloudSso(
-  page: Page,
-  projectBaseUrl: string,
-  options: UmbracoCloudSsoOptions,
-): Promise<void> {
-  await page.goto(`${projectBaseUrl.replace(/\/$/, "")}/umbraco`);
-
-  // Wait until we land on identity.umbraco.com / Azure B2C.
-  await page.waitForURL(
-    (url) =>
-      url.hostname === "identity.umbraco.com" ||
-      url.hostname.endsWith("b2clogin.com") ||
-      url.hostname === "login.microsoftonline.com",
-    { timeout: 60_000 },
-  );
-  await page.waitForLoadState("networkidle", { timeout: 60_000 });
-
-  // Fill email. The Umbraco ID flow renders email+password on one page;
-  // older B2C flows use two pages — we handle both.
-  const emailField = page
-    .locator(
-      'input[type="email"], input[name="email"], input#email, input#signInName',
-    )
-    .first();
-  await emailField.waitFor({ timeout: 30_000 });
-  await emailField.click();
-  await emailField.pressSequentially(options.email, { delay: 25 });
-
-  const passwordField = page
-    .locator('input[type="password"], input[name="password"], input#password')
-    .first();
-
-  if (!(await passwordField.isVisible().catch(() => false))) {
-    const nextButton = page
-      .getByRole("button", { name: /next|continue/i })
-      .first();
-    if (await nextButton.isVisible().catch(() => false)) {
-      await nextButton.click();
-      await passwordField.waitFor({ timeout: 30_000 });
-    }
-  }
-
-  await passwordField.click();
-  await passwordField.pressSequentially(options.password, { delay: 25 });
-
-  const submitButton = page
-    .getByRole("button", { name: /sign in|log in|login|submit|next/i })
-    .first();
-  await submitButton.click();
-
-  // Wait until we land back on the project's host.
-  const projectHost = new URL(projectBaseUrl).hostname;
-  await page.waitForURL((url) => url.hostname === projectHost, {
-    timeout: 60_000,
-  });
-}
-
-/**
- * Drive the OAuth flow on the Umbraco Cloud project assuming the user is
- * already authenticated to the project (use `authenticateUmbracoCloudSso`
- * first). Approves consent and waits for the OAuth flow to complete silently.
+ * Approve the consent screen for an Umbraco Cloud OAuth flow. The Cloud
+ * project's short-circuit composer redirects to Umbraco ID SSO from there;
+ * the caller drives the B2C login form afterwards.
  */
 export async function handleUmbracoCloudOAuthFlow(
-  _mainPage: Page,
   oauthPage: Page,
   consentOptions?: ConsentOptions,
 ): Promise<void> {

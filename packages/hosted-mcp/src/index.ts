@@ -124,4 +124,8 @@ export {
   type SiteRoutingResolver,
 } from "./types/multi-site.js";
 
-export { createSiteRouter } from "./site-routing/site-router.js";
+export {
+  createSiteRouter,
+  createSiteRoutingApiHandler,
+  type SiteRoutingApiHandlerOptions,
+} from "./site-routing/site-router.js";

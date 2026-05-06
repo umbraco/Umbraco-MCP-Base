@@ -295,79 +295,43 @@ export function createWorkerExport(
 
   return {
     async fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext): Promise<Response> {
-      // Fix protocol behind reverse proxies / tunnels (e.g. cloudflared).
-      // The proxy→worker hop is plain HTTP, but OAuthProvider derives
-      // discovery-document URLs from the request origin. Without this,
-      // they end up as http:// which clients like ChatGPT reject.
-      const proto = request.headers.get("x-forwarded-proto");
-      if (proto === "https" && new URL(request.url).protocol === "http:") {
-        const url = new URL(request.url);
+      let url = new URL(request.url);
+
+      // Proxies/tunnels (cloudflared) hop to the worker over plain HTTP, but
+      // OAuthProvider derives discovery URLs from the request origin — so
+      // upgrade the protocol when x-forwarded-proto says https.
+      if (
+        request.headers.get("x-forwarded-proto") === "https" &&
+        url.protocol === "http:"
+      ) {
         url.protocol = "https:";
         request = new Request(url.toString(), request);
+        url = new URL(request.url);
       }
 
-      // Protected Resource Metadata (RFC 9728): clients fetch this to discover
-      // the resource URL they should pass as the OAuth `resource` parameter.
-      // Per the spec the OPM URL for resource `https://host/at/abc` is
-      // `https://host/.well-known/oauth-protected-resource/at/abc`.
+      const pathname = url.pathname;
+
       if (siteRouter) {
-        const url = new URL(request.url);
+        // RFC 9728 protected resource metadata, scoped per site.
         const opmPrefix = "/.well-known/oauth-protected-resource";
-        if (url.pathname.startsWith(opmPrefix + "/")) {
-          const resourcePath = url.pathname.slice(opmPrefix.length);
+        if (pathname.startsWith(opmPrefix + "/")) {
+          const resourcePath = pathname.slice(opmPrefix.length);
           if (siteRouter.prefixRegex.test(resourcePath)) {
-            if (request.method === "OPTIONS") {
-              return new Response(null, {
-                status: 204,
-                headers: {
-                  "Access-Control-Allow-Origin": "*",
-                  "Access-Control-Allow-Methods": "GET, OPTIONS",
-                  "Access-Control-Allow-Headers": "*",
-                  "Access-Control-Max-Age": "86400",
-                },
-              });
-            }
-            const issuer = `${url.protocol}//${url.host}`;
-            const resourceUrl = `${issuer}${resourcePath}`;
-            return new Response(
-              JSON.stringify({
-                resource: resourceUrl,
-                authorization_servers: [issuer],
-                bearer_methods_supported: ["header"],
-              }),
-              {
-                status: 200,
-                headers: {
-                  "Content-Type": "application/json",
-                  "Access-Control-Allow-Origin": "*",
-                },
-              }
-            );
+            return renderProtectedResourceMetadata(request, url, resourcePath);
           }
         }
-      }
 
-      // Site-router prefix path (e.g. /at/{alias}/) — handled before the
-      // single-site `/` branch so a Cloud-style URL never hits the landing page.
-      if (siteRouter) {
-        const url = new URL(request.url);
-        // Probe the prefix without resolving — landing page responses for
-        // browser GETs to `/at/{alias}/` would be nicer, but for MVP we
-        // only render the resolved-or-404 path.
-        if (siteRouter.prefixRegex.test(url.pathname)) {
+        if (siteRouter.prefixRegex.test(pathname)) {
           return siteRouter.fetch(request, env, ctx);
         }
       }
 
-      const url = new URL(request.url);
-
-      if (url.pathname === "/") {
-        const method = request.method;
+      if (pathname === "/") {
         const hasAuth = request.headers.has("Authorization");
         const acceptsSSE = request.headers.get("Accept")?.includes("text/event-stream");
 
         // Browser visit: plain GET with no auth and not SSE → landing page
-        if (method === "GET" && !hasAuth && !acceptsSSE) {
+        if (request.method === "GET" && !hasAuth && !acceptsSSE) {
           if (options.siteRouting) {
             return renderSiteRoutingLandingResponse(
               options.name,
@@ -382,10 +346,8 @@ export function createWorkerExport(
         }
 
         // MCP request: rewrite / → /mcp so OAuthProvider routes it correctly
-        const rewrittenUrl = new URL(request.url);
-        rewrittenUrl.pathname = "/mcp";
-        const rewrittenRequest = new Request(rewrittenUrl.toString(), request);
-        return oauthProvider.fetch(rewrittenRequest, env, ctx);
+        url.pathname = "/mcp";
+        return oauthProvider.fetch(new Request(url.toString(), request), env, ctx);
       }
 
       // All other paths pass through to OAuthProvider unchanged
@@ -539,6 +501,39 @@ async function handleSiteRoutingRequest(
   }
 
   return new Response("Not Found", { status: 404 });
+}
+
+function renderProtectedResourceMetadata(
+  request: Request,
+  url: URL,
+  resourcePath: string,
+): Response {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+  const issuer = `${url.protocol}//${url.host}`;
+  return new Response(
+    JSON.stringify({
+      resource: `${issuer}${resourcePath}`,
+      authorization_servers: [issuer],
+      bearer_methods_supported: ["header"],
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    }
+  );
 }
 
 // ============================================================================

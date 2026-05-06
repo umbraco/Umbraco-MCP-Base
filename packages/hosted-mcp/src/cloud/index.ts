@@ -69,6 +69,10 @@ export interface UmbracoCloudRoutingOptions {
 const DEFAULT_REGION = "euwest01";
 const DEFAULT_PATH_PREFIX = "/at/:siteId";
 const DEFAULT_CACHE_TTL = { ok: 60_000, miss: 30_000, error: 10_000 };
+// Cap to keep the per-isolate cache bounded — at this point we evict expired
+// entries and, if still over the cap, drop the oldest. Stops a stream of
+// unique aliases (typos, scans) from growing the Map without bound.
+const MAX_CACHE_ENTRIES = 1_000;
 
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }
@@ -82,6 +86,21 @@ export function umbracoCloudSiteRouting(
 ): SiteRoutingConfig {
   const ttl = { ...DEFAULT_CACHE_TTL, ...options.cacheTtl };
   const cache = new Map<string, CacheEntry>();
+
+  const setCache = (siteId: string, entry: CacheEntry): void => {
+    if (cache.size >= MAX_CACHE_ENTRIES) {
+      const now = Date.now();
+      for (const [key, value] of cache) {
+        if (value.expiresAt <= now) cache.delete(key);
+      }
+      while (cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = cache.keys().next().value;
+        if (oldest === undefined) break;
+        cache.delete(oldest);
+      }
+    }
+    cache.set(siteId, entry);
+  };
 
   const resolveSite: SiteRoutingResolver = async (siteId, env) => {
     const now = Date.now();
@@ -97,15 +116,13 @@ export function umbracoCloudSiteRouting(
     const exists = await validator(siteId, baseUrl, env);
 
     if (!exists) {
-      cache.set(siteId, { kind: "miss", expiresAt: now + ttl.miss });
+      setCache(siteId, { kind: "miss", expiresAt: now + ttl.miss });
       return null;
     }
 
-    let oauthClientSecret: string | undefined;
-    if (options.resolveOauthClientSecret) {
-      const secret = await options.resolveOauthClientSecret(siteId, env);
-      if (secret) oauthClientSecret = secret;
-    }
+    const oauthClientSecret = options.resolveOauthClientSecret
+      ? (await options.resolveOauthClientSecret(siteId, env)) ?? undefined
+      : undefined;
 
     const site: SiteConfig = {
       id: siteId,
@@ -115,7 +132,7 @@ export function umbracoCloudSiteRouting(
       ...(oauthClientSecret ? { oauthClientSecret } : {}),
     };
 
-    cache.set(siteId, { kind: "ok", site, expiresAt: now + ttl.ok });
+    setCache(siteId, { kind: "ok", site, expiresAt: now + ttl.ok });
     return site;
   };
 
@@ -126,33 +143,22 @@ export function umbracoCloudSiteRouting(
 }
 
 /**
- * Default validator — probes the Umbraco backoffice path on the project's
- * Cloud host. Treats any 2xx/3xx as "exists"; 4xx/5xx and network errors as
- * "missing".
- *
- * `/umbraco` is the backoffice entry on every Cloud project; nonexistent
- * aliases either fail DNS or time out at the wildcard edge.
- *
- * Network errors don't throw — Cloud projects come and go and we treat
- * "doesn't resolve" the same as "404".
+ * Default validator — GETs `/umbraco` on the Cloud host. Any 2xx/3xx is
+ * "exists"; 4xx/5xx and network failures are "missing". (HEAD looks tempting
+ * but Cloud's edge returns 404 for HEAD on this path.)
  */
 async function defaultValidateProject(
   _siteId: string,
   baseUrl: string,
   _env: HostedMcpEnv
 ): Promise<boolean> {
-  const probeUrl = new URL("/umbraco", baseUrl).toString();
-
   try {
-    const response = await fetch(probeUrl, {
+    const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
       method: "GET",
-      headers: { Accept: "text/html" },
       redirect: "manual",
-      // Workers `fetch` doesn't support a true timeout, but we set a short
-      // signal-based abort to fail fast when the project is unreachable.
       signal: AbortSignal.timeout(5_000),
     });
-    // 2xx/3xx all indicate the project responded; only treat 4xx/5xx as missing.
+    response.body?.cancel();
     return response.status < 400;
   } catch {
     return false;

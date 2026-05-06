@@ -47,10 +47,6 @@ const skipReason = haveCredentials
   ? ""
   : "Cloud E2E credentials missing. Copy .env.test.cloud.example to .env.test.cloud and fill in the values, or pass UMBRACO_CLOUD_TEST_PROJECT/USER/PASSWORD/OAUTH_CLIENT_ID inline.";
 
-// Cloud's login API rejects headless browsers via Cloudflare bot management.
-// Force this test file to run headed — every other E2E in this directory
-// still runs headless against the local Umbraco.
-test.use({ headless: false });
 
 test.describe("Cloud MCP Inspector E2E", () => {
   test.skip(!haveCredentials, skipReason);
@@ -91,11 +87,7 @@ test.describe("Cloud MCP Inspector E2E", () => {
       inspector.url,
     );
 
-    // Cold-start flow:
-    //   consent → Approve → cookie scheme challenges Umbraco ID directly →
-    //   id.umbraco.com / Azure B2C → fill creds → project completes OAuth →
-    //   worker /callback → MCP client.
-    await handleUmbracoCloudOAuthFlow(page, oauthPage);
+    await handleUmbracoCloudOAuthFlow(oauthPage);
 
     // SSO login form on identity.umbraco.com / B2C
     await page.waitForURL(

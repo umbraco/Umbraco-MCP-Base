@@ -14,14 +14,10 @@ import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
 
 export interface SiteRouterOptions {
   /**
-   * Optional path the prefix should be rewritten to (e.g. "/mcp") before
-   * delegating to `inner`.
-   *
-   * Leave undefined when the wrapped handler is OAuthProvider configured with
-   * resource indicators — the OAuth access token's audience is bound to the
-   * original `/<pathPrefix>/<siteId>` URL, so OAuthProvider must see that
-   * URL to validate the token. In that case the consumer's `apiHandler`
-   * does the internal rewrite to `/mcp` after token validation has succeeded.
+   * Path the prefix should be rewritten to before delegating to `inner`
+   * (e.g. "/mcp"). Leave undefined when `inner` is OAuthProvider configured
+   * with resource indicators — its audience check needs to see the original
+   * `/<pathPrefix>/<siteId>` URL.
    */
   rewriteTo?: string;
 }
@@ -33,41 +29,16 @@ export type FetchHandler = (
 ) => Promise<Response>;
 
 export interface SiteRouterResult {
-  /** A wrapped fetch handler that performs prefix rewriting. */
+  /** Wrapped fetch handler that validates the site and (optionally) rewrites. */
   fetch: FetchHandler;
-  /** The compiled prefix regex, exported for reuse by other callers. */
+  /** Compiled prefix regex, exposed so the worker entry can probe it cheaply. */
   prefixRegex: RegExp;
-  /**
-   * Resolve a site for a given request. Returns:
-   * - `{ ok: true, site }` when the request matches the prefix and resolveSite returns a SiteConfig
-   * - `{ ok: false, status: 404 }` when the request matches the prefix but resolveSite returns null
-   * - `null` when the request does not match the prefix at all
-   *
-   * Throws when resolveSite throws — callers may want to render a 502.
-   */
-  resolveForRequest: (
-    request: Request,
-    env: HostedMcpEnv
-  ) => Promise<
-    | { matched: true; site: SiteConfig }
-    | { matched: true; site: null }
-    | { matched: false }
-  >;
 }
 
 /**
- * Create a site-router fetch wrapper from a SiteRoutingConfig.
- *
- * Usage:
- *
- * ```ts
- * const router = createSiteRouter(siteRouting, { rewriteTo: "/mcp" });
- * return router.fetch(request, env, ctx);
- * ```
- *
- * The returned `fetch` calls `inner` (the wrapped OAuthProvider or worker) for
- * non-matching requests. For matching requests it validates the site, rewrites
- * the path, and delegates.
+ * Wrap a fetch handler so requests matching `config.pathPrefix` are validated
+ * via `config.resolveSite` (404 on null, 502 on throw) and either passed
+ * through or rewritten to `options.rewriteTo`.
  */
 export function createSiteRouter(
   config: SiteRoutingConfig,
@@ -75,18 +46,6 @@ export function createSiteRouter(
   inner: FetchHandler
 ): SiteRouterResult {
   const prefixRegex = buildPrefixRegex(config.pathPrefix);
-
-  const resolveForRequest: SiteRouterResult["resolveForRequest"] = async (
-    request,
-    env
-  ) => {
-    const url = new URL(request.url);
-    const siteId = extractSiteIdFromPath(url.pathname, prefixRegex);
-    if (!siteId) return { matched: false };
-    const site = await config.resolveSite(siteId, env);
-    if (!site) return { matched: true, site: null };
-    return { matched: true, site };
-  };
 
   const fetch: FetchHandler = async (request, env, ctx) => {
     const url = new URL(request.url);
@@ -124,7 +83,7 @@ export function createSiteRouter(
     return inner(rewrittenRequest, env, ctx);
   };
 
-  return { fetch, prefixRegex, resolveForRequest };
+  return { fetch, prefixRegex };
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -132,4 +91,35 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+export interface SiteRoutingApiHandlerOptions {
+  /** External path prefix MCP clients connect via (e.g. "/at/"). */
+  externalPrefix?: string;
+  /** Internal path the wrapped McpAgent serves at (e.g. "/mcp"). */
+  internalPath?: string;
+}
+
+/**
+ * Wrap a `McpAgent.serve(path)` handler so site-routed URLs (`/at/<alias>/*`)
+ * get rewritten to the McpAgent's internal path *after* OAuthProvider's
+ * audience check has run on the original URL. Use as the OAuthProvider's
+ * `apiHandler` when `apiRoute` includes the site-routing prefix.
+ */
+export function createSiteRoutingApiHandler(
+  baseHandler: { fetch: FetchHandler },
+  options: SiteRoutingApiHandlerOptions = {}
+): { fetch: FetchHandler } {
+  const externalPrefix = options.externalPrefix ?? "/at/";
+  const internalPath = options.internalPath ?? "/mcp";
+  return {
+    async fetch(request, env, ctx) {
+      const url = new URL(request.url);
+      if (url.pathname.startsWith(externalPrefix)) {
+        url.pathname = internalPath;
+        request = new Request(url.toString(), request);
+      }
+      return baseHandler.fetch(request, env, ctx);
+    },
+  };
 }
