@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-hosted",
-  "version": "17.0.0-beta.17",
+  "version": "17.0.0-beta.18",
   "description": "Hosted MCP server infrastructure for Umbraco on Cloudflare Workers",
   "type": "module",
   "main": "dist/index.js",
