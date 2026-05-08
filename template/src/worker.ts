@@ -34,9 +34,12 @@ import {
   // type ChainedServerConsentConfig,
 } from "@umbraco-cms/mcp-hosted";
 
-// Uncomment to host this MCP across multiple Umbraco Cloud projects from a
-// single Worker (`/at/{project-alias}/`):
-// import { umbracoCloudSiteRouting } from "@umbraco-cms/mcp-hosted/cloud";
+// Cloud preset for hosting this MCP across multiple Umbraco Cloud projects
+// from a single Worker (`/at/{project-alias}/`). Wired unconditionally below;
+// the runtime mode is controlled by `env.UMBRACO_CLOUD_ROUTING_ENABLED`. With
+// the var absent or not `"true"`, the Worker behaves as a single-tenant
+// deployment driven by `UMBRACO_BASE_URL`.
+import { umbracoCloudSiteRouting } from "@umbraco-cms/mcp-hosted/cloud";
 
 // Import tool collections and registries (shared with stdio mode via collections.ts)
 import { collections, allModes, allModeNames, allSliceNames } from "./collections.js";
@@ -92,23 +95,30 @@ const options = {
   //
   // Uncomment for in-process chaining — adds chained server modes to consent screen:
   // chainedServers: [cmsChainedServer],
-  //
-  // Uncomment to host one Worker that serves every Umbraco Cloud project the
-  // standardised MCP client is registered in. MCP clients connect to
-  // `https://<your-worker-host>/at/<project-alias>/` and the worker resolves
+
+  // URL-based site routing — lets one Worker serve every Umbraco Cloud project
+  // that has the standardised MCP OAuth client registered. MCP clients connect
+  // to `https://<your-worker-host>/at/<project-alias>/`; the Worker resolves
   // each project on demand.
   //
-  // Each Cloud project must:
-  //   1. Register an OAuth client with this client_id (public/PKCE
+  // Activated by `env.UMBRACO_CLOUD_ROUTING_ENABLED === "true"` (set in
+  // `wrangler.toml [vars]` or via `wrangler secret`). When absent or any
+  // other value, the Worker behaves single-tenant — `UMBRACO_BASE_URL` is
+  // honoured and `/at/*` requests 401 from OAuthProvider.
+  //
+  // Each Cloud project served by this Worker must:
+  //   1. Register an OAuth client with the `oauthClientId` below (PKCE/public
   //      recommended) — see umbraco/McpOAuthComposer.cs.
   //   2. Add the Cloud-only short-circuit composer that lets cold-start MCP
   //      clients reach Umbraco ID SSO — see
   //      umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs.
   //
-  // siteRouting: umbracoCloudSiteRouting({
-  //   oauthClientId: "mcp-cms-editor",  // the client_id registered in each project
-  //   // region: "euwest01",              // or set env.UMBRACO_CLOUD_REGION
-  // }),
+  // Replace `oauthClientId` with the client id registered in your Cloud
+  // projects (single value across all projects for this MCP type).
+  siteRouting: umbracoCloudSiteRouting({
+    oauthClientId: "my-umbraco-mcp",
+    // region: "euwest01",            // or set env.UMBRACO_CLOUD_REGION
+  }),
 };
 
 const serverOptions = getServerOptions(options);
@@ -171,7 +181,11 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
  * to the original `/at/{alias}` URL (per the MCP spec's resource-indicator
  * requirement); OAuthProvider must see that URL to validate the token. The
  * `/at/{alias}/` → `/mcp` rewrite happens INSIDE `apiHandler` below, after
- * token validation.
+ * token validation. When `siteRouting` is wired but
+ * `env.UMBRACO_CLOUD_ROUTING_ENABLED !== "true"`, the library disables the
+ * `/at/*` paths at request time — leaving `apiRoute` as `["/mcp", "/at/"]`
+ * is safe in single-tenant deployments because OAuthProvider's token check
+ * 401s any unauthenticated `/at/*` request.
  */
 const provider = new OAuthProvider({
   apiRoute: ["/mcp", "/at/"],

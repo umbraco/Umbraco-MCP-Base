@@ -4,6 +4,7 @@ import { umbracoCloudSiteRouting } from "../index.js";
 
 const env = {
   UMBRACO_CLOUD_REGION: "euwest01",
+  UMBRACO_CLOUD_ROUTING_ENABLED: "true",
 } as HostedMcpEnv;
 
 describe("umbracoCloudSiteRouting", () => {
@@ -39,7 +40,7 @@ describe("umbracoCloudSiteRouting", () => {
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
     const site = await config.resolveSite(
       "abc",
-      {} as HostedMcpEnv
+      { UMBRACO_CLOUD_ROUTING_ENABLED: "true" } as HostedMcpEnv
     );
     expect(site?.baseUrl).toBe("https://abc.euwest01.umbraco.io");
   });
@@ -152,5 +153,83 @@ describe("umbracoCloudSiteRouting", () => {
       pathPrefix: "/p/:project",
     });
     expect(config.pathPrefix).toBe("/p/:project");
+  });
+
+  describe("UMBRACO_CLOUD_ROUTING_ENABLED gate", () => {
+    it("returns null without invoking the validator when the flag is absent", async () => {
+      const validateProject = jest.fn<
+        (siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean
+      >().mockReturnValue(true);
+      const config = umbracoCloudSiteRouting({
+        oauthClientId: "mcp-cms-editor",
+        validateProject,
+      });
+      const site = await config.resolveSite("abc", {
+        UMBRACO_CLOUD_REGION: "euwest01",
+      } as HostedMcpEnv);
+      expect(site).toBeNull();
+      expect(validateProject).not.toHaveBeenCalled();
+    });
+
+    it("returns null when the flag is any value other than \"true\"", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("abc", {
+        UMBRACO_CLOUD_ROUTING_ENABLED: "false",
+      } as HostedMcpEnv);
+      expect(site).toBeNull();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not poison the cache when the flag flips from off to on", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const offEnv = {
+        UMBRACO_CLOUD_REGION: "euwest01",
+      } as HostedMcpEnv;
+      expect(await config.resolveSite("abc", offEnv)).toBeNull();
+      // Now the flag flips to "true" — the resolver must probe the project,
+      // not return a cached miss from the off-flag call.
+      const site = await config.resolveSite("abc", env);
+      expect(site).not.toBeNull();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("exposes the default `enabled` predicate on the returned config", () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      expect(config.enabled).toBeDefined();
+      expect(config.enabled!({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" } as HostedMcpEnv)).toBe(true);
+      expect(config.enabled!({ UMBRACO_CLOUD_ROUTING_ENABLED: "false" } as HostedMcpEnv)).toBe(false);
+      expect(config.enabled!({} as HostedMcpEnv)).toBe(false);
+    });
+
+    it("honours a custom `enabled` override (e.g. different env var)", async () => {
+      const config = umbracoCloudSiteRouting({
+        oauthClientId: "mcp-cms-editor",
+        enabled: (e) => (e as { MY_FLAG?: string }).MY_FLAG === "yes",
+      });
+      // Default-named flag is now ignored.
+      expect(
+        await config.resolveSite("abc", {
+          UMBRACO_CLOUD_ROUTING_ENABLED: "true",
+        } as HostedMcpEnv),
+      ).toBeNull();
+      // Custom flag flips it on.
+      expect(
+        await config.resolveSite("abc", {
+          MY_FLAG: "yes",
+          UMBRACO_CLOUD_REGION: "euwest01",
+        } as unknown as HostedMcpEnv),
+      ).not.toBeNull();
+    });
+
+    it("supports always-on (`enabled: () => true`) for non-flag deployments", async () => {
+      const config = umbracoCloudSiteRouting({
+        oauthClientId: "mcp-cms-editor",
+        enabled: () => true,
+      });
+      const site = await config.resolveSite("abc", {
+        UMBRACO_CLOUD_REGION: "euwest01",
+      } as HostedMcpEnv);
+      expect(site).not.toBeNull();
+    });
   });
 });
