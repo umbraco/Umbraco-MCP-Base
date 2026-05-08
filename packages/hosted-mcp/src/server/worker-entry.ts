@@ -230,13 +230,15 @@ export function createDefaultHandler(options: HostedMcpServerOptions) {
       // Build consent tool config (only if enableConsentToolSelection resolved to true)
       const consentToolConfig = buildConsentToolConfig(optionsWithConsent);
 
-      // URL-based cloud routing is gated by an env var so infra can flip the
-      // mode at deploy time without consumer source edits. When `siteRouting`
-      // is wired but the flag is off, treat the worker as single-tenant —
-      // don't expose `siteRouting` to the authorize handler or downstream
-      // routing.
+      // URL-based site routing has an optional runtime gate so consumers
+      // (and the Umbraco Cloud preset) can flip the mode per-request without
+      // module-scope env access. When `siteRouting.enabled` is missing the
+      // routing is always-on; the Cloud preset defaults `enabled` to read
+      // `env.UMBRACO_CLOUD_ROUTING_ENABLED`. When the gate returns false,
+      // treat the worker as single-tenant — don't expose `siteRouting` to
+      // the authorize handler or downstream routing.
       const effectiveSiteRouting =
-        options.siteRouting && env.UMBRACO_CLOUD_ROUTING_ENABLED === "true"
+        options.siteRouting && (options.siteRouting.enabled?.(env) ?? true)
           ? options.siteRouting
           : undefined;
       const effectiveOptions: HostedMcpServerOptions = {
@@ -325,13 +327,16 @@ export function createWorkerExport(
 
       const pathname = url.pathname;
 
-      // URL-based cloud routing is gated by an env var so infra can flip the
-      // mode at deploy time without consumer source edits. `siteRouter` itself
-      // is built eagerly from compile-time `options.siteRouting`; the runtime
-      // gate lives at the call site so `/at/*` requests fall through to
-      // OAuthProvider (which 401s unauthenticated requests) when off.
-      const cloudRoutingEnabled = env.UMBRACO_CLOUD_ROUTING_ENABLED === "true";
-      const useSiteRouter = siteRouter && cloudRoutingEnabled;
+      // URL-based site routing has an optional runtime gate
+      // (`siteRouting.enabled`) so the mode can flip at deploy time without
+      // module-scope env access. `siteRouter` itself is built eagerly from
+      // compile-time `options.siteRouting`; the runtime gate lives at the
+      // call site so `/at/*` requests fall through to OAuthProvider (which
+      // 401s unauthenticated requests) when off. Always-on by default; the
+      // Umbraco Cloud preset wires this to `env.UMBRACO_CLOUD_ROUTING_ENABLED`.
+      const siteRoutingEnabled =
+        options.siteRouting?.enabled?.(env) ?? Boolean(options.siteRouting);
+      const useSiteRouter = Boolean(siteRouter && siteRoutingEnabled);
 
       if (useSiteRouter) {
         // RFC 9728 protected resource metadata, scoped per site.
@@ -354,7 +359,7 @@ export function createWorkerExport(
 
         // Browser visit: plain GET with no auth and not SSE → landing page
         if (request.method === "GET" && !hasAuth && !acceptsSSE) {
-          if (options.siteRouting && cloudRoutingEnabled) {
+          if (options.siteRouting && siteRoutingEnabled) {
             return renderSiteRoutingLandingResponse(
               options.name,
               options.version,

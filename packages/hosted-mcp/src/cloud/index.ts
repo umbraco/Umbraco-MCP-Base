@@ -57,6 +57,14 @@ export interface UmbracoCloudRoutingOptions {
    */
   pathPrefix?: string;
   /**
+   * Override the runtime gate predicate. Defaults to
+   * `(env) => env.UMBRACO_CLOUD_ROUTING_ENABLED === "true"` so infra
+   * (`wrangler.toml [vars]`) can flip cloud mode at deploy time without
+   * consumer source edits. Pass a custom predicate (or `() => true`) to
+   * gate cloud routing on a different env var or always-on behaviour.
+   */
+  enabled?: (env: HostedMcpEnv) => boolean;
+  /**
    * Cache TTLs in milliseconds. Defaults to `{ ok: 60_000, miss: 30_000, error: 10_000 }`.
    */
   cacheTtl?: {
@@ -102,14 +110,15 @@ export function umbracoCloudSiteRouting(
     cache.set(siteId, entry);
   };
 
+  const enabled =
+    options.enabled ??
+    ((env: HostedMcpEnv) => env.UMBRACO_CLOUD_ROUTING_ENABLED === "true");
+
   const resolveSite: SiteRoutingResolver = async (siteId, env) => {
-    // Cloud routing is gated by a Worker env var so infra
-    // (`wrangler.toml [vars]`) can flip the mode at deploy time without
-    // consumer source edits. When off, refuse to resolve any site so the rest
-    // of the request pipeline behaves single-tenant. Defense in depth — the
-    // primary gates live in `createWorkerExport` / `createDefaultHandler`,
-    // which short-circuit before this resolver is invoked.
-    if (env.UMBRACO_CLOUD_ROUTING_ENABLED !== "true") {
+    // Defense in depth — the primary gates live in `createWorkerExport` /
+    // `createDefaultHandler`, which consult the same `enabled` predicate
+    // exposed below and short-circuit before this resolver is invoked.
+    if (!enabled(env)) {
       return null;
     }
 
@@ -149,6 +158,7 @@ export function umbracoCloudSiteRouting(
   return {
     pathPrefix: options.pathPrefix ?? DEFAULT_PATH_PREFIX,
     resolveSite,
+    enabled,
   };
 }
 

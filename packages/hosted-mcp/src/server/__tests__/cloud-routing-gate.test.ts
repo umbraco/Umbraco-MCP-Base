@@ -1,11 +1,17 @@
 /**
- * Tests the env-driven gate (`UMBRACO_CLOUD_ROUTING_ENABLED`) added in
- * `createWorkerExport` (gate 2) and `createDefaultHandler` (gate 1).
+ * Tests the runtime gate (`siteRouting.enabled`) consulted by gates 1 and 2:
+ * - `createDefaultHandler` derives `effectiveSiteRouting` from `enabled?.(env)`
+ * - `createWorkerExport` consults the same predicate at request time
  *
- * Three real flag/wiring combinations exercised here:
- * - `siteRouting` absent — single-tenant path, flag ignored
- * - `siteRouting` present + flag off — must behave like single-tenant
- * - `siteRouting` present + flag on — current PR #88 behaviour
+ * Real wiring combinations exercised:
+ * - `siteRouting` absent — single-tenant path, gate inert
+ * - `siteRouting` present, no `enabled` — always-on (default for custom configs)
+ * - `siteRouting` present + `enabled` returns false — behaves like single-tenant
+ * - `siteRouting` present + `enabled` returns true — full URL-based routing
+ *
+ * The Umbraco Cloud preset wires `enabled` to `env.UMBRACO_CLOUD_ROUTING_ENABLED`
+ * by default; non-Cloud consumers either omit `enabled` (always-on) or supply
+ * their own predicate.
  */
 
 import { describe, expect, it, jest } from "@jest/globals";
@@ -36,7 +42,11 @@ const siteConfigFixture: SiteConfig = {
   oauthClientId: "test-client",
 };
 
-function makeSiteRouting(): SiteRoutingConfig & {
+interface MakeSiteRoutingOptions {
+  enabled?: SiteRoutingConfig["enabled"];
+}
+
+function makeSiteRouting(opts: MakeSiteRoutingOptions = {}): SiteRoutingConfig & {
   resolveSite: jest.Mock<(siteId: string, env: HostedMcpEnv) => Promise<SiteConfig | null>>;
 } {
   return {
@@ -44,6 +54,7 @@ function makeSiteRouting(): SiteRoutingConfig & {
     resolveSite: jest
       .fn<(siteId: string, env: HostedMcpEnv) => Promise<SiteConfig | null>>()
       .mockResolvedValue(siteConfigFixture),
+    ...(opts.enabled ? { enabled: opts.enabled } : {}),
   };
 }
 
@@ -68,19 +79,18 @@ function makeEnv(overrides: Partial<HostedMcpEnv> = {}): HostedMcpEnv {
   };
 }
 
-describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", () => {
-  describe("siteRouting wired + flag on", () => {
+describe("createWorkerExport — siteRouting.enabled gate (gate 2)", () => {
+  describe("siteRouting wired + enabled returns true", () => {
     it("renders the site-routing landing page on GET /", async () => {
       const oauthProvider = makeOauthProvider();
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
-        siteRouting: makeSiteRouting(),
+        siteRouting: makeSiteRouting({ enabled: () => true }),
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" });
       const response = await handler.fetch(
         new Request("https://worker.example.com/"),
-        env,
+        makeEnv(),
         {} as ExecutionContext,
       );
 
@@ -92,13 +102,13 @@ describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", (
 
     it("routes /at/{alias} requests through siteRouter (resolveSite invoked)", async () => {
       const oauthProvider = makeOauthProvider();
-      const siteRouting = makeSiteRouting();
+      const siteRouting = makeSiteRouting({ enabled: () => true });
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
         siteRouting,
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" });
+      const env = makeEnv();
       await handler.fetch(
         new Request("https://worker.example.com/at/abc/"),
         env,
@@ -112,13 +122,12 @@ describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", (
       const oauthProvider = makeOauthProvider();
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
-        siteRouting: makeSiteRouting(),
+        siteRouting: makeSiteRouting({ enabled: () => true }),
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" });
       const response = await handler.fetch(
         new Request("https://worker.example.com/.well-known/oauth-protected-resource/at/abc"),
-        env,
+        makeEnv(),
         {} as ExecutionContext,
       );
 
@@ -129,18 +138,17 @@ describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", (
     });
   });
 
-  describe("siteRouting wired + flag off", () => {
+  describe("siteRouting wired + enabled returns false", () => {
     it("renders the single-tenant landing page on GET /", async () => {
       const oauthProvider = makeOauthProvider();
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
-        siteRouting: makeSiteRouting(),
+        siteRouting: makeSiteRouting({ enabled: () => false }),
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv();
       const response = await handler.fetch(
         new Request("https://worker.example.com/"),
-        env,
+        makeEnv(),
         {} as ExecutionContext,
       );
 
@@ -152,16 +160,15 @@ describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", (
 
     it("falls /at/{alias} through to OAuthProvider unchanged (no resolveSite)", async () => {
       const oauthProvider = makeOauthProvider(async () => new Response("oauth-401", { status: 401 }));
-      const siteRouting = makeSiteRouting();
+      const siteRouting = makeSiteRouting({ enabled: () => false });
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
         siteRouting,
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv();
       const response = await handler.fetch(
         new Request("https://worker.example.com/at/abc/"),
-        env,
+        makeEnv(),
         {} as ExecutionContext,
       );
 
@@ -174,52 +181,101 @@ describe("createWorkerExport — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 2)", (
       const oauthProvider = makeOauthProvider(async () => new Response("oauth-fallthrough", { status: 404 }));
       const handler = createWorkerExport(oauthProvider, {
         ...baseOptions,
-        siteRouting: makeSiteRouting(),
+        siteRouting: makeSiteRouting({ enabled: () => false }),
       }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv();
       await handler.fetch(
         new Request("https://worker.example.com/.well-known/oauth-protected-resource/at/abc"),
-        env,
+        makeEnv(),
         {} as ExecutionContext,
       );
 
       expect(oauthProvider.fetch).toHaveBeenCalledTimes(1);
     });
-  });
 
-  describe("siteRouting absent (flag ignored)", () => {
-    it("flag=on still serves the single-tenant landing page", async () => {
-      const oauthProvider = makeOauthProvider();
-      const handler = createWorkerExport(
-        oauthProvider,
-        baseOptions,
-      ) as unknown as { fetch: WorkerFetch };
+    it("passes the request env to the predicate", async () => {
+      const enabled = jest.fn<NonNullable<SiteRoutingConfig["enabled"]>>().mockReturnValue(false);
+      const oauthProvider = makeOauthProvider(async () => new Response("ok", { status: 401 }));
+      const handler = createWorkerExport(oauthProvider, {
+        ...baseOptions,
+        siteRouting: makeSiteRouting({ enabled }),
+      }) as unknown as { fetch: WorkerFetch };
 
-      const env = makeEnv({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" });
-      const response = await handler.fetch(
-        new Request("https://worker.example.com/"),
+      const env = makeEnv({ UMBRACO_BASE_URL: "https://probe.example.com" });
+      await handler.fetch(
+        new Request("https://worker.example.com/at/abc/"),
         env,
         {} as ExecutionContext,
       );
 
+      expect(enabled).toHaveBeenCalledWith(env);
+    });
+  });
+
+  describe("siteRouting wired without `enabled` (default always-on, e.g. custom non-Cloud config)", () => {
+    it("activates routing without consulting any env var", async () => {
+      const oauthProvider = makeOauthProvider();
+      const siteRouting = makeSiteRouting(); // no `enabled`
+      const handler = createWorkerExport(oauthProvider, {
+        ...baseOptions,
+        siteRouting,
+      }) as unknown as { fetch: WorkerFetch };
+
+      const env = makeEnv(); // no UMBRACO_CLOUD_ROUTING_ENABLED
+      await handler.fetch(
+        new Request("https://worker.example.com/at/abc/"),
+        env,
+        {} as ExecutionContext,
+      );
+
+      expect(siteRouting.resolveSite).toHaveBeenCalledWith("abc", env);
+    });
+
+    it("renders the site-routing landing page on GET /", async () => {
+      const handler = createWorkerExport(makeOauthProvider(), {
+        ...baseOptions,
+        siteRouting: makeSiteRouting(),
+      }) as unknown as { fetch: WorkerFetch };
+
+      const response = await handler.fetch(
+        new Request("https://worker.example.com/"),
+        makeEnv(),
+        {} as ExecutionContext,
+      );
+
+      expect(await response.text()).toContain("Per-project URLs");
+    });
+  });
+
+  describe("siteRouting absent (gate inert)", () => {
+    it("serves the single-tenant landing page regardless of env", async () => {
+      const handler = createWorkerExport(
+        makeOauthProvider(),
+        baseOptions,
+      ) as unknown as { fetch: WorkerFetch };
+
+      const response = await handler.fetch(
+        new Request("https://worker.example.com/"),
+        makeEnv({ UMBRACO_CLOUD_ROUTING_ENABLED: "true" }),
+        {} as ExecutionContext,
+      );
+
       const body = await response.text();
-      expect(response.status).toBe(200);
       expect(body).toContain("https://single.example.com");
       expect(body).not.toContain("Per-project URLs");
     });
   });
 });
 
-describe("createDefaultHandler — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 1)", () => {
-  it("flag off + siteRouting wired: /callback/{siteId} returns 404 (single-tenant routing)", async () => {
+describe("createDefaultHandler — siteRouting.enabled gate (gate 1)", () => {
+  it("enabled=false + siteRouting wired: /callback/{siteId} returns 404 (single-tenant routing)", async () => {
     // handleSingleSiteRequest only matches `path === "/callback"`.
     // handleSiteRoutingRequest matches `/callback/:siteId`.
-    // With the flag off, gate 1 must select single-tenant routing — so the
+    // With the gate off, gate 1 must select single-tenant routing — so the
     // path falls through to 404 instead of being handled.
     const handler = createDefaultHandler({
       ...baseOptions,
-      siteRouting: makeSiteRouting(),
+      siteRouting: makeSiteRouting({ enabled: () => false }),
     }) as unknown as { fetch: DefaultFetch };
 
     const response = await handler.fetch(
@@ -230,10 +286,10 @@ describe("createDefaultHandler — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 1)",
     expect(response.status).toBe(404);
   });
 
-  it("flag off + siteRouting wired: /info renders single-tenant info shape", async () => {
+  it("enabled=false + siteRouting wired: /info renders single-tenant info shape", async () => {
     const handler = createDefaultHandler({
       ...baseOptions,
-      siteRouting: makeSiteRouting(),
+      siteRouting: makeSiteRouting({ enabled: () => false }),
     }) as unknown as { fetch: DefaultFetch };
 
     const response = await handler.fetch(
@@ -247,7 +303,7 @@ describe("createDefaultHandler — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 1)",
     expect(body).not.toHaveProperty("sites");
   });
 
-  it("flag absent + siteRouting absent: /callback/{siteId} also 404s (today's behaviour)", async () => {
+  it("siteRouting absent: /callback/{siteId} also 404s (today's behaviour)", async () => {
     const handler = createDefaultHandler(baseOptions) as unknown as {
       fetch: DefaultFetch;
     };
@@ -258,5 +314,23 @@ describe("createDefaultHandler — UMBRACO_CLOUD_ROUTING_ENABLED gate (gate 1)",
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it("siteRouting wired without `enabled` (default always-on): /info still renders without leaking env names", async () => {
+    const handler = createDefaultHandler({
+      ...baseOptions,
+      siteRouting: makeSiteRouting(),
+    }) as unknown as { fetch: DefaultFetch };
+
+    const response = await handler.fetch(
+      new Request("https://worker.example.com/info"),
+      makeEnv({ ENABLE_INFO_ENDPOINT: "true" }),
+    );
+
+    // Always-on: info endpoint doesn't differentiate, but we ensure no throw
+    // and that single-site shape is preserved (no `sites` in URL-based routing).
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("sites");
   });
 });

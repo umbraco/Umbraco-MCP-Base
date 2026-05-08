@@ -88,4 +88,18 @@ export interface SiteRoutingConfig {
     siteId: string,
     request: Request
   ) => Response | Promise<Response>;
+  /**
+   * Optional runtime gate. Returns `true` to activate site routing for a
+   * given request, `false` to behave as a single-tenant deployment for it.
+   *
+   * Defaults to always-on. The Cloud preset (`umbracoCloudSiteRouting`)
+   * defaults this to `(env) => env.UMBRACO_CLOUD_ROUTING_ENABLED === "true"`
+   * so infra (`wrangler.toml [vars]`) can flip the mode at deploy time
+   * without consumer source edits. Custom non-Cloud `siteRouting` configs
+   * may pass their own predicate, e.g. driven by a different env var.
+   *
+   * On Cloudflare Workers `env` is only available per-request, which is why
+   * this lives in the routing config rather than at module scope.
+   */
+  enabled?: (env: HostedMcpEnv) => boolean;
 }
