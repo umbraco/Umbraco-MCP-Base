@@ -103,6 +103,16 @@ export function umbracoCloudSiteRouting(
   };
 
   const resolveSite: SiteRoutingResolver = async (siteId, env) => {
+    // Cloud routing is gated by a Worker env var so infra
+    // (`wrangler.toml [vars]`) can flip the mode at deploy time without
+    // consumer source edits. When off, refuse to resolve any site so the rest
+    // of the request pipeline behaves single-tenant. Defense in depth — the
+    // primary gates live in `createWorkerExport` / `createDefaultHandler`,
+    // which short-circuit before this resolver is invoked.
+    if (env.UMBRACO_CLOUD_ROUTING_ENABLED !== "true") {
+      return null;
+    }
+
     const now = Date.now();
     const cached = cache.get(siteId);
     if (cached && cached.expiresAt > now) {

@@ -112,6 +112,17 @@ export interface HostedMcpEnv {
   ENABLE_CONSENT_TOOL_SELECTION?: string;
 
   // Umbraco Cloud (optional, used by `umbracoCloudSiteRouting`)
+  /**
+   * Set to "true" to enable URL-based cloud routing (`/at/{alias}/`).
+   *
+   * When `siteRouting` is wired in `worker.ts` but this flag is absent or not
+   * `"true"`, the library treats the Worker as single-tenant: `/at/*` requests
+   * 401 from `OAuthProvider`'s token check, `/authorize` ignores any
+   * `/at/{alias}` resource parameter, and `umbracoCloudSiteRouting.resolveSite`
+   * returns null. Lets infra (`wrangler.toml [vars]`) flip the mode at deploy
+   * time without consumer source edits.
+   */
+  UMBRACO_CLOUD_ROUTING_ENABLED?: string;
   /** Cloud region used for `{alias}.{region}.umbraco.io` URL composition (default "euwest01"). */
   UMBRACO_CLOUD_REGION?: string;
 

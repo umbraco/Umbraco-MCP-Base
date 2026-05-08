@@ -230,6 +230,20 @@ export function createDefaultHandler(options: HostedMcpServerOptions) {
       // Build consent tool config (only if enableConsentToolSelection resolved to true)
       const consentToolConfig = buildConsentToolConfig(optionsWithConsent);
 
+      // URL-based cloud routing is gated by an env var so infra can flip the
+      // mode at deploy time without consumer source edits. When `siteRouting`
+      // is wired but the flag is off, treat the worker as single-tenant —
+      // don't expose `siteRouting` to the authorize handler or downstream
+      // routing.
+      const effectiveSiteRouting =
+        options.siteRouting && env.UMBRACO_CLOUD_ROUTING_ENABLED === "true"
+          ? options.siteRouting
+          : undefined;
+      const effectiveOptions: HostedMcpServerOptions = {
+        ...options,
+        siteRouting: effectiveSiteRouting,
+      };
+
       // Merge auto-generated tool config and multi-site config into auth options.
       // Use the server name as the consent screen server name if not explicitly set.
       const effectiveAuthOptions: UmbracoAuthHandlerOptions = {
@@ -237,10 +251,10 @@ export function createDefaultHandler(options: HostedMcpServerOptions) {
         ...options.authOptions,
         ...(consentToolConfig ? { consentToolConfig } : {}),
         ...(options.multiSite ? { sites: options.multiSite.sites } : {}),
-        ...(options.siteRouting ? { siteRouting: options.siteRouting } : {}),
+        ...(effectiveSiteRouting ? { siteRouting: effectiveSiteRouting } : {}),
       };
 
-      return handleDefaultRequest(request, env, options, effectiveAuthOptions);
+      return handleDefaultRequest(request, env, effectiveOptions, effectiveAuthOptions);
     },
   };
 }
@@ -311,18 +325,26 @@ export function createWorkerExport(
 
       const pathname = url.pathname;
 
-      if (siteRouter) {
+      // URL-based cloud routing is gated by an env var so infra can flip the
+      // mode at deploy time without consumer source edits. `siteRouter` itself
+      // is built eagerly from compile-time `options.siteRouting`; the runtime
+      // gate lives at the call site so `/at/*` requests fall through to
+      // OAuthProvider (which 401s unauthenticated requests) when off.
+      const cloudRoutingEnabled = env.UMBRACO_CLOUD_ROUTING_ENABLED === "true";
+      const useSiteRouter = siteRouter && cloudRoutingEnabled;
+
+      if (useSiteRouter) {
         // RFC 9728 protected resource metadata, scoped per site.
         const opmPrefix = "/.well-known/oauth-protected-resource";
         if (pathname.startsWith(opmPrefix + "/")) {
           const resourcePath = pathname.slice(opmPrefix.length);
-          if (siteRouter.prefixRegex.test(resourcePath)) {
+          if (siteRouter!.prefixRegex.test(resourcePath)) {
             return renderProtectedResourceMetadata(request, url, resourcePath);
           }
         }
 
-        if (siteRouter.prefixRegex.test(pathname)) {
-          return siteRouter.fetch(request, env, ctx);
+        if (siteRouter!.prefixRegex.test(pathname)) {
+          return siteRouter!.fetch(request, env, ctx);
         }
       }
 
@@ -332,7 +354,7 @@ export function createWorkerExport(
 
         // Browser visit: plain GET with no auth and not SSE → landing page
         if (request.method === "GET" && !hasAuth && !acceptsSSE) {
-          if (options.siteRouting) {
+          if (options.siteRouting && cloudRoutingEnabled) {
             return renderSiteRoutingLandingResponse(
               options.name,
               options.version,

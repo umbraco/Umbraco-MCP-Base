@@ -105,6 +105,12 @@ const options = {
   //      clients reach Umbraco ID SSO — see
   //      umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs.
   //
+  // The runtime mode is gated by `env.UMBRACO_CLOUD_ROUTING_ENABLED`. Wire
+  // `siteRouting` unconditionally and set the env var (`wrangler.toml [vars]`
+  // or `wrangler secret`) to `"true"` at deploy time to flip into cloud mode.
+  // When the var is absent or any other value, the Worker behaves as a
+  // single-tenant deployment driven by `UMBRACO_BASE_URL`.
+  //
   // siteRouting: umbracoCloudSiteRouting({
   //   oauthClientId: "mcp-cms-editor",  // the client_id registered in each project
   //   // region: "euwest01",              // or set env.UMBRACO_CLOUD_REGION
@@ -171,7 +177,11 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
  * to the original `/at/{alias}` URL (per the MCP spec's resource-indicator
  * requirement); OAuthProvider must see that URL to validate the token. The
  * `/at/{alias}/` → `/mcp` rewrite happens INSIDE `apiHandler` below, after
- * token validation.
+ * token validation. When `siteRouting` is wired but
+ * `env.UMBRACO_CLOUD_ROUTING_ENABLED !== "true"`, the library disables the
+ * `/at/*` paths at request time — leaving `apiRoute` as `["/mcp", "/at/"]`
+ * is safe in single-tenant deployments because OAuthProvider's token check
+ * 401s any unauthenticated `/at/*` request.
  */
 const provider = new OAuthProvider({
   apiRoute: ["/mcp", "/at/"],
