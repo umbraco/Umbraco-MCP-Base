@@ -60,14 +60,45 @@ Combinations:
 | URL prefix | `resource` param | Behavior |
 |------------|------------------|----------|
 | `/at/A/...` | absent | Use A. Synthesize `resource = ${origin}/at/A` so the issued token has `aud` set correctly. |
-| `/at/A/...` | `${origin}/at/A` | Use A. Cross-validation passes. |
-| `/at/A/...` | `${origin}/at/B` | **Reject** with `invalid_request` — mismatched tenant. |
+| `/at/A/...` | `${origin}/at/A` (canonical) | Use A. Cross-validation passes. |
+| `/at/A/...` | any other string | **Reject** with `invalid_request` — see "Resource match rule" below. |
 | `/authorize` (root) | `${origin}/at/A` | Existing behavior — use A from `resource`. |
 | `/authorize` (root) | absent | Existing behavior — 400 with "resource required" when `siteRouting` is configured. |
 
+### Resource match rule
+
+When the URL prefix is `/at/<alias>/...`, a non-empty `resource` parameter must be **byte-for-byte equal** to the PRM canonical value `${origin}/at/<alias>` — no normalisation, no trailing-slash tolerance, no path-suffix tolerance. Any other value is rejected with `invalid_request`.
+
+| Sent `resource` | Result against `/at/A/...` |
+|-----------------|----------------------------|
+| (omitted) | Synthesised — `${origin}/at/A` |
+| `${origin}/at/A` | Pass |
+| `${origin}/at/A/` | **Reject** (trailing slash differs from canonical PRM value) |
+| `${origin}/at/A/mcp` | **Reject** (full endpoint, not the resource identifier) |
+| `${origin}/at/B` | **Reject** (mismatched tenant) |
+| `https://otherhost/at/A` | **Reject** (host mismatch) |
+| `http://<origin>/at/A` (when origin is https) | **Reject** (scheme mismatch) |
+
+Rationale: clients that walk PRM → AS metadata correctly receive and send the canonical value. Strict equality is harder to spoof than a normalisation pipeline, and avoids silent acceptance of variants that signal a confused client (e.g. one inferring `resource` from the MCP request URL rather than the PRM doc).
+
 ### Audience synthesis
 
-When the authorize handler is reached via the URL-prefix path with no client-supplied `resource`, the lib injects `resource = ${origin}/at/<alias>` into the parsed `OAuthAuthRequest` before forwarding to OAuthProvider. This is required for OAuthProvider to bind the issued token's `aud` claim to the per-tenant URL, which the existing audience check at `/at/<alias>/mcp` then validates. Synthesis is server-side only — the client doesn't see it.
+When the authorize handler is reached via the URL-prefix path with no client-supplied `resource`, the lib **injects `resource = ${origin}/at/<alias>` into the parsed `OAuthAuthRequest` before forwarding to OAuthProvider's `/authorize`**. OAuthProvider then runs its existing flow and produces a token with `aud = ${origin}/at/<alias>` via its standard resource-indicator handling.
+
+Critically, the lib does **not** stamp `aud` itself at token issuance — that would require a deeper hook into OAuthProvider's token machinery. Injecting at the entry forwarder keeps OAuthProvider's role unchanged and reuses its battle-tested resource-indicator path.
+
+Synthesis is server-side only — the client never sees the synthesised value.
+
+### Redirect URI handling
+
+The MCP client passes `redirect_uri` as part of the authorize request. Under tenant routing, the canonical redirect_uri is `${origin}/at/<alias>/callback` (matching the prefixed AS metadata's endpoints). DCR registered the prefixed form, so:
+
+- `/at/<alias>/register` accepts and stores `redirect_uri = ${origin}/at/<alias>/callback` in OAuthProvider's client record
+- `/at/<alias>/authorize` forwards `redirect_uri` through to OAuthProvider **unchanged** — the prefix-stripper does NOT rewrite it
+- OAuthProvider's redirect_uri allowlist match passes because the registered form is identical
+- `/at/<alias>/callback` is routed by the lib's existing tenant dispatch back to the per-tenant callback handler
+
+This avoids needing to teach OAuthProvider that the redirect_uri prefix is "really" a single root path. The path is what the client registered and what comes back; treating it as opaque keeps OAuthProvider's handlers correct.
 
 ## Architecture
 
@@ -115,44 +146,63 @@ For `register/authorize/token`, the lib strips the prefix to `/{register,authori
 
 ### Tenant binding store
 
-The `at:<alias>:client:<client_id>` KV record is the only new persistent state. The value is intentionally minimal (`"1"` or a JSON envelope with creation timestamp for audit) — it's a presence check, not a copy of OAuthProvider's registration record (which OAuthProvider continues to own at its existing flat KV layout).
+Two records per registration, both written transactionally at `/at/<alias>/register`:
 
-This avoids forking OAuthProvider's storage. Tenant scope is enforced by the lib's binding check on the way in; OAuthProvider's flat client-id store is unchanged.
+| Key | Value | Purpose |
+|-----|-------|---------|
+| `at:<alias>:client:<client_id>` | `{"createdAt": <unix-ms>}` | Forward index — answers "is this client allowed at this tenant?" Used at every `/at/<alias>/authorize` and `/at/<alias>/token`. |
+| `client:<client_id>:tenant` | `<alias>` | Reverse index — answers "which tenant did this client register under?" Used for revocation, audit, and any future token introspection. |
+
+Doubles the write at registration, which is rare. The forward-only model paints us into a corner the first time we need to revoke or audit by `client_id` alone — adding the reverse index later is fine for new registrations but leaves old ones orphaned, so we add it from day one.
+
+The value is intentionally minimal (a creation timestamp for audit, nothing else) — it's a presence check, not a copy of OAuthProvider's registration record (which OAuthProvider continues to own at its existing flat KV layout). OAuthProvider's flat client-id store is unchanged.
+
+Tenant scope is enforced by the lib's binding check on the way in. The reverse index is read-only at request time; revocation flows write to both keys.
 
 ## Module organisation
 
-Two new files plus targeted edits to three existing files:
+Two new files plus targeted edits to three existing files. The shared alias-context helper is extracted to `site-routing/internal/` so both `site-routing/` and `tenant-oauth/` can reuse the regex / resolution logic without `tenant-oauth/` reaching into `site-routing/`'s public surface.
 
 ```
 packages/hosted-mcp/src/
+├── site-routing/
+│   ├── path-prefix.ts                         [UNCHANGED]
+│   ├── site-router.ts                         [UNCHANGED]
+│   │   — siteRouter still validates /at/<alias>/mcp and forwards to OAuthProvider
+│   └── internal/
+│       └── alias-context.ts                   [NEW — shared helper]
+│           - resolveAliasFromUrl(url, siteRouting)  — runs prefixRegex, returns { alias, site } or rejection Response
+│           - canonicalResourceForAlias(origin, alias)  — returns the strict PRM canonical value
 ├── tenant-oauth/                              [NEW directory]
 │   ├── tenant-router.ts                       [NEW]
 │   │   - matchTenantOAuthPath(pathname)       — recognises /at/<alias>/{authorize,token,register,callback,.well-known/...}
 │   │   - dispatchTenantOAuth(request, ...)    — alias validation + binding check + prefix strip + forward
 │   │   - renderTenantAuthorizationServerMetadata(origin, alias)
+│   ├── resource-match.ts                      [NEW]
+│   │   - validateResourceMatch(sentResource, canonicalResource)  — strict equals; returns ok / error response
 │   ├── binding-store.ts                       [NEW]
-│   │   - putClientBinding(kv, alias, clientId)
-│   │   - hasClientBinding(kv, alias, clientId)
-│   │   - listClientBindings(kv, alias)        — admin / future use
+│   │   - putClientBinding(kv, alias, clientId)               — writes BOTH forward and reverse keys
+│   │   - hasClientBinding(kv, alias, clientId)               — forward lookup
+│   │   - getClientTenant(kv, clientId)                       — reverse lookup
+│   │   - revokeClient(kv, clientId)                          — deletes both keys (uses reverse to find alias)
 │   └── __tests__/
 │       ├── tenant-router.test.ts              [NEW]
+│       ├── resource-match.test.ts             [NEW]
 │       └── binding-store.test.ts              [NEW]
 ├── server/
-│   └── worker-entry.ts                        [MODIFIED]
-│       - createWorkerExport: dispatch /at/<alias>/{authorize,token,register,callback} via tenant-router BEFORE siteRouter.fetch
-│       - renderProtectedResourceMetadata: emit tenant-pinned authorization_servers
-│       - new well-known route: /.well-known/oauth-authorization-server/at/<alias>
-├── auth/
-│   └── umbraco-handler.ts                     [MODIFIED]
-│       - resolveSiteFromResource → resolveSiteFromContext
-│         (accept URL-prefix alias as primary source, cross-validate `resource` if present)
-│       - audience synthesis when alias from URL prefix and `resource` absent
-└── site-routing/
-    └── site-router.ts                         [UNCHANGED]
-        — siteRouter still validates /at/<alias>/mcp and forwards to OAuthProvider
+│   ├── worker-entry.ts                        [MODIFIED]
+│   │   - createWorkerExport: dispatch /at/<alias>/{authorize,token,register,callback} and the new well-known via tenant-router BEFORE siteRouter.fetch
+│   │   - renderProtectedResourceMetadata: emit tenant-pinned authorization_servers
+│   └── __tests__/
+│       └── tenant-discovery.test.ts           [NEW]
+└── auth/
+    └── umbraco-handler.ts                     [MODIFIED]
+        - resolveSiteFromResource → resolveSiteFromContext
+          (accept URL-prefix alias as primary source, cross-validate `resource` if present)
+        - audience synthesis happens here when alias from URL prefix and `resource` absent
 ```
 
-The new `tenant-oauth/` directory is intentionally separate from `site-routing/`. `site-routing/` validates aliases for the MCP endpoint (its current job); `tenant-oauth/` mediates per-tenant OAuth flows. Two units, two responsibilities.
+`site-routing/`'s mandate stays "parse alias, forward MCP traffic." `tenant-oauth/` owns OAuth mediation: binding store, RFC 8414 metadata, cross-validation, prefix-strip-and-forward. The next person reading `site-routing/` doesn't need to understand OAuth flows to grok alias validation, and vice versa. Dependency direction: `tenant-oauth/` imports from `site-routing/internal/`, never the reverse.
 
 ## Error handling
 
@@ -189,16 +239,32 @@ E2E tests (Playwright + running Umbraco):
 - [ ] `/.well-known/oauth-protected-resource/at/<alias>` advertises `authorization_servers: [${origin}/at/<alias>]`
 - [ ] `/.well-known/oauth-authorization-server/at/<alias>` returns 200 unauthenticated, valid RFC 8414 doc, all endpoints tenant-prefixed
 - [ ] OPTIONS preflight returns 204 with CORS headers on the new well-known
-- [ ] `POST /at/<alias>/register` succeeds and creates a `at:<alias>:client:<client_id>` binding
+- [ ] `POST /at/<alias>/register` succeeds and creates BOTH `at:<alias>:client:<client_id>` and `client:<client_id>:tenant` bindings
 - [ ] `GET /at/<alias>/authorize?client_id=X` succeeds when X is bound to `<alias>`, fails 400 when bound to a different alias or unbound
+- [ ] `redirect_uri` registered at `/at/<alias>/register` is preserved unchanged through `/at/<alias>/authorize` (no prefix stripping)
+- [ ] `resource` parameter strict match: trailing-slash variant rejected, `/mcp`-suffix variant rejected, host/scheme mismatch rejected
 - [ ] `GET /at/A/authorize?resource=${origin}/at/B` returns 400 `invalid_request` (mismatch)
 - [ ] Token issued via `/at/<alias>/authorize` (no `resource` from client) carries `aud = ${origin}/at/<alias>`
 - [ ] `/at/<alias>/mcp` accepts the tenant-bound token; `/at/<other>/mcp` rejects it (existing behavior, unchanged)
 - [ ] RFC-8707 client (sends `resource`) still completes flow via root `/authorize` when `siteRouting` is on
 - [ ] Single-tenant Worker (no `siteRouting`) sees zero behavior change
 
+## Rollout
+
+After this change, the canonical `aud` claim becomes `${origin}/at/<alias>`. Tokens issued under the existing #94 path have whatever `aud` the lib produces today (driven by the client-supplied `resource`, typically `${origin}/at/<alias>` already because clients walk PRM and PRM advertises that as the resource — same shape).
+
+Two scenarios:
+
+1. **Pre-existing tokens whose `aud` matches the new canonical form** — no action, validation continues to pass.
+2. **Pre-existing tokens whose `aud` differs** (e.g. clients that sent a slight variant) — these fail audience validation after deployment until they expire and are re-issued by the new flow.
+
+Default access-token TTL is 60 minutes, so the rollout window is naturally bounded. No transitional dual-acceptance is required. Document the window in the PR description for the operator running the deploy; if zero-downtime is critical they can pin a maintenance window equal to the access-token TTL plus a buffer.
+
+Refresh tokens issued under #94 continue to refresh into new-format access tokens via OAuthProvider's existing flow (the refresh path uses the stored authorization grant's resource, which the lib will canonicalise on next use).
+
 ## Out of scope
 
 - Per-tenant client_secret rotation / admin UI (future work, opt-in)
 - Listing or migrating shared-DCR registrations (none exist)
 - A higher-level `createUmbracoCloudWorker` wrapper (separate issue)
+- Transitional dual-`aud` acceptance for in-flight tokens (rejected — the natural TTL-bounded rollout is sufficient)
