@@ -1,0 +1,11 @@
+name = "mcp-oauth-discovery-spike"
+main = "worker.ts"
+compatibility_date = "2025-01-01"
+
+# Deploy to a workers.dev subdomain — no custom domain needed for the spike.
+# After `wrangler deploy`, note the assigned URL and use it as the MCP endpoint
+# in ChatGPT / Claude Desktop / MCP Inspector.
+workers_dev = true
+
+[observability]
+enabled = true
