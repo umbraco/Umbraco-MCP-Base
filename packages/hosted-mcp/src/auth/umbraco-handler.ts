@@ -27,8 +27,10 @@ import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from 
 import { consentResponse, type ConsentScreenOptions, type ConsentToolConfig } from "./consent.js";
 import {
   buildPrefixRegex,
+  extractSiteIdFromOneResource,
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
+import { getClientTenant } from "../tenant-oauth/binding-store.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -40,6 +42,43 @@ import {
   isClientAuthed,
   type TokenResponse,
 } from "./token-storage.js";
+
+// ============================================================================
+// Confused-deputy helper
+// ============================================================================
+
+/**
+ * Verify that the client's registered tenant matches the resolved site AND
+ * that every entry of `resource` (which may be an array) extracts to the
+ * same registered tenant. Returns true when the binding is valid.
+ *
+ * Used at root /authorize under siteRouting to block:
+ *   1. Cross-tenant reuse: client registered for A used to authorise for B.
+ *   2. Multi-resource expansion: client registered for A authorising with
+ *      `resource=[A, B]` to obtain a token whose audience covers both.
+ *   3. Audience over-broadening: an entry like `https://<worker>/at` whose
+ *      path doesn't carry an alias would be silently kept by OAuthProvider
+ *      and would prefix-match every tenant URL on audience validation.
+ *
+ * Fails closed on any entry that can't be extracted as a tenant alias —
+ * legitimate clients only ever send the canonical `${origin}/at/<alias>`.
+ */
+function checkAllResourceAliasesMatchClient(
+  resource: string | string[] | undefined,
+  prefixRegex: RegExp,
+  registeredTenant: string | null,
+  resolvedSiteId: string
+): boolean {
+  if (registeredTenant === null) return false;
+  if (registeredTenant !== resolvedSiteId) return false;
+  const values = !resource ? [] : Array.isArray(resource) ? resource : [resource];
+  for (const v of values) {
+    const alias = extractSiteIdFromOneResource(v, prefixRegex);
+    // null (non-extractable) and any cross-tenant value both fail closed.
+    if (alias !== registeredTenant) return false;
+  }
+  return true;
+}
 
 // ============================================================================
 // Crypto Helpers
@@ -322,6 +361,32 @@ export function createAuthorizeHandler(
         const result = await resolveSiteFromResource(authRequest.resource);
         if (!result.ok) return result.response;
         site = result.site;
+        // Confused-deputy defence (issue #100): when siteRouting is on the
+        // client_id MUST be registered for the resolved tenant via the
+        // per-tenant DCR flow. Reverse-index lookup blocks an attacker from
+        // reusing a client registered at /at/A/register against tenant B
+        // via root /authorize?resource=${origin}/at/B.
+        //
+        // Defence-in-depth: when `resource` is an array, EVERY extractable
+        // siteId must equal the registered tenant. Otherwise an attacker
+        // could pass `resource=A&resource=B` and have OAuthProvider mint a
+        // multi-audience token reaching tenant B.
+        if (
+          !checkAllResourceAliasesMatchClient(
+            authRequest.resource,
+            sitePrefixRegex!,
+            await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+            site.id
+          )
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: "invalid_client",
+              error_description: "Client not registered for this site",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
         // Carry siteId through consentChoices so the per-request server can
         // look up the site again with the same resolveSite callback.
         consentChoices = { ...(consentChoices ?? {}), siteId: result.site.id };
@@ -400,6 +465,27 @@ export function createAuthorizeHandler(
       const result = await resolveSiteFromResource(authRequest.resource);
       if (!result.ok) return result.response;
       routedSite = result.site;
+
+      // Confused-deputy defence (issue #100). Same check as the POST branch
+      // — also enforced on consent-screen render so the user never sees a
+      // consent prompt for a tenant the client isn't registered against.
+      // Defence-in-depth: every extractable resource alias must match.
+      if (
+        !checkAllResourceAliasesMatchClient(
+          authRequest.resource,
+          sitePrefixRegex!,
+          await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+          routedSite.id
+        )
+      ) {
+        return new Response(
+          JSON.stringify({
+            error: "invalid_client",
+            error_description: "Client not registered for this site",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Build sites list for consent screen.

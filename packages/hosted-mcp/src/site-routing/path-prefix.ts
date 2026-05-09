@@ -64,15 +64,48 @@ export function extractSiteIdFromResource(
   if (!resource) return null;
   const values = Array.isArray(resource) ? resource : [resource];
   for (const value of values) {
-    let pathname: string;
-    try {
-      pathname = new URL(value).pathname;
-    } catch {
-      // Resource may already be a path-only string (some clients).
-      pathname = value.startsWith("/") ? value : `/${value}`;
-    }
-    const siteId = extractSiteIdFromPath(pathname, prefixRegex);
+    const siteId = extractSiteIdFromOneResource(value, prefixRegex);
     if (siteId) return siteId;
   }
   return null;
+}
+
+/**
+ * Like `extractSiteIdFromResource` but returns EVERY siteId extractable from
+ * the (possibly array-valued) resource parameter. Used for defence-in-depth
+ * checks that must reject when a multi-valued `resource` carries audiences
+ * for tenants other than the registered one.
+ */
+export function extractAllSiteIdsFromResource(
+  resource: string | string[] | undefined,
+  prefixRegex: RegExp
+): string[] {
+  if (!resource) return [];
+  const values = Array.isArray(resource) ? resource : [resource];
+  const out: string[] = [];
+  for (const value of values) {
+    const siteId = extractSiteIdFromOneResource(value, prefixRegex);
+    if (siteId) out.push(siteId);
+  }
+  return out;
+}
+
+/**
+ * Extract the site identifier from a single (non-array) resource value.
+ * Returns null when the value's path doesn't match the prefix regex.
+ *
+ * Exposed so defence-in-depth callers can fail-closed on non-extractable
+ * values rather than silently dropping them.
+ */
+export function extractSiteIdFromOneResource(
+  value: string,
+  prefixRegex: RegExp
+): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(value).pathname;
+  } catch {
+    pathname = value.startsWith("/") ? value : `/${value}`;
+  }
+  return extractSiteIdFromPath(pathname, prefixRegex);
 }
