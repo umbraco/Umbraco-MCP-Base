@@ -26,6 +26,10 @@ import type {
 import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { createSiteRouter } from "../site-routing/site-router.js";
 import {
+  matchTenantOAuthPath,
+  dispatchTenantOAuth,
+} from "../tenant-oauth/tenant-router.js";
+import {
   createAuthorizeHandler,
   createCallbackHandler,
   createLogoutCallbackHandler,
@@ -339,7 +343,39 @@ export function createWorkerExport(
       const useSiteRouter = Boolean(siteRouter && siteRoutingEnabled);
 
       if (useSiteRouter) {
-        // RFC 9728 protected resource metadata, scoped per site.
+        // 1. Tenant-OAuth paths (authorize/token/register/callback + new
+        //    per-tenant well-known + per-tenant PRM) are intercepted before
+        //    OAuthProvider sees them. Issue #100 — per-tenant DCR, audience
+        //    synthesis, confused-deputy defence.
+        const tenantMatch = matchTenantOAuthPath(pathname);
+        if (tenantMatch) {
+          return dispatchTenantOAuth(
+            tenantMatch,
+            request,
+            env,
+            ctx,
+            options.siteRouting!,
+            oauthProvider
+          );
+        }
+
+        // 2. Disable root /register under siteRouting. Per-tenant DCR is the
+        //    only legitimate registration path; root /register would produce
+        //    tenant-unbound clients that fail every authorize request.
+        if (pathname === "/register") {
+          return new Response(
+            JSON.stringify({
+              error: "registration_disabled",
+              error_description: "Use /at/<alias>/register",
+            }),
+            { status: 404, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        // 3. Legacy PRM handler — kept as a fallback for clients that walk
+        //    the prefix-matched path even though the canonical PRM is now
+        //    served by the tenant-OAuth dispatcher above. Both emit the same
+        //    tenant-pinned authorization_servers value.
         const opmPrefix = "/.well-known/oauth-protected-resource";
         if (pathname.startsWith(opmPrefix + "/")) {
           const resourcePath = pathname.slice(opmPrefix.length);
@@ -348,6 +384,8 @@ export function createWorkerExport(
           }
         }
 
+        // 4. /at/<alias>/mcp — siteRouter validates + forwards to OAuthProvider
+        //    with the path intact for audience-claim validation.
         if (siteRouter!.prefixRegex.test(pathname)) {
           return siteRouter!.fetch(request, env, ctx);
         }
@@ -547,10 +585,13 @@ function renderProtectedResourceMetadata(
     });
   }
   const issuer = `${url.protocol}//${url.host}`;
+  const tenantUrl = `${issuer}${resourcePath}`;
   return new Response(
     JSON.stringify({
-      resource: `${issuer}${resourcePath}`,
-      authorization_servers: [issuer],
+      resource: tenantUrl,
+      // Tenant-pinned per issue #100 — clients walk per-tenant AS metadata
+      // and never lose the alias.
+      authorization_servers: [tenantUrl],
       bearer_methods_supported: ["header"],
     }),
     {
