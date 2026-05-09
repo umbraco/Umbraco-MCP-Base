@@ -29,6 +29,7 @@ import {
   buildPrefixRegex,
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
+import { getClientTenant } from "../tenant-oauth/binding-store.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -322,6 +323,24 @@ export function createAuthorizeHandler(
         const result = await resolveSiteFromResource(authRequest.resource);
         if (!result.ok) return result.response;
         site = result.site;
+        // Confused-deputy defence (issue #100): when siteRouting is on the
+        // client_id MUST be registered for the resolved tenant via the
+        // per-tenant DCR flow. Reverse-index lookup blocks an attacker from
+        // reusing a client registered at /at/A/register against tenant B
+        // via root /authorize?resource=${origin}/at/B.
+        const registeredTenant = await getClientTenant(
+          env.OAUTH_KV,
+          authRequest.clientId
+        );
+        if (registeredTenant !== site.id) {
+          return new Response(
+            JSON.stringify({
+              error: "invalid_client",
+              error_description: "Client not registered for this site",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
         // Carry siteId through consentChoices so the per-request server can
         // look up the site again with the same resolveSite callback.
         consentChoices = { ...(consentChoices ?? {}), siteId: result.site.id };
@@ -400,6 +419,23 @@ export function createAuthorizeHandler(
       const result = await resolveSiteFromResource(authRequest.resource);
       if (!result.ok) return result.response;
       routedSite = result.site;
+
+      // Confused-deputy defence (issue #100). Same check as the POST branch
+      // — also enforced on consent-screen render so the user never sees a
+      // consent prompt for a tenant the client isn't registered against.
+      const registeredTenant = await getClientTenant(
+        env.OAUTH_KV,
+        authRequest.clientId
+      );
+      if (registeredTenant !== routedSite.id) {
+        return new Response(
+          JSON.stringify({
+            error: "invalid_client",
+            error_description: "Client not registered for this site",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Build sites list for consent screen.
