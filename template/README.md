@@ -58,7 +58,9 @@ npm run inspect
 ├── scripts/
 │   └── tunnels.sh              # Cloudflare tunnels for remote MCP client testing
 ├── umbraco/
-│   └── McpOAuthComposer.cs     # OAuth client registration (copy into your Umbraco project)
+│   ├── McpOAuthComposer.cs                            # Self-hosted: OAuth client for your own Worker
+│   ├── McpHostedClientsComposer.Cloud.cs              # Cloud only (commented out): one or more hosted MCP clients (Editor / Dev / …) chosen via array
+│   └── McpExternalLoginShortCircuitComposer.Cloud.cs  # Cloud only (commented out): redirects to Umbraco SSO instead of dead-ending at /umbraco/login
 ├── __tests__/
 │   └── example/                # Example tests
 ├── package.json
