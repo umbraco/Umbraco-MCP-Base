@@ -54,9 +54,16 @@ describe("validateResourceMatch", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("accepts array where one value is exactly canonical (any match wins)", () => {
-    expect(validateResourceMatch([`${canonical}/x`, canonical], canonical)).toEqual({
-      ok: true,
-    });
+  it("rejects array with multiple values even if one matches canonical", () => {
+    // RFC 8707 single-resource convention: a multi-element array at a tenant-
+    // prefixed endpoint would land extra audience claims on the issued token
+    // and let it reach a sibling tenant. Confused-deputy defence requires
+    // strict all-match (and we only allow single-element arrays in practice).
+    const r = validateResourceMatch([canonical, `${canonical}/other`], canonical);
+    expect(r.ok).toBe(false);
+  });
+
+  it("accepts a single-element array containing the canonical value", () => {
+    expect(validateResourceMatch([canonical], canonical)).toEqual({ ok: true });
   });
 });

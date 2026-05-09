@@ -27,6 +27,7 @@ import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from 
 import { consentResponse, type ConsentScreenOptions, type ConsentToolConfig } from "./consent.js";
 import {
   buildPrefixRegex,
+  extractAllSiteIdsFromResource,
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
 import { getClientTenant } from "../tenant-oauth/binding-store.js";
@@ -41,6 +42,35 @@ import {
   isClientAuthed,
   type TokenResponse,
 } from "./token-storage.js";
+
+// ============================================================================
+// Confused-deputy helper
+// ============================================================================
+
+/**
+ * Verify that the client's registered tenant matches the resolved site AND
+ * that every alias extractable from `resource` (which may be an array) is
+ * the same registered tenant. Returns true when the binding is valid.
+ *
+ * Used at root /authorize under siteRouting to block:
+ *   1. Cross-tenant reuse: client registered for A used to authorise for B.
+ *   2. Multi-resource expansion: client registered for A authorising with
+ *      `resource=[A, B]` to obtain a token whose audience covers both.
+ */
+function checkAllResourceAliasesMatchClient(
+  resource: string | string[] | undefined,
+  prefixRegex: RegExp,
+  registeredTenant: string | null,
+  resolvedSiteId: string
+): boolean {
+  if (registeredTenant === null) return false;
+  if (registeredTenant !== resolvedSiteId) return false;
+  const allAliases = extractAllSiteIdsFromResource(resource, prefixRegex);
+  for (const alias of allAliases) {
+    if (alias !== registeredTenant) return false;
+  }
+  return true;
+}
 
 // ============================================================================
 // Crypto Helpers
@@ -328,11 +358,19 @@ export function createAuthorizeHandler(
         // per-tenant DCR flow. Reverse-index lookup blocks an attacker from
         // reusing a client registered at /at/A/register against tenant B
         // via root /authorize?resource=${origin}/at/B.
-        const registeredTenant = await getClientTenant(
-          env.OAUTH_KV,
-          authRequest.clientId
-        );
-        if (registeredTenant !== site.id) {
+        //
+        // Defence-in-depth: when `resource` is an array, EVERY extractable
+        // siteId must equal the registered tenant. Otherwise an attacker
+        // could pass `resource=A&resource=B` and have OAuthProvider mint a
+        // multi-audience token reaching tenant B.
+        if (
+          !checkAllResourceAliasesMatchClient(
+            authRequest.resource,
+            sitePrefixRegex!,
+            await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+            site.id
+          )
+        ) {
           return new Response(
             JSON.stringify({
               error: "invalid_client",
@@ -423,11 +461,15 @@ export function createAuthorizeHandler(
       // Confused-deputy defence (issue #100). Same check as the POST branch
       // — also enforced on consent-screen render so the user never sees a
       // consent prompt for a tenant the client isn't registered against.
-      const registeredTenant = await getClientTenant(
-        env.OAUTH_KV,
-        authRequest.clientId
-      );
-      if (registeredTenant !== routedSite.id) {
+      // Defence-in-depth: every extractable resource alias must match.
+      if (
+        !checkAllResourceAliasesMatchClient(
+          authRequest.resource,
+          sitePrefixRegex!,
+          await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+          routedSite.id
+        )
+      ) {
         return new Response(
           JSON.stringify({
             error: "invalid_client",

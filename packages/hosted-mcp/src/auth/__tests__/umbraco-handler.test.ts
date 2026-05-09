@@ -1561,6 +1561,27 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       expect(response.status).toBe(200);
     });
 
+    it("rejects 400 invalid_client when resource is multi-valued and includes a tenant the client is not registered for", async () => {
+      // Defence-in-depth at the root /authorize handler. Even if an attacker
+      // bypassed the dispatcher (e.g. via a deliberate downgrade to root),
+      // a multi-resource attack with a foreign alias must fail closed here.
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: [
+            "https://worker.example.com/at/my-project",
+            "https://worker.example.com/at/foreign-tenant",
+          ],
+        })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toBe("invalid_client");
+    });
+
     it("rejects 400 invalid_client on POST consent submission with cross-tenant client", async () => {
       const env = createMockEnv();
       (env.OAUTH_KV as unknown as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get

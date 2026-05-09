@@ -317,4 +317,81 @@ describe("dispatchTenantOAuth — authorize", () => {
     );
     expect(response.status).toBe(200);
   });
+
+  it("rejects multi-valued resource (resource=A&resource=B) even when one element is canonical", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn();
+    const response = await dispatchTenantOAuth(
+      { kind: "authorize", alias: "demo" },
+      new Request(
+        "https://worker.example.com/at/demo/authorize?client_id=client-1&response_type=code&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fdemo&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fother"
+      ),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe("invalid_request");
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+
+  it("forces resource to canonical when forwarding (overrides client-supplied value even if it would have validated)", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn(async (req: Request) => {
+      const u = new URL(req.url);
+      // Exactly one resource value, exactly the canonical — even if the
+      // request had carried something else that validated, the forwarded
+      // request must only contain canonical.
+      expect(u.searchParams.getAll("resource")).toEqual([
+        "https://worker.example.com/at/demo",
+      ]);
+      return new Response("ok", { status: 200 });
+    });
+
+    // Caller sends single canonical (passes validator). The dispatcher should
+    // still re-emit only canonical to OAuthProvider, not preserve the client's
+    // raw param verbatim.
+    const response = await dispatchTenantOAuth(
+      { kind: "authorize", alias: "demo" },
+      new Request(
+        "https://worker.example.com/at/demo/authorize?client_id=client-1&response_type=code&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fdemo"
+      ),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects multi-valued resource on POST form body (token endpoint)", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn();
+    const formBody = new URLSearchParams();
+    formBody.append("client_id", "client-1");
+    formBody.append("grant_type", "authorization_code");
+    formBody.append("code", "abc");
+    formBody.append("resource", "https://worker.example.com/at/demo");
+    formBody.append("resource", "https://worker.example.com/at/other");
+
+    const response = await dispatchTenantOAuth(
+      { kind: "token", alias: "demo" },
+      new Request("https://worker.example.com/at/demo/token", {
+        method: "POST",
+        body: formBody.toString(),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+    expect(response.status).toBe(400);
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
 });

@@ -232,12 +232,18 @@ async function dispatchAuthorizeOrToken(
     return jsonError(400, "invalid_request", validation.reason);
   }
 
-  // Strip prefix; carry query params; synthesise resource if absent.
+  // Strip prefix; carry query params; force resource to the single canonical
+  // value. Even when validateResourceMatch passes, replace the client's
+  // resource params unconditionally — the validator already ruled out
+  // anything other than canonical or absent, so this is just defence in
+  // depth that ensures only one canonical resource value reaches
+  // OAuthProvider regardless of how it was supplied.
   const stripped = new URL(`/${kind}`, url.origin);
-  for (const [k, v] of url.searchParams) stripped.searchParams.append(k, v);
-  if (parsed.sentResource === undefined || parsed.sentResource === "") {
-    stripped.searchParams.set("resource", canonical);
+  for (const [k, v] of url.searchParams) {
+    if (k === "resource") continue;
+    stripped.searchParams.append(k, v);
   }
+  stripped.searchParams.set("resource", canonical);
 
   const init: RequestInit = {
     method: request.method,
@@ -246,11 +252,10 @@ async function dispatchAuthorizeOrToken(
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     if (parsed.formClone !== null) {
-      if (parsed.sentResource === undefined || parsed.sentResource === "") {
-        parsed.formClone.set("resource", canonical);
-      }
+      // Same defence-in-depth on POST form bodies.
+      parsed.formClone.delete("resource");
+      parsed.formClone.append("resource", canonical);
       init.body = parsed.formClone.toString();
-      // Headers already includes content-type from original request
     } else {
       init.body = request.body;
       (init as { duplex?: string }).duplex = "half";
