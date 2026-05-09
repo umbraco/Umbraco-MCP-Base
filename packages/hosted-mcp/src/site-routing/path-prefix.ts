@@ -90,7 +90,14 @@ export function extractAllSiteIdsFromResource(
   return out;
 }
 
-function extractSiteIdFromOneResource(
+/**
+ * Extract the site identifier from a single (non-array) resource value.
+ * Returns null when the value's path doesn't match the prefix regex.
+ *
+ * Exposed so defence-in-depth callers can fail-closed on non-extractable
+ * values rather than silently dropping them.
+ */
+export function extractSiteIdFromOneResource(
   value: string,
   prefixRegex: RegExp
 ): string | null {

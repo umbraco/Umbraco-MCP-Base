@@ -1582,6 +1582,78 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       expect(body.error).toBe("invalid_client");
     });
 
+    it("rejects 400 invalid_client when one resource entry has no extractable alias (audience-broadening attack)", async () => {
+      // resource=[/at/my-project, /at] — second entry has no alias segment.
+      // Without fail-closed handling, OAuthProvider's audience matcher would
+      // accept the token at any /at/<X>/mcp via path-prefix match.
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: [
+            "https://worker.example.com/at/my-project",
+            "https://worker.example.com/at",
+          ],
+        })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toBe("invalid_client");
+    });
+
+    it("rejects 400 invalid_client when one resource entry is the bare origin (root audience over-broadening)", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: [
+            "https://worker.example.com/at/my-project",
+            "https://worker.example.com",
+          ],
+        })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toBe("invalid_client");
+    });
+
+    it("rejects 400 invalid_client when a resource entry points at a foreign origin", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: [
+            "https://worker.example.com/at/my-project",
+            "https://attacker.evil/anything",
+          ],
+        })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toBe("invalid_client");
+    });
+
+    it("rejects 400 invalid_client when a resource entry is a non-URL garbage string", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: ["https://worker.example.com/at/my-project", "garbage"],
+        })
+      );
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toBe("invalid_client");
+    });
+
     it("rejects 400 invalid_client on POST consent submission with cross-tenant client", async () => {
       const env = createMockEnv();
       (env.OAUTH_KV as unknown as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
