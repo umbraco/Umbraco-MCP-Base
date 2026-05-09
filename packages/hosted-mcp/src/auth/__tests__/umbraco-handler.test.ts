@@ -121,13 +121,13 @@ function createJsonResponse(status: number, body: unknown): Response {
 
 beforeEach(() => {
   mockStoreOAuthState.mockClear();
-  mockConsumeOAuthState.mockClear().mockImplementation(async (_kv: unknown, key: string) => {
+  mockConsumeOAuthState.mockClear().mockImplementation((async (_kv: unknown, key: string) => {
     // Return valid consent state for CSRF validation on POST
     if (key.startsWith("consent:")) {
       return { clientId: "mcp-client-1" };
     }
     return null;
-  });
+  }) as never);
   mockStoreUmbracoToken.mockClear();
   mockStoreLogoutRedirect.mockClear();
   mockConsumeLogoutRedirect.mockClear();
@@ -1329,9 +1329,9 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
   // check (issue #100) lets the request through. createMockAuthRequest()
   // generates clientId="mcp-client-1" by default.
   function bindClientToSite(env: HostedMcpEnv, clientId: string, alias: string) {
-    (env.OAUTH_KV as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
-      .mockImplementation(async (key: string) =>
-        key === `client:${clientId}:tenant` ? alias : null
+    (env.OAUTH_KV as unknown as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
+      .mockImplementation((async (key: string) =>
+        key === `client:${clientId}:tenant` ? alias : null) as never
       );
   }
 
@@ -1512,9 +1512,9 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const env = createMockEnv();
       // mcp-client-1 registered for "other-tenant" — attempting to authorize
       // for "my-project" via root /authorize?resource=…/at/my-project.
-      (env.OAUTH_KV as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
-        .mockImplementation(async (key: string) =>
-          key === "client:mcp-client-1:tenant" ? "other-tenant" : null
+      (env.OAUTH_KV as unknown as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
+        .mockImplementation((async (key: string) =>
+          key === "client:mcp-client-1:tenant" ? "other-tenant" : null) as never
         );
 
       const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
@@ -1563,12 +1563,12 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
 
     it("rejects 400 invalid_client on POST consent submission with cross-tenant client", async () => {
       const env = createMockEnv();
-      (env.OAUTH_KV as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
-        .mockImplementation(async (key: string) => {
+      (env.OAUTH_KV as unknown as { get: jest.Mock<(...a: unknown[]) => Promise<unknown>> }).get
+        .mockImplementation((async (key: string) => {
           if (key === "client:mcp-client-1:tenant") return "other-tenant";
           // Honour consent state lookup the existing test infrastructure relies on
           return null;
-        });
+        }) as never);
       mockConsumeOAuthState.mockResolvedValue({ clientId: "mcp-client-1" });
 
       const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
