@@ -151,13 +151,30 @@ Two records per registration, both written transactionally at `/at/<alias>/regis
 | Key | Value | Purpose |
 |-----|-------|---------|
 | `at:<alias>:client:<client_id>` | `{"createdAt": <unix-ms>}` | Forward index — answers "is this client allowed at this tenant?" Used at every `/at/<alias>/authorize` and `/at/<alias>/token`. |
-| `client:<client_id>:tenant` | `<alias>` | Reverse index — answers "which tenant did this client register under?" Used for revocation, audit, and any future token introspection. |
+| `client:<client_id>:tenant` | `<alias>` | Reverse index — answers "which tenant did this client register under?" Used at root `/authorize` for confused-deputy defence (see "Root OAuth endpoints" below), and for revocation / audit. |
 
-Doubles the write at registration, which is rare. The forward-only model paints us into a corner the first time we need to revoke or audit by `client_id` alone — adding the reverse index later is fine for new registrations but leaves old ones orphaned, so we add it from day one.
+Doubles the write at registration, which is rare. Both indexes are **load-bearing for security** — not just convenience. Without the reverse index, root `/authorize` has no way to verify a client's registered tenant against the `resource`-derived target tenant, leaving the confused-deputy door open.
 
-The value is intentionally minimal (a creation timestamp for audit, nothing else) — it's a presence check, not a copy of OAuthProvider's registration record (which OAuthProvider continues to own at its existing flat KV layout). OAuthProvider's flat client-id store is unchanged.
+The value is intentionally minimal (a creation timestamp on the forward index, just the alias on the reverse) — it's a presence check, not a copy of OAuthProvider's registration record (which OAuthProvider continues to own at its existing flat KV layout). OAuthProvider's flat client-id store is unchanged.
 
-Tenant scope is enforced by the lib's binding check on the way in. The reverse index is read-only at request time; revocation flows write to both keys.
+Tenant scope is enforced by the lib's binding check on the way in. Revocation flows delete both keys atomically (look up alias via reverse index, delete forward and reverse together).
+
+### Root OAuth endpoints under siteRouting
+
+The lib does NOT advertise root flows in tenant-pinned PRM, but OAuthProvider still serves root `/.well-known/oauth-authorization-server`, and RFC-8707 clients (the existing #94 path) walk root AS metadata and authorize with `resource=${origin}/at/<alias>`. Issue #100 explicitly preserves this path, so we can't disable root authorize wholesale. But we MUST close the confused-deputy door.
+
+Behaviour matrix when `siteRouting` is configured AND its runtime gate is on:
+
+| Endpoint | Behaviour |
+|----------|-----------|
+| `/.well-known/oauth-authorization-server` | Served by OAuthProvider unchanged. Advertises root endpoints. |
+| `/register` (root) | **404** with body `{"error": "registration_disabled", "error_description": "Use /at/<alias>/register"}`. Eliminates dead-registration footgun and closes one path through which an attacker could acquire a tenant-unbound client_id. |
+| `/authorize` (root) | Existing RFC-8707 path retained: `resource` parameter is **required**, alias extracted via `extractSiteIdFromResource`. Newly added: **reverse-index check** — look up `client:<client_id>:tenant`, reject 400 `invalid_client` if absent (client never registered for any tenant) or if it doesn't match the resolved alias. This blocks confused-deputy attacks via root authorize using a cross-tenant client_id. |
+| `/token` (root) | Pass-through to OAuthProvider unchanged. The tenant binding was verified at `/authorize`; OAuthProvider's stored grant carries the resource and the issued token's `aud` follows from that. No explicit binding check needed here. Refresh-token flow inherits the same. |
+
+When `siteRouting` is off (gate returns false, or never configured), the worker behaves single-tenant — root `/register` works, root `/authorize` and `/token` work without binding checks. No tenant exists; no binding to check.
+
+The forward index handles `/at/<alias>/authorize`. The reverse index handles root `/authorize` under siteRouting. Both queries hit the same store written at registration.
 
 ## Module organisation
 
@@ -210,9 +227,12 @@ packages/hosted-mcp/src/
 |-----------|--------|------|
 | Unknown alias at any `/at/<alias>/...` path | 404 | `{"error": "unknown_site", ...}` (existing siteRouter behavior) |
 | `resolveSite` throws | 502 | `{"error": "bad_gateway", ...}` (existing siteRouter behavior) |
-| `client_id` not registered for this tenant | 400 | `{"error": "invalid_client", "error_description": "Client not registered for this site"}` |
-| `resource` parameter conflicts with URL prefix | 400 | `{"error": "invalid_request", "error_description": "resource parameter does not match site URL"}` |
+| `client_id` not registered for this tenant (forward index miss at `/at/<alias>/authorize`) | 400 | `{"error": "invalid_client", "error_description": "Client not registered for this site"}` |
+| `client_id` not registered for any tenant at root `/authorize` while `siteRouting` is on | 400 | `{"error": "invalid_client", "error_description": "Client not registered for this site"}` |
+| `client_id` registered for a different tenant at root `/authorize` while `siteRouting` is on | 400 | `{"error": "invalid_client", "error_description": "Client not registered for this site"}` |
+| `resource` parameter does not byte-equal canonical `${origin}/at/<alias>` | 400 | `{"error": "invalid_request", "error_description": "resource parameter does not match site URL"}` |
 | `/authorize` (root) without `resource` while `siteRouting` is on | 400 | Existing message (unchanged) |
+| `/register` (root) while `siteRouting` is on | 404 | `{"error": "registration_disabled", "error_description": "Use /at/<alias>/register"}` |
 | `OPTIONS /at/<alias>/.well-known/oauth-authorization-server` | 204 | CORS preflight — `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, OPTIONS` |
 
 ## Test plan
@@ -243,6 +263,10 @@ E2E tests (Playwright + running Umbraco):
 - [ ] `GET /at/<alias>/authorize?client_id=X` succeeds when X is bound to `<alias>`, fails 400 when bound to a different alias or unbound
 - [ ] `redirect_uri` registered at `/at/<alias>/register` is preserved unchanged through `/at/<alias>/authorize` (no prefix stripping)
 - [ ] `resource` parameter strict match: trailing-slash variant rejected, `/mcp`-suffix variant rejected, host/scheme mismatch rejected
+- [ ] `POST /register` (root) returns 404 when `siteRouting` gate is on
+- [ ] `POST /register` (root) works as today when `siteRouting` is off or gate returns false
+- [ ] `GET /authorize` (root) under siteRouting with `client_id` registered at `/at/A/...` and `resource=${origin}/at/B` returns 400 `invalid_client` (confused-deputy defence)
+- [ ] `GET /authorize` (root) under siteRouting with `client_id` registered at `/at/A/...` and `resource=${origin}/at/A` succeeds (RFC-8707 path preserved)
 - [ ] `GET /at/A/authorize?resource=${origin}/at/B` returns 400 `invalid_request` (mismatch)
 - [ ] Token issued via `/at/<alias>/authorize` (no `resource` from client) carries `aud = ${origin}/at/<alias>`
 - [ ] `/at/<alias>/mcp` accepts the tenant-bound token; `/at/<other>/mcp` rejects it (existing behavior, unchanged)
