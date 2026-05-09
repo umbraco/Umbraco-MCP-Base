@@ -89,6 +89,7 @@ export {
 // Elicitation helpers
 export {
   confirmAction,
+  ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./elicitation.js";
 
