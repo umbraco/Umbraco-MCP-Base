@@ -1,5 +1,5 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
-import { confirmAction } from "../elicitation.js";
+import { confirmAction, ElicitationUnsupportedError } from "../elicitation.js";
 import { setServerRef, clearServerRef } from "../server-ref.js";
 
 describe("confirmAction", () => {
@@ -119,5 +119,139 @@ describe("confirmAction", () => {
 
     await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
       .rejects.toThrow("Server reference not set");
+  });
+
+  describe("capability awareness", () => {
+    afterEach(() => {
+      clearServerRef();
+    });
+
+    it("uses elicitInput when client advertises elicitation.form", async () => {
+      const elicitInput = jest.fn<any>().mockResolvedValue({
+        action: "accept",
+        content: { confirm: true },
+      });
+      const request = jest.fn<any>();
+      setServerRef({
+        elicitInput,
+        request,
+        getClientCapabilities: () => ({ elicitation: { form: {} } }),
+      } as any);
+
+      const result = await confirmAction({ requestId: "req-form" }, "Publish?");
+
+      expect(result).toBe(true);
+      expect(elicitInput).toHaveBeenCalledTimes(1);
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("falls back to bare elicitation/create when client advertises elicitation but not form", async () => {
+      const elicitInput = jest.fn<any>();
+      const request = jest.fn<any>().mockResolvedValue({
+        action: "accept",
+        content: { confirm: true },
+      });
+      setServerRef({
+        elicitInput,
+        request,
+        getClientCapabilities: () => ({ elicitation: {} }),
+      } as any);
+
+      const result = await confirmAction({ requestId: "req-basic" }, "Publish?");
+
+      expect(result).toBe(true);
+      expect(elicitInput).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "elicitation/create",
+          params: expect.objectContaining({
+            message: "Publish?",
+            requestedSchema: expect.objectContaining({
+              properties: expect.objectContaining({
+                confirm: expect.objectContaining({ type: "boolean" }),
+              }),
+            }),
+          }),
+        }),
+        expect.anything(),
+        { relatedRequestId: "req-basic" },
+      );
+    });
+
+    it("does not include a mode field in the bare elicitation/create params", async () => {
+      const request = jest.fn<any>().mockResolvedValue({
+        action: "accept",
+        content: { confirm: true },
+      });
+      setServerRef({
+        elicitInput: jest.fn(),
+        request,
+        getClientCapabilities: () => ({ elicitation: {} }),
+      } as any);
+
+      await confirmAction({ requestId: "req-no-mode" }, "Publish?");
+
+      const params = request.mock.calls[0][0].params;
+      expect(params).not.toHaveProperty("mode");
+    });
+
+    it("returns false when basic elicitation is declined", async () => {
+      const request = jest.fn<any>().mockResolvedValue({
+        action: "decline",
+        content: {},
+      });
+      setServerRef({
+        elicitInput: jest.fn(),
+        request,
+        getClientCapabilities: () => ({ elicitation: {} }),
+      } as any);
+
+      const result = await confirmAction({ requestId: "req-1" }, "Delete?");
+
+      expect(result).toBe(false);
+    });
+
+    it("returns false when basic elicitation accepts but confirm is false", async () => {
+      const request = jest.fn<any>().mockResolvedValue({
+        action: "accept",
+        content: { confirm: false },
+      });
+      setServerRef({
+        elicitInput: jest.fn(),
+        request,
+        getClientCapabilities: () => ({ elicitation: {} }),
+      } as any);
+
+      const result = await confirmAction({ requestId: "req-1" }, "Delete?");
+
+      expect(result).toBe(false);
+    });
+
+    it("throws ElicitationUnsupportedError when client advertises no elicitation capability", async () => {
+      const elicitInput = jest.fn<any>();
+      const request = jest.fn<any>();
+      setServerRef({
+        elicitInput,
+        request,
+        getClientCapabilities: () => ({}),
+      } as any);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
+        .rejects.toBeInstanceOf(ElicitationUnsupportedError);
+      expect(elicitInput).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("throws ElicitationUnsupportedError when getClientCapabilities returns null", async () => {
+      const elicitInput = jest.fn<any>();
+      setServerRef({
+        elicitInput,
+        request: jest.fn(),
+        getClientCapabilities: () => null,
+      } as any);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
+        .rejects.toBeInstanceOf(ElicitationUnsupportedError);
+    });
   });
 });
