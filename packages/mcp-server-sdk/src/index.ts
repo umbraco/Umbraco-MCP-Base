@@ -98,6 +98,17 @@ export {
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
 
+// Cross-host widgets module — confirmation surfaces that pick MCP Apps
+// (GUI hosts) or elicitation (terminal hosts) at request time.
+export {
+  hostSupportsMcpApps,
+  getSupportedElicitationKind,
+  getClientElicitationCapabilities,
+  requestApproval,
+  type ClientElicitationCapabilities,
+  type RequestApprovalOptions,
+} from "./widgets/index.js";
+
 // Chained Result Extraction
 export { extractChainedResult } from "./helpers/chained-result.js";
 
