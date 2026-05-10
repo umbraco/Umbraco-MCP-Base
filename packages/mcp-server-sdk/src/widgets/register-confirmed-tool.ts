@@ -31,6 +31,10 @@ import {
 import { hostSupportsMcpApps } from "./capability.js";
 import { getServerRef } from "../helpers/server-ref.js";
 import { CONFIRM_DIALOG_URI } from "./built-in/confirm-dialog/dist-html.generated.js";
+import {
+  consumeConfirmationToken,
+  issueConfirmationToken,
+} from "./confirmation-tokens.js";
 import type { ToolDefinition } from "../types/tool-definition.js";
 
 type CallToolResultLike = {
@@ -129,7 +133,17 @@ export function createConfirmedToolDefinition<
         "Internal: set by the confirmation widget after the user accepts. " +
           "Do not set this yourself.",
       ),
-  } as InputArgs & { confirmed: z.ZodOptional<z.ZodBoolean> };
+    confirmationToken: z
+      .string()
+      .optional()
+      .describe(
+        "Internal: one-shot token issued by the server when the confirm " +
+          "widget is shown. The widget passes it back; the LLM should not.",
+      ),
+  } as InputArgs & {
+    confirmed: z.ZodOptional<z.ZodBoolean>;
+    confirmationToken: z.ZodOptional<z.ZodString>;
+  };
 
   const handler = async (
     rawArgs: unknown,
@@ -137,11 +151,23 @@ export function createConfirmedToolDefinition<
   ): Promise<unknown> => {
     const args = (rawArgs ?? {}) as ZodRawShapeToInfer<InputArgs> & {
       confirmed?: boolean;
+      confirmationToken?: string;
     };
-    const { confirmed, ...rest } = args;
+    const { confirmed, confirmationToken, ...rest } = args;
     const userArgs = rest as unknown as ZodRawShapeToInfer<InputArgs>;
 
     if (confirmed === true) {
+      // Widget branch: a valid one-shot token bound to these exact args is
+      // required. This blocks the simplest LLM-replay path where the model
+      // sets confirmed: true on its own without ever showing the dialog.
+      if (!consumeConfirmationToken(confirmationToken, userArgs)) {
+        return createToolResultError({
+          message:
+            "Confirmation rejected: missing or invalid confirmation token. " +
+            "Call this tool without `confirmed` to display the confirmation " +
+            "dialog; the dialog will provide a valid token when the user accepts.",
+        });
+      }
       return options.confirmHandler(userArgs, extra);
     }
 
@@ -150,19 +176,22 @@ export function createConfirmedToolDefinition<
     const useWidget = server ? hostSupportsMcpApps(server) : false;
 
     if (useWidget) {
+      const token = issueConfirmationToken(userArgs);
       const widgetResult: CallToolResultLike = {
         content: [
           {
             type: "text",
             text:
               "A confirmation dialog is being shown to the user. " +
-              "Wait for the result of their decision before continuing.",
+              "Wait for the result of their decision before continuing. " +
+              "Do not call this tool again with `confirmed: true` yourself.",
           },
         ],
         structuredContent: {
           prompt: promptMessage,
           toolName: options.name,
           args: userArgs as unknown as Record<string, unknown>,
+          confirmationToken: token,
         },
         _meta: { ui: { resourceUri: widgetUri } },
       };

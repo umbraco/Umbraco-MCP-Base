@@ -17,6 +17,11 @@ interface ConfirmDialogPayload {
   prompt: string;
   toolName: string;
   args: Record<string, unknown>;
+  /**
+   * One-shot token the server issued when it returned this widget
+   * reference. Passed straight back when re-entering the tool.
+   */
+  confirmationToken?: string;
   acceptLabel?: string;
   cancelLabel?: string;
 }
@@ -84,7 +89,13 @@ function renderDialog(payload: ConfirmDialogPayload, app: App) {
     try {
       await app.callServerTool({
         name: payload.toolName,
-        arguments: { ...payload.args, confirmed: true },
+        arguments: {
+          ...payload.args,
+          confirmed: true,
+          ...(payload.confirmationToken
+            ? { confirmationToken: payload.confirmationToken }
+            : {}),
+        },
       });
     } finally {
       void app.requestTeardown();
