@@ -10,8 +10,9 @@
  *   `elicitation.form` and don't render HTML. Tools call `requestApproval`
  *   synchronously and proceed on accept.
  *
- * `registerConfirmedTool` (PR 2) wraps both paths in a single helper.
- * This module currently exports the primitives those wrappers compose.
+ * `createConfirmedToolDefinition` wraps both paths in a single helper.
+ * `registerConfirmDialogResource` wires up the built-in widget HTML on
+ * server init.
  *
  * @see modelcontextprotocol.io/extensions/apps/overview for the MCP Apps spec.
  */
@@ -28,3 +29,15 @@ export {
   ElicitationUnsupportedError,
   type RequestApprovalOptions,
 } from "./request-approval.js";
+
+export {
+  createConfirmedToolDefinition,
+  type CreateConfirmedToolOptions,
+} from "./register-confirmed-tool.js";
+
+export {
+  registerConfirmDialogResource,
+  CONFIRM_DIALOG_HTML,
+  CONFIRM_DIALOG_URI,
+  type RegisterConfirmDialogResourceOptions,
+} from "./register-confirm-dialog-resource.js";

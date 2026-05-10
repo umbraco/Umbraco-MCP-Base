@@ -578,6 +578,56 @@ import { detectFileExtensionFromBuffer } from '@umbraco-cms/mcp-server-sdk';
 const extension = detectFileExtensionFromBuffer(buffer); // e.g., 'png', 'jpg', 'pdf'
 ```
 
+## Cross-host Confirmation
+
+Tools that need explicit user approval can wrap themselves with
+`createConfirmedToolDefinition` and let the SDK pick the right surface
+per host:
+
+- **GUI hosts** (Claude.ai web/desktop, ChatGPT web/desktop) get an MCP
+  Apps widget rendered inline. The first call returns a widget reference;
+  the iframe handles user interaction and calls the tool back with
+  `confirmed: true`.
+- **Terminal hosts** (Claude Code, MCP Inspector) get the existing
+  `requestApproval` elicitation prompt synchronously.
+
+```typescript
+import {
+  createConfirmedToolDefinition,
+  registerConfirmDialogResource,
+  setServerRef,
+} from "@umbraco-cms/mcp-server-sdk";
+import { z } from "zod";
+
+// At server init:
+setServerRef(server.server);
+registerConfirmDialogResource(server);
+
+// Define a confirmed tool:
+const publishTool = createConfirmedToolDefinition({
+  name: "content.publish",
+  description: "Publish a content item",
+  slices: ["publish"],
+  inputSchema: { id: z.string() },
+  prompt: ({ id }) => `Publish content ${id}?`,
+  confirmHandler: async ({ id }) => {
+    // Runs only after the user accepts.
+    return { ok: true, id };
+  },
+});
+```
+
+Ship your own widget by passing `widgetResourceUri` and registering the
+HTML resource yourself — see [the `widget-build` and `widget-runtime`
+exports](#subpath-exports).
+
+The `umbraco-mcp-widgets` CLI bundles widget folders into single-file
+HTML modules:
+
+```sh
+umbraco-mcp-widgets build ./widgets --uri-prefix ui://my-mcp/widgets/
+```
+
 ## Subpath Exports
 
 The SDK provides several subpath exports for tree-shaking:
@@ -589,12 +639,16 @@ The SDK provides several subpath exports for tree-shaking:
 - `@umbraco-cms/mcp-server-sdk/helpers` - Helper functions
 - `@umbraco-cms/mcp-server-sdk/types` - Type definitions
 - `@umbraco-cms/mcp-server-sdk/constants` - Umbraco well-known IDs
+- `@umbraco-cms/mcp-server-sdk/widget-runtime` - In-iframe `App` runtime re-export (use inside widget HTML)
+- `@umbraco-cms/mcp-server-sdk/widget-build` - Vite config helpers for bundling widgets
 
 ## Requirements
 
 - Node.js >= 22.0.0
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
+- `@modelcontextprotocol/ext-apps` (optional, only required if you
+  build your own widgets via `widget-runtime` / `widget-build`)
 
 ## License
 

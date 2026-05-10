@@ -105,8 +105,14 @@ export {
   getSupportedElicitationKind,
   getClientElicitationCapabilities,
   requestApproval,
+  createConfirmedToolDefinition,
+  registerConfirmDialogResource,
+  CONFIRM_DIALOG_HTML,
+  CONFIRM_DIALOG_URI,
   type ClientElicitationCapabilities,
   type RequestApprovalOptions,
+  type CreateConfirmedToolOptions,
+  type RegisterConfirmDialogResourceOptions,
 } from "./widgets/index.js";
 
 // Chained Result Extraction
