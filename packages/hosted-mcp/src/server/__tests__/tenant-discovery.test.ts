@@ -153,6 +153,62 @@ describe("createWorkerExport — tenant-OAuth dispatch", () => {
     expect(response.status).toBe(200);
   });
 
+  it("returns 404 root /.well-known/oauth-authorization-server when siteRouting gate is on", async () => {
+    const oauth = { fetch: jest.fn() };
+    const handler = createWorkerExport(oauth as never, {
+      ...baseOptions,
+      siteRouting: makeRouting(),
+    });
+    const response = await handler.fetch(
+      new Request(
+        "https://worker.example.com/.well-known/oauth-authorization-server",
+        { method: "GET" },
+      ),
+      makeEnv(),
+      ctx,
+    );
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe("not_supported");
+    expect(oauth.fetch).not.toHaveBeenCalled();
+  });
+
+  it("DOES NOT 404 root /.well-known/oauth-authorization-server when siteRouting gate returns false", async () => {
+    const oauth = {
+      fetch: jest.fn(async () => new Response("ok", { status: 200 })),
+    };
+    const handler = createWorkerExport(oauth as never, {
+      ...baseOptions,
+      siteRouting: makeRouting({ enabled: () => false }),
+    });
+    const response = await handler.fetch(
+      new Request(
+        "https://worker.example.com/.well-known/oauth-authorization-server",
+        { method: "GET" },
+      ),
+      makeEnv(),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(oauth.fetch).toHaveBeenCalled();
+  });
+
+  it("DOES NOT 404 root /.well-known/oauth-authorization-server when siteRouting is undefined", async () => {
+    const oauth = {
+      fetch: jest.fn(async () => new Response("ok", { status: 200 })),
+    };
+    const handler = createWorkerExport(oauth as never, baseOptions);
+    const response = await handler.fetch(
+      new Request(
+        "https://worker.example.com/.well-known/oauth-authorization-server",
+        { method: "GET" },
+      ),
+      makeEnv(),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("/at/<alias>/mcp continues to flow through siteRouter to OAuthProvider unchanged", async () => {
     const oauth = {
       fetch: jest.fn(async (req: Request) => {

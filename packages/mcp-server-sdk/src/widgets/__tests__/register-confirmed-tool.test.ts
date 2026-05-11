@@ -10,11 +10,6 @@ import { z } from "zod";
 import { setServerRef, clearServerRef } from "../../helpers/server-ref.js";
 import { createConfirmedToolDefinition } from "../register-confirmed-tool.js";
 import { CONFIRM_DIALOG_URI } from "../built-in/confirm-dialog/dist-html.generated.js";
-import {
-  clearConfirmationTokens,
-  issueConfirmationToken,
-  setConfirmationTokenTtlMs,
-} from "../confirmation-tokens.js";
 
 describe("widgets/createConfirmedToolDefinition", () => {
   const confirmHandler = jest.fn<(...args: unknown[]) => Promise<unknown>>();
@@ -23,8 +18,6 @@ describe("widgets/createConfirmedToolDefinition", () => {
 
   afterEach(() => {
     clearServerRef();
-    clearConfirmationTokens();
-    setConfirmationTokenTtlMs();
     confirmHandler.mockReset();
     elicitInput.mockReset();
     request.mockReset();
@@ -61,17 +54,14 @@ describe("widgets/createConfirmedToolDefinition", () => {
     });
   });
 
-  describe("when called with confirmed: true and a valid token", () => {
-    it("runs the confirmHandler and skips capability checks", async () => {
+  describe("when called with confirmed: true", () => {
+    it("runs the confirmHandler immediately — trusts the flag", async () => {
       const tool = makeTool();
       confirmHandler.mockResolvedValue({ ok: true });
-      const token = issueConfirmationToken({ id: "abc" });
-
       const result = await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
+        { id: "abc", confirmed: true } as any,
         {} as any,
       );
-
       expect(result).toEqual({ ok: true });
       expect(confirmHandler).toHaveBeenCalledTimes(1);
       const [args] = confirmHandler.mock.calls[0]!;
@@ -80,78 +70,12 @@ describe("widgets/createConfirmedToolDefinition", () => {
       expect(request).not.toHaveBeenCalled();
     });
 
-    it("strips the confirmed and confirmationToken flags before calling the handler", async () => {
+    it("strips the confirmed flag before calling the handler", async () => {
       const tool = makeTool();
       confirmHandler.mockResolvedValue({});
-      const token = issueConfirmationToken({ id: "abc" });
-      await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      );
+      await tool.handler({ id: "abc", confirmed: true } as any, {} as any);
       const [args] = confirmHandler.mock.calls[0]!;
       expect((args as Record<string, unknown>).confirmed).toBeUndefined();
-      expect(
-        (args as Record<string, unknown>).confirmationToken,
-      ).toBeUndefined();
-    });
-
-    it("rejects a confirmed call with no token (LLM bypass attempt)", async () => {
-      const tool = makeTool();
-      const result = (await tool.handler(
-        { id: "abc", confirmed: true } as any,
-        {} as any,
-      )) as Record<string, any>;
-
-      expect(result.isError).toBe(true);
-      expect(result.structuredContent.message).toMatch(
-        /missing or invalid confirmation token/,
-      );
-      expect(confirmHandler).not.toHaveBeenCalled();
-    });
-
-    it("rejects a confirmed call with a token issued for different args", async () => {
-      const tool = makeTool();
-      const token = issueConfirmationToken({ id: "DIFFERENT" });
-      const result = (await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      )) as Record<string, any>;
-
-      expect(result.isError).toBe(true);
-      expect(confirmHandler).not.toHaveBeenCalled();
-    });
-
-    it("rejects replay of an already-consumed token", async () => {
-      const tool = makeTool();
-      confirmHandler.mockResolvedValue({ ok: true });
-      const token = issueConfirmationToken({ id: "abc" });
-
-      const first = await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      );
-      expect(first).toEqual({ ok: true });
-
-      const second = (await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      )) as Record<string, any>;
-      expect(second.isError).toBe(true);
-      expect(confirmHandler).toHaveBeenCalledTimes(1);
-    });
-
-    it("rejects an expired token", async () => {
-      setConfirmationTokenTtlMs(1);
-      const tool = makeTool();
-      const token = issueConfirmationToken({ id: "abc" });
-      await new Promise((r) => setTimeout(r, 5));
-
-      const result = (await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      )) as Record<string, any>;
-      expect(result.isError).toBe(true);
-      expect(confirmHandler).not.toHaveBeenCalled();
     });
   });
 
@@ -164,7 +88,7 @@ describe("widgets/createConfirmedToolDefinition", () => {
       } as any);
     });
 
-    it("returns a widget reference with a one-shot token and does not call confirmHandler", async () => {
+    it("returns a widget reference and does not call confirmHandler", async () => {
       const tool = makeTool();
       const result = (await tool.handler(
         { id: "abc" } as any,
@@ -177,40 +101,9 @@ describe("widgets/createConfirmedToolDefinition", () => {
       expect(result.structuredContent.prompt).toBe("Publish abc?");
       expect(result.structuredContent.toolName).toBe("demo.publish");
       expect(result.structuredContent.args).toEqual({ id: "abc" });
-      expect(typeof result.structuredContent.confirmationToken).toBe("string");
-      expect(result.structuredContent.confirmationToken.length).toBeGreaterThan(
-        16,
-      );
       expect(result.content[0].type).toBe("text");
       expect(confirmHandler).not.toHaveBeenCalled();
       expect(elicitInput).not.toHaveBeenCalled();
-    });
-
-    it("issues a fresh token on every call (no reuse across calls)", async () => {
-      const tool = makeTool();
-      const a = (await tool.handler({ id: "x" } as any, {} as any)) as any;
-      const b = (await tool.handler({ id: "x" } as any, {} as any)) as any;
-      expect(a.structuredContent.confirmationToken).not.toBe(
-        b.structuredContent.confirmationToken,
-      );
-    });
-
-    it("end-to-end: widget reference → confirmed call with token → confirmHandler runs", async () => {
-      const tool = makeTool();
-      confirmHandler.mockResolvedValue({ ok: true });
-
-      const widgetResult = (await tool.handler(
-        { id: "abc" } as any,
-        {} as any,
-      )) as any;
-      const token = widgetResult.structuredContent.confirmationToken;
-
-      const finalResult = await tool.handler(
-        { id: "abc", confirmed: true, confirmationToken: token } as any,
-        {} as any,
-      );
-      expect(finalResult).toEqual({ ok: true });
-      expect(confirmHandler).toHaveBeenCalledTimes(1);
     });
 
     it("respects a custom widgetResourceUri", async () => {
@@ -246,12 +139,10 @@ describe("widgets/createConfirmedToolDefinition", () => {
       elicitInput.mockResolvedValue({ action: "accept" });
       confirmHandler.mockResolvedValue({ ok: 1 });
       const tool = makeTool();
-
       const result = await tool.handler(
         { id: "abc" } as any,
         { requestId: "r1" } as any,
       );
-
       expect(elicitInput).toHaveBeenCalledTimes(1);
       const [{ message }] = elicitInput.mock.calls[0]! as [{ message: string }];
       expect(message).toBe("Publish abc?");
@@ -262,12 +153,10 @@ describe("widgets/createConfirmedToolDefinition", () => {
     it("returns a cancelled tool result on decline (handler not invoked)", async () => {
       elicitInput.mockResolvedValue({ action: "decline" });
       const tool = makeTool();
-
       const result = (await tool.handler(
         { id: "abc" } as any,
         {} as any,
       )) as Record<string, any>;
-
       expect(confirmHandler).not.toHaveBeenCalled();
       expect(result.structuredContent).toEqual({
         message: "User cancelled the confirmation.",
@@ -285,7 +174,6 @@ describe("widgets/createConfirmedToolDefinition", () => {
         confirmHandler: async () => ({}),
         cancelledMessage: "Aborted by the user.",
       });
-
       const result = (await tool.handler(
         { id: "x" } as any,
         {} as any,
@@ -337,9 +225,7 @@ describe("widgets/createConfirmedToolDefinition", () => {
       process.env.UMBRACO_AUTO_CONFIRM = "true";
       confirmHandler.mockResolvedValue({ ok: 9 });
       const tool = makeTool();
-
       const result = await tool.handler({ id: "abc" } as any, {} as any);
-
       expect(elicitInput).not.toHaveBeenCalled();
       expect(confirmHandler).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ ok: 9 });

@@ -1,5 +1,5 @@
 /**
- * `registerConfirmedTool` — cross-host confirmation wrapper.
+ * `createConfirmedToolDefinition` — cross-host confirmation wrapper.
  *
  * Returns a `ToolDefinition` whose handler routes based on the connected
  * client's capabilities at request time:
@@ -13,9 +13,31 @@
  *   call `requestApproval` synchronously. On Accept the wrapped handler
  *   runs in the same call — no second round-trip.
  *
- * The caller's `confirmHandler` only ever runs after explicit user
- * approval. The `confirmed` field is added to `inputSchema` automatically
- * and should not be set by the LLM — its description discourages that.
+ * # Trust model — read before shipping
+ *
+ * The `confirmed: true` flag is the **only** gate between the LLM's tool
+ * call and the destructive action. There is no cryptographic proof that
+ * the flag was set by a human clicking the widget; an LLM that sets it
+ * directly will bypass the confirmation step entirely.
+ *
+ * An earlier iteration tried to bind a stateless HMAC token to the call,
+ * shipped via `structuredContent`. Empirical spike data (this repo, 2026-05)
+ * showed ChatGPT's MCP App runtime strips `structuredContent` from the
+ * widget's `ui/notifications/tool-result` notification, so the widget
+ * cannot read the token. And even when a covert channel exists, the LLM
+ * has the same protocol access as the widget — any resource the widget
+ * can read, the LLM can read — so token validation is not robustly
+ * securable until the MCP Apps spec adds a host-attested widget identity.
+ *
+ * In the meantime:
+ * - The host's per-tool permission UI (Claude Desktop, Claude.ai web) is
+ *   the actual security boundary — it shows the user the call + args
+ *   before the tool ever runs.
+ * - The `confirmed` field description discourages the LLM from setting it.
+ * - Terminal-host flows still go through real elicitation (spec-defined).
+ *
+ * If you ship a tool wrapped here, treat the widget consent as a UX
+ * affordance, not as a security check.
  */
 
 import { z, type ZodRawShape } from "zod";
@@ -31,10 +53,6 @@ import {
 import { hostSupportsMcpApps } from "./capability.js";
 import { getServerRef } from "../helpers/server-ref.js";
 import { CONFIRM_DIALOG_URI } from "./built-in/confirm-dialog/dist-html.generated.js";
-import {
-  consumeConfirmationToken,
-  issueConfirmationToken,
-} from "./confirmation-tokens.js";
 import type { ToolDefinition } from "../types/tool-definition.js";
 
 type CallToolResultLike = {
@@ -131,18 +149,11 @@ export function createConfirmedToolDefinition<
       .optional()
       .describe(
         "Internal: set by the confirmation widget after the user accepts. " +
-          "Do not set this yourself.",
-      ),
-    confirmationToken: z
-      .string()
-      .optional()
-      .describe(
-        "Internal: one-shot token issued by the server when the confirm " +
-          "widget is shown. The widget passes it back; the LLM should not.",
+          "Do not set this yourself — the host shows a confirmation dialog " +
+          "to the user; the widget will set this flag on Accept.",
       ),
   } as InputArgs & {
     confirmed: z.ZodOptional<z.ZodBoolean>;
-    confirmationToken: z.ZodOptional<z.ZodString>;
   };
 
   const handler = async (
@@ -151,23 +162,13 @@ export function createConfirmedToolDefinition<
   ): Promise<unknown> => {
     const args = (rawArgs ?? {}) as ZodRawShapeToInfer<InputArgs> & {
       confirmed?: boolean;
-      confirmationToken?: string;
     };
-    const { confirmed, confirmationToken, ...rest } = args;
+    const { confirmed, ...rest } = args;
     const userArgs = rest as unknown as ZodRawShapeToInfer<InputArgs>;
 
     if (confirmed === true) {
-      // Widget branch: a valid one-shot token bound to these exact args is
-      // required. This blocks the simplest LLM-replay path where the model
-      // sets confirmed: true on its own without ever showing the dialog.
-      if (!consumeConfirmationToken(confirmationToken, userArgs)) {
-        return createToolResultError({
-          message:
-            "Confirmation rejected: missing or invalid confirmation token. " +
-            "Call this tool without `confirmed` to display the confirmation " +
-            "dialog; the dialog will provide a valid token when the user accepts.",
-        });
-      }
+      // Trust the flag — see the module-level "Trust model" header for why
+      // we don't (currently) validate a cryptographic token here.
       return options.confirmHandler(userArgs, extra);
     }
 
@@ -176,7 +177,6 @@ export function createConfirmedToolDefinition<
     const useWidget = server ? hostSupportsMcpApps(server) : false;
 
     if (useWidget) {
-      const token = issueConfirmationToken(userArgs);
       const widgetResult: CallToolResultLike = {
         content: [
           {
@@ -191,7 +191,6 @@ export function createConfirmedToolDefinition<
           prompt: promptMessage,
           toolName: options.name,
           args: userArgs as unknown as Record<string, unknown>,
-          confirmationToken: token,
         },
         _meta: { ui: { resourceUri: widgetUri } },
       };

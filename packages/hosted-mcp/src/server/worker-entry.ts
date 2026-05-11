@@ -388,6 +388,28 @@ export function createWorkerExport(
           );
         }
 
+        // 2a. Disable root /.well-known/oauth-authorization-server under
+        //    siteRouting. The root document advertises `registration_endpoint`
+        //    as root /register (because OAuthProvider builds it from
+        //    `url.origin` only), which we've just 404'd above. Clients that
+        //    skip the `WWW-Authenticate.resource_metadata` chain and walk root
+        //    discovery directly land there and fail dynamic client
+        //    registration with no recovery path. Returning 404 here forces
+        //    them onto the spec-compliant resource_metadata flow, which
+        //    yields the per-tenant authz-server URL that *does* work.
+        //    Spec-compliant clients are unaffected — they never read root
+        //    metadata to begin with.
+        if (pathname === "/.well-known/oauth-authorization-server") {
+          return new Response(
+            JSON.stringify({
+              error: "not_supported",
+              error_description:
+                "This server is multi-tenant. Resolve the per-tenant authorization-server URL via the `resource_metadata` field of the 401 WWW-Authenticate header on the protected MCP endpoint, then read /.well-known/oauth-authorization-server/at/<alias> (or /at/<alias>/.well-known/oauth-authorization-server).",
+            }),
+            { status: 404, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
         // 3. Legacy PRM handler — kept as a fallback for clients that walk
         //    the prefix-matched path even though the canonical PRM is now
         //    served by the tenant-OAuth dispatcher above. Both emit the same
