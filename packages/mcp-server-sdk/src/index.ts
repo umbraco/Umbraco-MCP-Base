@@ -98,21 +98,17 @@ export {
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
 
-// Cross-host widgets module — confirmation surfaces that pick MCP Apps
-// (GUI hosts) or elicitation (terminal hosts) at request time.
+// Cross-host confirmation surfaces. `requestApproval` elicits on terminal
+// hosts and auto-accepts on GUI hosts (where the host's native per-tool
+// permission UI is already the consent boundary). Capability helpers are
+// exposed so callers can branch on host shape if they need to.
 export {
   hostSupportsMcpApps,
   getSupportedElicitationKind,
   getClientElicitationCapabilities,
   requestApproval,
-  createConfirmedToolDefinition,
-  registerConfirmDialogResource,
-  CONFIRM_DIALOG_HTML,
-  CONFIRM_DIALOG_URI,
   type ClientElicitationCapabilities,
   type RequestApprovalOptions,
-  type CreateConfirmedToolOptions,
-  type RegisterConfirmDialogResourceOptions,
 } from "./widgets/index.js";
 
 // Chained Result Extraction

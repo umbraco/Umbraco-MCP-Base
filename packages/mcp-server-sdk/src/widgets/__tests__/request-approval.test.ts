@@ -102,18 +102,16 @@ describe("widgets/requestApproval", () => {
       } as any);
     });
 
-    it("throws ElicitationUnsupportedError by default", async () => {
-      await expect(requestApproval(undefined, "Proceed?")).rejects.toThrow(
-        ElicitationUnsupportedError,
-      );
+    it("auto-accepts (returns true) by default — GUI host consent is host-native", async () => {
+      await expect(requestApproval(undefined, "Proceed?")).resolves.toBe(true);
       expect(mockElicitInput).not.toHaveBeenCalled();
       expect(mockRequest).not.toHaveBeenCalled();
     });
 
-    it("returns true when allowAutoAccept is set", async () => {
+    it("throws ElicitationUnsupportedError when allowAutoAccept is explicitly false", async () => {
       await expect(
-        requestApproval(undefined, "Proceed?", { allowAutoAccept: true }),
-      ).resolves.toBe(true);
+        requestApproval(undefined, "Proceed?", { allowAutoAccept: false }),
+      ).rejects.toThrow(ElicitationUnsupportedError);
       expect(mockElicitInput).not.toHaveBeenCalled();
       expect(mockRequest).not.toHaveBeenCalled();
     });
@@ -147,11 +145,13 @@ describe("widgets/requestApproval", () => {
       expect(mockRequest).not.toHaveBeenCalled();
     });
 
-    it("does NOT short-circuit when set to anything other than 'true'", async () => {
+    it("does NOT short-circuit when set to anything other than 'true' — falls through to default (auto-accept here)", async () => {
+      // With the no-cap default of auto-accept, this returns true via the
+      // host-native-consent path. Setting the env to "1" only proves it
+      // doesn't take the UMBRACO_AUTO_CONFIRM short-circuit branch — the
+      // actual return value depends on host capabilities.
       process.env.UMBRACO_AUTO_CONFIRM = "1";
-      await expect(requestApproval(undefined, "Proceed?")).rejects.toThrow(
-        ElicitationUnsupportedError,
-      );
+      await expect(requestApproval(undefined, "Proceed?")).resolves.toBe(true);
     });
   });
 });
