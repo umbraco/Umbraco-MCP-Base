@@ -6,8 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js",
-    "umbraco-mcp-widgets": "./dist/cli/widgets-cli.js"
+    "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js"
   },
   "exports": {
     ".": {
@@ -37,14 +36,6 @@
     "./constants": {
       "types": "./dist/constants/index.d.ts",
       "import": "./dist/constants/index.js"
-    },
-    "./widget-runtime": {
-      "types": "./dist/widget-runtime/index.d.ts",
-      "import": "./dist/widget-runtime/index.js"
-    },
-    "./widget-build": {
-      "types": "./dist/widget-build/index.d.ts",
-      "import": "./dist/widget-build/index.js"
     }
   },
   "files": [
@@ -52,11 +43,9 @@
   ],
   "scripts": {
     "clean": "rimraf dist",
-    "build:widgets": "tsx scripts/build-builtin-widgets.ts",
-    "build": "npm run build:widgets && tsup",
-    "compile": "npm run build:widgets && tsc --noEmit",
+    "build": "tsup",
+    "compile": "tsc --noEmit",
     "watch": "tsup --watch",
-    "pretest": "npm run build:widgets",
     "test": "npm run test:parallel && npm run test:stdio",
     "test:parallel": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathIgnorePatterns='src/mcp-client/__tests__/(manager|proxy).test.ts'",
     "test:stdio": "NODE_OPTIONS='--experimental-vm-modules' jest --runInBand --testPathPattern='src/mcp-client/__tests__/(manager|proxy).test.ts'",
@@ -90,7 +79,6 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
     "@jest/types": "^29.6.3",
-    "@modelcontextprotocol/ext-apps": "^1.7.1",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.14.1",
     "jest": "^29.7.0",
@@ -99,19 +87,13 @@
     "ts-jest": "^29.3.2",
     "tsup": "^8.4.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.8.3",
-    "vite": "^8.0.11",
-    "vite-plugin-singlefile": "^2.3.3"
+    "typescript": "^5.8.3"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": ">=0.2.39",
-    "@modelcontextprotocol/ext-apps": ">=1.7.0"
+    "@anthropic-ai/claude-agent-sdk": ">=0.2.39"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
-      "optional": true
-    },
-    "@modelcontextprotocol/ext-apps": {
       "optional": true
     }
   }

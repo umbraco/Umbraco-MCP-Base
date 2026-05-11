@@ -1,5 +1,6 @@
 /**
- * `requestApproval` — yes/no confirmation via MCP elicitation.
+ * `requestApproval` — yes/no confirmation via MCP elicitation, on hosts
+ * that support it.
  *
  * Sibling to {@link confirmAction} (which uses a `confirm: boolean` schema
  * field, rendered by some hosts as an extra checkbox). `requestApproval`
@@ -7,17 +8,28 @@
  * Accept / Decline dialog with no inner controls — for tools where Accept
  * already means "go ahead, I'm sure" and the checkbox is friction.
  *
- * Capability-aware along the same lines as `confirmAction`:
- * - Clients with `elicitation.form` → `server.elicitInput({ message, empty schema })`.
+ * Capability-aware:
+ * - Clients with `elicitation.form` (e.g. Claude Code, MCP Inspector) →
+ *   `server.elicitInput({ message, empty schema })` and the boolean result
+ *   reflects the user's choice.
  * - Clients with base `elicitation` only → raw `elicitation/create` request.
- * - Clients with no elicitation capability → throws unless `allowAutoAccept`.
+ * - Clients with **no elicitation capability at all** (Claude.ai web,
+ *   Claude Desktop, ChatGPT) → returns `true` (auto-accept). These hosts
+ *   already render a native per-tool permission dialog before any tool
+ *   call ever reaches the server, so an additional elicitation surface
+ *   isn't possible and would be redundant if it were. The host UI *is*
+ *   the consent boundary; tools can safely run when reached.
  *
- * Honours `process.env.UMBRACO_AUTO_CONFIRM === "true"` as a global short-
- * circuit (returns `true` immediately) — useful for batch/audit campaigns and
- * non-interactive environments.
+ * Cross-host MCP App widget consent was prototyped and rejected — see
+ * the spike summary in this repo's PR history for the empirical
+ * justification (ChatGPT strips `structuredContent` from widget
+ * notifications; Claude.ai doesn't deliver `updateModelContext` to the
+ * model reliably; widgets cannot retrieve original call args via any
+ * channel the runtime preserves).
  *
- * Pair with `hostSupportsMcpApps()` from the same module to route GUI hosts
- * to a widget instead of this elicitation path.
+ * Honours `process.env.UMBRACO_AUTO_CONFIRM === "true"` as a global
+ * short-circuit (returns `true` immediately) — useful for batch/audit
+ * campaigns and non-interactive environments.
  */
 
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -29,13 +41,13 @@ export { ElicitationUnsupportedError };
 
 export interface RequestApprovalOptions {
   /**
-   * When the connected client advertises no elicitation capability at all,
-   * return `true` instead of throwing {@link ElicitationUnsupportedError}.
+   * Legacy escape hatch. The default behaviour on hosts that advertise no
+   * elicitation capability is now to return `true` (host-native consent
+   * is the boundary). Setting this to `false` restores the older
+   * "throw `ElicitationUnsupportedError`" behaviour for callers that
+   * want explicit failure on hosts without elicitation.
    *
-   * Use only for non-destructive flows where skipping the prompt is safer
-   * than failing the tool.
-   *
-   * @default false
+   * @default true
    */
   allowAutoAccept?: boolean;
 }
@@ -54,13 +66,15 @@ function autoConfirmOverride(): boolean {
 }
 
 /**
- * Ask the user to approve an action. Returns `true` only on Accept.
+ * Ask the user to approve an action.
  *
  * @param extra - The handler's `extra` parameter (provides `requestId`).
  * @param message - The prompt shown to the user.
  * @param options - Optional behaviour tweaks.
- * @returns `true` on Accept, `false` on Decline / Cancel.
- * @throws {ElicitationUnsupportedError} when the client advertises no elicitation capability and `allowAutoAccept` is not set.
+ * @returns `true` on Accept (or on GUI hosts that don't elicit, where the
+ *  host's native permission UI already gates the call); `false` on Decline.
+ * @throws {ElicitationUnsupportedError} only when `allowAutoAccept: false`
+ *  is explicitly passed AND the client advertises no elicitation.
  */
 export async function requestApproval(
   extra: HandlerExtra | undefined,
@@ -103,9 +117,16 @@ export async function requestApproval(
     return result.action === "accept";
   }
 
-  // kind === "none"
-  if (options?.allowAutoAccept) return true;
-  throw new ElicitationUnsupportedError(
-    "Client does not support elicitation. Use a host with elicitation support, or pass `allowAutoAccept: true`.",
-  );
+  // kind === "none" — GUI hosts (Claude.ai, Claude Desktop, ChatGPT).
+  // The host's native per-tool permission UI is the consent boundary;
+  // the tool call only reaches us after the user has already approved.
+  // Auto-accept by default; callers can opt back into the old throw
+  // behaviour with `allowAutoAccept: false`.
+  if (options?.allowAutoAccept === false) {
+    throw new ElicitationUnsupportedError(
+      "Client does not support elicitation and `allowAutoAccept: false` was set.",
+    );
+  }
+  void message; // implicit-trust path; the host UI showed the args.
+  return true;
 }

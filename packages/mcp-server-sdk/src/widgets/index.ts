@@ -1,20 +1,21 @@
 /**
- * Widgets module — cross-host confirmation surfaces for MCP tools.
+ * Confirmation surfaces for MCP tools.
  *
- * Two paths, picked at request time based on client capabilities:
- * - **GUI hosts** (Claude.ai, Claude Desktop, ChatGPT web/desktop) render
- *   MCP App widgets inline in chat. Tools return a `_meta.ui.resourceUri`
- *   reference; the iframe handles user interaction and calls the same tool
- *   back with `confirmed: true`.
- * - **Terminal hosts** (Claude Code, MCP Inspector) advertise
- *   `elicitation.form` and don't render HTML. Tools call `requestApproval`
- *   synchronously and proceed on accept.
+ * `requestApproval` is the only call site needed:
+ * - **Terminal hosts** (Claude Code, MCP Inspector, anything that
+ *   advertises `elicitation`/`elicitation.form`) → prompt via MCP
+ *   elicitation; Accept/Decline propagates to the caller.
+ * - **GUI hosts** (Claude.ai web, Claude Desktop, ChatGPT) → auto-accept
+ *   because the host already renders a native per-tool permission UI
+ *   that gates the call before it ever reaches the server. That UI *is*
+ *   the consent surface.
  *
- * `createConfirmedToolDefinition` wraps both paths in a single helper.
- * `registerConfirmDialogResource` wires up the built-in widget HTML on
- * server init.
- *
- * @see modelcontextprotocol.io/extensions/apps/overview for the MCP Apps spec.
+ * Cross-host MCP App widget consent was explored (PR #110/#111 + the
+ * spike on staging) and rejected: ChatGPT strips `structuredContent`
+ * from widget notifications, Claude.ai doesn't reliably surface
+ * `updateModelContext` to the model, and the LLM has the same protocol
+ * access as the widget so secrets/tokens aren't securable. The
+ * host-native dialog turned out to be the right consent surface anyway.
  */
 
 export {
@@ -29,15 +30,3 @@ export {
   ElicitationUnsupportedError,
   type RequestApprovalOptions,
 } from "./request-approval.js";
-
-export {
-  createConfirmedToolDefinition,
-  type CreateConfirmedToolOptions,
-} from "./register-confirmed-tool.js";
-
-export {
-  registerConfirmDialogResource,
-  CONFIRM_DIALOG_HTML,
-  CONFIRM_DIALOG_URI,
-  type RegisterConfirmDialogResourceOptions,
-} from "./register-confirm-dialog-resource.js";

@@ -578,55 +578,39 @@ import { detectFileExtensionFromBuffer } from '@umbraco-cms/mcp-server-sdk';
 const extension = detectFileExtensionFromBuffer(buffer); // e.g., 'png', 'jpg', 'pdf'
 ```
 
-## Cross-host Confirmation
+## Confirmation Surfaces
 
-Tools that need explicit user approval can wrap themselves with
-`createConfirmedToolDefinition` and let the SDK pick the right surface
-per host:
+Tools that need explicit user approval call `requestApproval` from their
+handler. The SDK routes by host capability:
 
-- **GUI hosts** (Claude.ai web/desktop, ChatGPT web/desktop) get an MCP
-  Apps widget rendered inline. The first call returns a widget reference;
-  the iframe handles user interaction and calls the tool back with
-  `confirmed: true`.
-- **Terminal hosts** (Claude Code, MCP Inspector) get the existing
-  `requestApproval` elicitation prompt synchronously.
+- **Terminal hosts** (Claude Code, MCP Inspector) advertise `elicitation`
+  → user sees an Accept/Decline prompt; the boolean reflects their choice.
+- **GUI hosts** (Claude.ai, Claude Desktop, ChatGPT) advertise no
+  elicitation → `requestApproval` auto-accepts. These hosts render their
+  own native per-tool permission dialog (showing the call + args) before
+  the tool ever reaches the server, so that UI *is* the consent surface.
 
 ```typescript
-import {
-  createConfirmedToolDefinition,
-  registerConfirmDialogResource,
-  setServerRef,
-} from "@umbraco-cms/mcp-server-sdk";
-import { z } from "zod";
+import { requestApproval, setServerRef, createToolResult } from "@umbraco-cms/mcp-server-sdk";
 
 // At server init:
 setServerRef(server.server);
-registerConfirmDialogResource(server);
 
-// Define a confirmed tool:
-const publishTool = createConfirmedToolDefinition({
-  name: "content.publish",
-  description: "Publish a content item",
-  slices: ["publish"],
-  inputSchema: { id: z.string() },
-  prompt: ({ id }) => `Publish content ${id}?`,
-  confirmHandler: async ({ id }) => {
-    // Runs only after the user accepts.
-    return { ok: true, id };
-  },
-});
+// In a tool handler:
+handler: async ({ id }, extra) => {
+  if (!await requestApproval(extra, `Unpublish content ${id}?`)) {
+    return createToolResult({ message: "Cancelled" });
+  }
+  // ... proceed
+};
 ```
 
-Ship your own widget by passing `widgetResourceUri` and registering the
-HTML resource yourself — see [the `widget-build` and `widget-runtime`
-exports](#subpath-exports).
-
-The `umbraco-mcp-widgets` CLI bundles widget folders into single-file
-HTML modules:
-
-```sh
-umbraco-mcp-widgets build ./widgets --uri-prefix ui://my-mcp/widgets/
-```
+Cross-host MCP App widget consent was prototyped and rejected (see the
+spike in PR #112) — ChatGPT strips `structuredContent` from widget
+notifications, Claude.ai doesn't reliably surface `updateModelContext`
+to the model, and the LLM has the same protocol access as the widget so
+tokens aren't securable. The host-native dialog turned out to be the
+right consent surface anyway.
 
 ## Subpath Exports
 
@@ -639,16 +623,12 @@ The SDK provides several subpath exports for tree-shaking:
 - `@umbraco-cms/mcp-server-sdk/helpers` - Helper functions
 - `@umbraco-cms/mcp-server-sdk/types` - Type definitions
 - `@umbraco-cms/mcp-server-sdk/constants` - Umbraco well-known IDs
-- `@umbraco-cms/mcp-server-sdk/widget-runtime` - In-iframe `App` runtime re-export (use inside widget HTML)
-- `@umbraco-cms/mcp-server-sdk/widget-build` - Vite config helpers for bundling widgets
 
 ## Requirements
 
 - Node.js >= 22.0.0
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
-- `@modelcontextprotocol/ext-apps` (optional, only required if you
-  build your own widgets via `widget-runtime` / `widget-build`)
 
 ## License
 
