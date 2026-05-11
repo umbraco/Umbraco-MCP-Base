@@ -37,6 +37,7 @@
  * ```
  */
 
+import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { getServerRef } from "./server-ref.js";
 
 /**
@@ -68,11 +69,33 @@ interface HandlerExtra {
 }
 
 /**
+ * Thrown when the connected client advertises no `elicitation` capability at all.
+ *
+ * Callers can catch this to fall back to a non-interactive code path
+ * (e.g. require an explicit `confirm: true` argument on the tool call).
+ */
+export class ElicitationUnsupportedError extends Error {
+  constructor(message = "Client does not support elicitation.") {
+    super(message);
+    this.name = "ElicitationUnsupportedError";
+  }
+}
+
+/**
  * Ask the user to confirm an action via MCP elicitation.
  *
  * Sends an elicitation request with a boolean confirm checkbox and waits
  * for the user's response. Returns true if the user accepted and checked
  * the confirm box, false otherwise (declined, cancelled, or unchecked).
+ *
+ * Capability-aware: clients that advertise `elicitation.form` (e.g. Claude
+ * Code) get the form-mode path through `server.elicitInput()`. Clients that
+ * advertise the base `elicitation` capability without `form` (e.g. ChatGPT,
+ * Claude.ai web at the time of writing) fall back to a bare
+ * `elicitation/create` request — schema-driven UI works on any client with
+ * the base capability and predates the `form`/`url` sub-capabilities.
+ * Clients that advertise no elicitation capability at all throw
+ * {@link ElicitationUnsupportedError}.
  *
  * Uses `getServerRef()` internally — ensure `setServerRef()` has been
  * called during server initialization.
@@ -84,6 +107,7 @@ interface HandlerExtra {
  * @param message - The confirmation message shown to the user
  * @param options - Optional title and default value
  * @returns true if confirmed, false if cancelled/declined
+ * @throws {ElicitationUnsupportedError} when the client advertises no elicitation capability
  *
  * @example
  * ```typescript
@@ -106,23 +130,67 @@ export async function confirmAction(
   const defaultValue = options?.defaultValue ?? true;
 
   const server = getServerRef();
-  const result = await server.elicitInput(
-    {
-      message,
-      requestedSchema: {
-        type: "object" as const,
-        properties: {
-          confirm: {
-            type: "boolean" as const,
-            title,
-            description: message,
-            default: defaultValue,
-          },
-        },
+  const requestOptions = { relatedRequestId: extra?.requestId };
+  const requestedSchema = {
+    type: "object" as const,
+    properties: {
+      confirm: {
+        type: "boolean" as const,
+        title,
+        description: message,
+        default: defaultValue,
       },
     },
-    { relatedRequestId: extra?.requestId },
-  );
+  };
 
-  return result.action === "accept" && !!(result.content as any)?.confirm;
+  // `getClientCapabilities` is undefined on test mocks built from
+  // `{ elicitInput: jest.fn() }`. Treat that as the legacy form path so
+  // existing tests keep working without per-test capability setup.
+  const getCaps = (server as { getClientCapabilities?: () => unknown })
+    .getClientCapabilities;
+  if (typeof getCaps !== "function") {
+    const result = await server.elicitInput(
+      { message, requestedSchema },
+      requestOptions,
+    );
+    return result.action === "accept" && !!(result.content as any)?.confirm;
+  }
+
+  const caps = getCaps.call(server) as
+    | { elicitation?: { form?: unknown } }
+    | null
+    | undefined;
+
+  // Form-mode path: client explicitly advertises `elicitation.form`.
+  if (caps?.elicitation?.form) {
+    const result = await server.elicitInput(
+      { message, requestedSchema },
+      requestOptions,
+    );
+    return result.action === "accept" && !!(result.content as any)?.confirm;
+  }
+
+  // Basic elicitation fallback: client advertises `elicitation` but not
+  // `elicitation.form`. Predates the form/url sub-capabilities — schema-
+  // driven UI works on any client with the base capability. Bypasses
+  // `elicitInput()`'s mode-based capability check and JSON Schema validator.
+  if (caps?.elicitation) {
+    const result = await (server as unknown as {
+      request: (
+        req: { method: string; params: unknown },
+        schema: typeof ElicitResultSchema,
+        opts?: typeof requestOptions,
+      ) => Promise<{ action: string; content?: { confirm?: boolean } }>;
+    }).request(
+      {
+        method: "elicitation/create",
+        params: { message, requestedSchema },
+      },
+      ElicitResultSchema,
+      requestOptions,
+    );
+    return result.action === "accept" && !!result.content?.confirm;
+  }
+
+  throw new ElicitationUnsupportedError();
 }

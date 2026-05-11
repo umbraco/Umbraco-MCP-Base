@@ -578,6 +578,40 @@ import { detectFileExtensionFromBuffer } from '@umbraco-cms/mcp-server-sdk';
 const extension = detectFileExtensionFromBuffer(buffer); // e.g., 'png', 'jpg', 'pdf'
 ```
 
+## Confirmation Surfaces
+
+Tools that need explicit user approval call `requestApproval` from their
+handler. The SDK routes by host capability:
+
+- **Terminal hosts** (Claude Code, MCP Inspector) advertise `elicitation`
+  → user sees an Accept/Decline prompt; the boolean reflects their choice.
+- **GUI hosts** (Claude.ai, Claude Desktop, ChatGPT) advertise no
+  elicitation → `requestApproval` auto-accepts. These hosts render their
+  own native per-tool permission dialog (showing the call + args) before
+  the tool ever reaches the server, so that UI *is* the consent surface.
+
+```typescript
+import { requestApproval, setServerRef, createToolResult } from "@umbraco-cms/mcp-server-sdk";
+
+// At server init:
+setServerRef(server.server);
+
+// In a tool handler:
+handler: async ({ id }, extra) => {
+  if (!await requestApproval(extra, `Unpublish content ${id}?`)) {
+    return createToolResult({ message: "Cancelled" });
+  }
+  // ... proceed
+};
+```
+
+Cross-host MCP App widget consent was prototyped and rejected (see the
+spike in PR #112) — ChatGPT strips `structuredContent` from widget
+notifications, Claude.ai doesn't reliably surface `updateModelContext`
+to the model, and the LLM has the same protocol access as the widget so
+tokens aren't securable. The host-native dialog turned out to be the
+right consent surface anyway.
+
 ## Subpath Exports
 
 The SDK provides several subpath exports for tree-shaking:

@@ -15,6 +15,14 @@ namespace MyUmbracoProject;
 ///
 /// For Cloudflare Tunnel support, add "MCP_TUNNEL_URL" to appsettings.local.json
 /// (the scripts/tunnels.sh script does this automatically).
+///
+/// **For Umbraco Cloud-hosted multi-tenant MCP Workers**, prefer
+/// `McpHostedClientsComposer.Cloud.cs` in this directory (and enable
+/// `McpExternalLoginShortCircuitComposer.Cloud.cs`). It registers each
+/// hosted MCP client (Editor, Dev, etc. — choose which to enable via the
+/// `Clients` array) with the tenant-prefixed redirect URIs the Cloud
+/// preset's site router expects. It co-exists with this composer —
+/// different client ids, no conflict.
 /// </summary>
 public class McpOAuthComposer : IComposer
 {

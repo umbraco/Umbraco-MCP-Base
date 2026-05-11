@@ -313,6 +313,22 @@ export function createWorkerExport(
       )
     : null;
 
+  // Wrap OAuthProvider so 401s on `/at/<alias>/...` paths get their
+  // `resource_metadata` URL rewritten to the tenant PRM. OAuthProvider builds
+  // the URL from `url.origin` only — the root PRM — which never enters the
+  // tenant-pinned discovery chain. (Issue #103.)
+  const fetchOAuth = async (
+    request: Request,
+    env: HostedMcpEnv,
+    ctx: ExecutionContext,
+  ): Promise<Response> => {
+    const response = await oauthProvider.fetch(request, env, ctx);
+    if (response.status === 401) {
+      return rewriteWwwAuthenticateForTenant(response, request);
+    }
+    return response;
+  };
+
   return {
     async fetch(request: Request, env: HostedMcpEnv, ctx: ExecutionContext): Promise<Response> {
       let url = new URL(request.url);
@@ -372,6 +388,28 @@ export function createWorkerExport(
           );
         }
 
+        // 2a. Disable root /.well-known/oauth-authorization-server under
+        //    siteRouting. The root document advertises `registration_endpoint`
+        //    as root /register (because OAuthProvider builds it from
+        //    `url.origin` only), which we've just 404'd above. Clients that
+        //    skip the `WWW-Authenticate.resource_metadata` chain and walk root
+        //    discovery directly land there and fail dynamic client
+        //    registration with no recovery path. Returning 404 here forces
+        //    them onto the spec-compliant resource_metadata flow, which
+        //    yields the per-tenant authz-server URL that *does* work.
+        //    Spec-compliant clients are unaffected — they never read root
+        //    metadata to begin with.
+        if (pathname === "/.well-known/oauth-authorization-server") {
+          return new Response(
+            JSON.stringify({
+              error: "not_supported",
+              error_description:
+                "This server is multi-tenant. Resolve the per-tenant authorization-server URL via the `resource_metadata` field of the 401 WWW-Authenticate header on the protected MCP endpoint, then read /.well-known/oauth-authorization-server/at/<alias> (or /at/<alias>/.well-known/oauth-authorization-server).",
+            }),
+            { status: 404, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
         // 3. Legacy PRM handler — kept as a fallback for clients that walk
         //    the prefix-matched path even though the canonical PRM is now
         //    served by the tenant-OAuth dispatcher above. Both emit the same
@@ -412,13 +450,53 @@ export function createWorkerExport(
 
         // MCP request: rewrite / → /mcp so OAuthProvider routes it correctly
         url.pathname = "/mcp";
-        return oauthProvider.fetch(new Request(url.toString(), request), env, ctx);
+        return fetchOAuth(new Request(url.toString(), request), env, ctx);
       }
 
       // All other paths pass through to OAuthProvider unchanged
-      return oauthProvider.fetch(request, env, ctx);
+      return fetchOAuth(request, env, ctx);
     },
   };
+}
+
+/**
+ * Patches the `resource_metadata` URL in a 401 response's `WWW-Authenticate`
+ * header so it points at the tenant-pinned PRM URL when the request was for a
+ * `/at/<alias>/...` path.
+ *
+ * `@cloudflare/workers-oauth-provider` builds the URL from `url.origin` only,
+ * which yields the root PRM (`<origin>/.well-known/oauth-protected-resource`)
+ * regardless of request path. Without this rewrite, clients walk root
+ * discovery, get root `authorization_servers`, and fail at root `/register`
+ * (which we 404 under site routing). Issue #103.
+ */
+function rewriteWwwAuthenticateForTenant(
+  response: Response,
+  request: Request,
+): Response {
+  const wwwAuth = response.headers.get("www-authenticate");
+  if (!wwwAuth) return response;
+
+  const url = new URL(request.url);
+  const tenantMatch = url.pathname.match(/^\/at\/([^/]+)\//);
+  if (!tenantMatch) return response;
+  const alias = tenantMatch[1];
+
+  const rootPrmUrl = `${url.origin}/.well-known/oauth-protected-resource`;
+  const tenantPrmUrl = `${url.origin}/.well-known/oauth-protected-resource/at/${alias}`;
+  const rewritten = wwwAuth.replace(
+    `resource_metadata="${rootPrmUrl}"`,
+    `resource_metadata="${tenantPrmUrl}"`,
+  );
+  if (rewritten === wwwAuth) return response;
+
+  const newHeaders = new Headers(response.headers);
+  newHeaders.set("www-authenticate", rewritten);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
 }
 
 // ============================================================================

@@ -94,8 +94,22 @@ export {
 // Elicitation Helpers
 export {
   confirmAction,
+  ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
+
+// Cross-host confirmation surfaces. `requestApproval` elicits on terminal
+// hosts and auto-accepts on GUI hosts (where the host's native per-tool
+// permission UI is already the consent boundary). Capability helpers are
+// exposed so callers can branch on host shape if they need to.
+export {
+  hostSupportsMcpApps,
+  getSupportedElicitationKind,
+  getClientElicitationCapabilities,
+  requestApproval,
+  type ClientElicitationCapabilities,
+  type RequestApprovalOptions,
+} from "./widgets/index.js";
 
 // Chained Result Extraction
 export { extractChainedResult } from "./helpers/chained-result.js";
