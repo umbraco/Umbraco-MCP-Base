@@ -135,4 +135,11 @@ export interface HostedMcpEnv {
   // Diagnostic (optional)
   /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
   ENABLE_INFO_ENDPOINT?: string;
+  /**
+   * Set to "true" to emit `[mcp-auth]` diagnostic logs covering token
+   * store / refresh-request / refresh-result / 401 / retry paths. Off by
+   * default — flip via `wrangler secret put LOG_AUTH` when debugging auth
+   * regressions, then tail with `wrangler tail | grep mcp-auth`.
+   */
+  LOG_AUTH?: string;
 }
