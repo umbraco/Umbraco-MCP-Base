@@ -629,8 +629,15 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Generate a unique key for this token set
     const tokenKey = generateSecureRandom();
 
-    // Store Umbraco tokens in KV (encrypted at rest by KV)
-    await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens);
+    // Store Umbraco tokens in KV (encrypted at rest by KV) along with the
+    // per-tenant OAuth context, so refresh can use the correct client_id /
+    // base URL even from call sites that don't have the site resolved.
+    await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, {
+      oauthClientId: effectiveClientId,
+      oauthClientSecret: effectiveClientSecret,
+      baseUrl: effectiveBaseUrl,
+      serverUrl: effectiveServerUrl,
+    });
 
     // Mark this MCP client as having completed auth (for reauth button visibility)
     await markClientAuthed(env.OAUTH_KV, authRequest.clientId);

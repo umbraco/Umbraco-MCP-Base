@@ -12,6 +12,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 import {
   getStoredUmbracoToken,
   refreshUmbracoToken,
+  type StoredSiteContext,
 } from "../auth/token-storage.js";
 
 /**
@@ -73,6 +74,12 @@ export interface UmbracoFetchClientConfig {
     env: HostedMcpEnv;
     tokenKey: string;
     refreshToken: string;
+    /**
+     * Optional per-tenant OAuth context. Required for cloud-routed Workers
+     * where the client_id is per-tenant rather than env-wide; without it,
+     * `refreshUmbracoToken` posts `client_id=undefined` and Umbraco rejects.
+     */
+    site?: StoredSiteContext;
   };
 }
 
@@ -140,17 +147,34 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     let resp = await fetch(fullUrl, fetchOptions);
 
     // Handle token refresh on 401
-    if (resp.status === 401 && config.refreshContext) {
-      const newToken = await refreshUmbracoToken(
-        config.refreshContext.env,
-        config.refreshContext.tokenKey,
-        config.refreshContext.refreshToken
-      );
+    if (resp.status === 401) {
+      if (config.refreshContext) {
+        console.log(
+          `[mcp-auth] 401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
+        );
+        const newToken = await refreshUmbracoToken(
+          config.refreshContext.env,
+          config.refreshContext.tokenKey,
+          config.refreshContext.refreshToken,
+          config.refreshContext.site
+        );
 
-      if (newToken) {
-        currentToken = newToken;
-        headers.Authorization = `Bearer ${currentToken}`;
-        resp = await fetch(fullUrl, { ...fetchOptions, headers });
+        if (newToken) {
+          currentToken = newToken;
+          headers.Authorization = `Bearer ${currentToken}`;
+          resp = await fetch(fullUrl, { ...fetchOptions, headers });
+          console.log(
+            `[mcp-auth] retry after refresh ${requestConfig.method} ${requestConfig.url} status=${resp.status}`
+          );
+        } else {
+          console.log(
+            `[mcp-auth] refresh failed — propagating 401 for ${requestConfig.method} ${requestConfig.url}`
+          );
+        }
+      } else {
+        console.log(
+          `[mcp-auth] 401 on ${requestConfig.method} ${requestConfig.url} — NO refresh context (no refresh_token in stored tokens)`
+        );
       }
     }
 
@@ -202,12 +226,24 @@ export async function createFetchClientFromKV(
   env: HostedMcpEnv,
   tokenKey: string
 ): Promise<ReturnType<typeof createUmbracoFetchClient> | null> {
-  const tokens = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
-  if (!tokens) return null;
+  const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
+  if (!entry) {
+    console.log(`[mcp-auth] createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
+    return null;
+  }
 
-  // Use UMBRACO_SERVER_URL for server-side calls if available
-  // (supports HTTP proxy for self-signed certs in local dev)
-  const serverBaseUrl = env.UMBRACO_SERVER_URL ?? env.UMBRACO_BASE_URL;
+  const { tokens, site } = entry;
+
+  if (!tokens.refresh_token) {
+    console.log(
+      `[mcp-auth] createFetchClientFromKV key=${tokenKey} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
+    );
+  }
+
+  // Prefer stored site context for the base URL too (covers cloud-routed
+  // Workers where env.UMBRACO_BASE_URL is the routing root, not the tenant).
+  const serverBaseUrl =
+    site?.serverUrl ?? site?.baseUrl ?? env.UMBRACO_SERVER_URL ?? env.UMBRACO_BASE_URL;
 
   return createUmbracoFetchClient({
     baseUrl: serverBaseUrl,
@@ -217,6 +253,7 @@ export async function createFetchClientFromKV(
           env,
           tokenKey,
           refreshToken: tokens.refresh_token,
+          site,
         }
       : undefined,
   });

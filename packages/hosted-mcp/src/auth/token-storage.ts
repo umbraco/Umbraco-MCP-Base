@@ -55,6 +55,29 @@ export interface TokenResponse {
   scope?: string;
 }
 
+/**
+ * Per-tenant OAuth context captured at login. Persisted alongside the tokens
+ * so refresh can use the correct client_id / base URL even from call sites
+ * that don't have the site resolved (e.g. chained-tools fetches), and on
+ * cloud-routed Workers where the client_id is per-tenant rather than env-wide.
+ */
+export interface StoredSiteContext {
+  oauthClientId: string;
+  oauthClientSecret?: string;
+  baseUrl: string;
+  serverUrl?: string;
+}
+
+/**
+ * The envelope written to KV. Backward-compatible read in
+ * `getStoredUmbracoToken` falls back to treating raw TokenResponse JSON as
+ * `{ tokens }` so pre-existing entries continue to work.
+ */
+interface StoredTokenEntry {
+  tokens: TokenResponse;
+  site?: StoredSiteContext;
+}
+
 // ============================================================================
 // KV State Management
 // ============================================================================
@@ -110,27 +133,41 @@ export async function consumeOAuthState(
 export async function storeUmbracoToken(
   kv: KVNamespace,
   tokenKey: string,
-  tokens: TokenResponse
+  tokens: TokenResponse,
+  site?: StoredSiteContext
 ): Promise<void> {
+  console.log(
+    `[mcp-auth] storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
+  );
+  const entry: StoredTokenEntry = site ? { tokens, site } : { tokens };
   await kv.put(
     `umbraco_token:${tokenKey}`,
-    JSON.stringify(tokens),
+    JSON.stringify(entry),
     { expirationTtl: 30 * 24 * 60 * 60 } // 30 days
   );
 }
 
 /**
- * Retrieves a stored Umbraco token from KV.
+ * Retrieves a stored Umbraco token entry from KV.
+ *
+ * Reads both the current `{ tokens, site? }` envelope and the legacy
+ * top-level TokenResponse format (so entries written before the envelope
+ * landed still authenticate; they just won't have site context for refresh).
  */
 export async function getStoredUmbracoToken(
   kv: KVNamespace,
   tokenKey: string
-): Promise<TokenResponse | null> {
+): Promise<StoredTokenEntry | null> {
   const data = await kv.get(`umbraco_token:${tokenKey}`);
   if (!data) return null;
 
   try {
-    return JSON.parse(data) as TokenResponse;
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && "tokens" in parsed) {
+      return parsed as unknown as StoredTokenEntry;
+    }
+    // Legacy: raw TokenResponse — wrap it.
+    return { tokens: parsed as unknown as TokenResponse };
   } catch {
     return null;
   }
@@ -198,23 +235,39 @@ export async function isClientAuthed(
 /**
  * Refreshes an expired Umbraco token using the refresh token.
  * Stores the new tokens in KV and returns the new access token.
+ *
+ * Prefers the site context persisted with the original token entry
+ * (captured at login from the per-tenant SiteConfig) so cloud-routed
+ * Workers — which have no env-wide UMBRACO_OAUTH_CLIENT_ID — can refresh
+ * with the correct per-tenant client_id. Falls back to env vars for the
+ * single-site / non-cloud case.
  */
 export async function refreshUmbracoToken(
   env: HostedMcpEnv,
   tokenKey: string,
-  refreshToken: string
+  refreshToken: string,
+  site?: StoredSiteContext
 ): Promise<string | null> {
-  const endpoints = getBackofficeEndpoints(env.UMBRACO_BASE_URL, env.UMBRACO_SERVER_URL);
+  const baseUrl = site?.baseUrl ?? env.UMBRACO_BASE_URL;
+  const serverUrl = site?.serverUrl ?? env.UMBRACO_SERVER_URL;
+  const clientId = site?.oauthClientId ?? env.UMBRACO_OAUTH_CLIENT_ID;
+  const clientSecret = site?.oauthClientSecret ?? env.UMBRACO_OAUTH_CLIENT_SECRET;
+
+  const endpoints = getBackofficeEndpoints(baseUrl, serverUrl);
 
   const params = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    client_id: env.UMBRACO_OAUTH_CLIENT_ID,
+    client_id: clientId,
   });
 
-  if (env.UMBRACO_OAUTH_CLIENT_SECRET) {
-    params.set("client_secret", env.UMBRACO_OAUTH_CLIENT_SECRET);
+  if (clientSecret) {
+    params.set("client_secret", clientSecret);
   }
+
+  console.log(
+    `[mcp-auth] refreshUmbracoToken request key=${tokenKey} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!site}`
+  );
 
   const resp = await fetch(endpoints.token_endpoint, {
     method: "POST",
@@ -222,9 +275,20 @@ export async function refreshUmbracoToken(
     body: params.toString(),
   });
 
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "<unreadable>");
+    console.log(
+      `[mcp-auth] refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
+    );
+    return null;
+  }
 
   const tokens = (await resp.json()) as TokenResponse;
-  await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens);
+  console.log(
+    `[mcp-auth] refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
+  );
+  // Carry the site context forward so the next refresh round-trip also
+  // uses the per-tenant client_id.
+  await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, site);
   return tokens.access_token;
 }
