@@ -1,3 +1,4 @@
+using System.Globalization;
 using OpenIddict.Abstractions;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Composing;
@@ -104,6 +105,18 @@ public class RegisterMcpClientHandler
                 OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode,
                 OpenIddictConstants.Permissions.GrantTypes.RefreshToken,
                 OpenIddictConstants.Permissions.ResponseTypes.Code,
+            },
+            // Per-client token lifetimes override the server-wide defaults
+            // (which are derived from Umbraco:CMS:Global:TimeOut and yield a
+            // 5-minute access token / 20-minute refresh window — too short
+            // for an MCP session that may sit idle between tool calls).
+            // Tune via appsettings if you want different values per env.
+            Settings =
+            {
+                [OpenIddictConstants.Settings.TokenLifetimes.AccessToken]
+                    = TimeSpan.FromHours(1).ToString("c", CultureInfo.InvariantCulture),
+                [OpenIddictConstants.Settings.TokenLifetimes.RefreshToken]
+                    = TimeSpan.FromHours(8).ToString("c", CultureInfo.InvariantCulture),
             }
         };
 
