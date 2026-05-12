@@ -7,6 +7,7 @@
 
 import { normalizeBaseUrl } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
+import { logAuth } from "./log.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -134,10 +135,12 @@ export async function storeUmbracoToken(
   kv: KVNamespace,
   tokenKey: string,
   tokens: TokenResponse,
-  site?: StoredSiteContext
+  site?: StoredSiteContext,
+  env?: { LOG_AUTH?: string }
 ): Promise<void> {
-  console.log(
-    `[mcp-auth] storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
+  logAuth(
+    env,
+    `storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
   );
   const entry: StoredTokenEntry = site ? { tokens, site } : { tokens };
   await kv.put(
@@ -265,8 +268,9 @@ export async function refreshUmbracoToken(
     params.set("client_secret", clientSecret);
   }
 
-  console.log(
-    `[mcp-auth] refreshUmbracoToken request key=${tokenKey} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!site}`
+  logAuth(
+    env,
+    `refreshUmbracoToken request key=${tokenKey} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!site}`
   );
 
   const resp = await fetch(endpoints.token_endpoint, {
@@ -277,18 +281,20 @@ export async function refreshUmbracoToken(
 
   if (!resp.ok) {
     const body = await resp.text().catch(() => "<unreadable>");
-    console.log(
-      `[mcp-auth] refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
+    logAuth(
+      env,
+      `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
     );
     return null;
   }
 
   const tokens = (await resp.json()) as TokenResponse;
-  console.log(
-    `[mcp-auth] refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
+  logAuth(
+    env,
+    `refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
   );
   // Carry the site context forward so the next refresh round-trip also
   // uses the per-tenant client_id.
-  await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, site);
+  await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, site, env);
   return tokens.access_token;
 }

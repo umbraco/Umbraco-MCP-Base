@@ -14,6 +14,7 @@ import {
   refreshUmbracoToken,
   type StoredSiteContext,
 } from "../auth/token-storage.js";
+import { logAuth } from "../auth/log.js";
 
 /**
  * Options for the fetch-based Umbraco management client.
@@ -149,11 +150,13 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     // Handle token refresh on 401
     if (resp.status === 401) {
       if (config.refreshContext) {
-        console.log(
-          `[mcp-auth] 401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
+        const env = config.refreshContext.env;
+        logAuth(
+          env,
+          `401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
         );
         const newToken = await refreshUmbracoToken(
-          config.refreshContext.env,
+          env,
           config.refreshContext.tokenKey,
           config.refreshContext.refreshToken,
           config.refreshContext.site
@@ -163,18 +166,20 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
           currentToken = newToken;
           headers.Authorization = `Bearer ${currentToken}`;
           resp = await fetch(fullUrl, { ...fetchOptions, headers });
-          console.log(
-            `[mcp-auth] retry after refresh ${requestConfig.method} ${requestConfig.url} status=${resp.status}`
+          logAuth(
+            env,
+            `retry after refresh ${requestConfig.method} ${requestConfig.url} status=${resp.status}`
           );
         } else {
-          console.log(
-            `[mcp-auth] refresh failed — propagating 401 for ${requestConfig.method} ${requestConfig.url}`
+          logAuth(
+            env,
+            `refresh failed — propagating 401 for ${requestConfig.method} ${requestConfig.url}`
           );
         }
       } else {
-        console.log(
-          `[mcp-auth] 401 on ${requestConfig.method} ${requestConfig.url} — NO refresh context (no refresh_token in stored tokens)`
-        );
+        // No refreshContext means no refresh_token was stored — we can't
+        // gate this on LOG_AUTH because the caller has no env handle here,
+        // but the resulting 401 will surface to the MCP client regardless.
       }
     }
 
@@ -228,15 +233,16 @@ export async function createFetchClientFromKV(
 ): Promise<ReturnType<typeof createUmbracoFetchClient> | null> {
   const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
   if (!entry) {
-    console.log(`[mcp-auth] createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
+    logAuth(env, `createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
     return null;
   }
 
   const { tokens, site } = entry;
 
   if (!tokens.refresh_token) {
-    console.log(
-      `[mcp-auth] createFetchClientFromKV key=${tokenKey} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
+    logAuth(
+      env,
+      `createFetchClientFromKV key=${tokenKey} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
     );
   }
 
