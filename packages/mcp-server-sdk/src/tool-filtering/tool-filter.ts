@@ -1,7 +1,9 @@
 /**
  * Tool Filter
  *
- * Functions for filtering tools based on collection configuration.
+ * Functions for filtering tools based on collection configuration and
+ * (optionally) the set of tools exposed by chained MCP servers for the
+ * current authenticated user.
  */
 
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -15,6 +17,13 @@ export interface ToolFilterContext {
   collectionName: string;
   /** The collection configuration to filter against */
   config: CollectionConfiguration;
+  /**
+   * Names of tools currently exposed by every chained MCP server combined.
+   * When supplied, tools declaring `chainedDeps` are skipped if any dep is
+   * missing from this set — the chained servers are the source of truth for
+   * what the authenticated user can actually run. Omit to disable dep gating.
+   */
+  availableChainedTools?: ReadonlySet<string>;
 }
 
 /**
@@ -28,6 +37,8 @@ export interface ToolFilterContext {
  * 4. Slice inclusions (enabledSlices) - if specified, only tools with these slices
  * 5. Collection exclusions (disabledCollections) - excludes entire collections
  * 6. Collection inclusions (enabledCollections) - if specified, only these collections
+ * 7. Chained-dep availability (availableChainedTools) - excludes tools whose
+ *    chainedDeps include any name not present in the chained-tool set
  *
  * @param tool - The tool definition to check
  * @param context - Filter context with collection name and config
@@ -36,19 +47,20 @@ export interface ToolFilterContext {
  * @example
  * ```typescript
  * const config = loader.loadFromConfig(serverConfig);
+ * const availableChainedTools = await gatherChainedTools(manager, ["cms"]);
  *
  * for (const tool of collection.tools(user)) {
- *   if (shouldIncludeTool(tool, { collectionName: collection.metadata.name, config })) {
+ *   if (shouldIncludeTool(tool, { collectionName: collection.metadata.name, config, availableChainedTools })) {
  *     server.registerTool(tool.name, ...);
  *   }
  * }
  * ```
  */
 export function shouldIncludeTool(
-  tool: Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly">,
+  tool: Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly" | "chainedDeps">,
   context: ToolFilterContext
 ): boolean {
-  const { collectionName, config } = context;
+  const { collectionName, config, availableChainedTools } = context;
 
   // 0. ReadOnly mode - only include tools that declare readOnlyHint
   if (config.readOnly) {
@@ -96,6 +108,13 @@ export function shouldIncludeTool(
     return config.enabledCollections.includes(collectionName);
   }
 
+  // 7. Chained-dep availability - only when caller has supplied the set
+  if (availableChainedTools && tool.chainedDeps && tool.chainedDeps.length > 0) {
+    for (const dep of tool.chainedDeps) {
+      if (!availableChainedTools.has(dep)) return false;
+    }
+  }
+
   // No filters apply - include the tool
   return true;
 }
@@ -106,12 +125,14 @@ export function shouldIncludeTool(
  * @param tools - Array of tool definitions
  * @param collectionName - The collection name these tools belong to
  * @param config - The collection configuration
+ * @param availableChainedTools - Optional set of chained tool names (see ToolFilterContext)
  * @returns Filtered array of tools
  */
-export function filterTools<T extends Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly">>(
+export function filterTools<T extends Pick<ToolDefinition, "name" | "slices" | "annotations" | "isReadOnly" | "chainedDeps">>(
   tools: T[],
   collectionName: string,
-  config: CollectionConfiguration
+  config: CollectionConfiguration,
+  availableChainedTools?: ReadonlySet<string>
 ): T[] {
-  return tools.filter(tool => shouldIncludeTool(tool, { collectionName, config }));
+  return tools.filter(tool => shouldIncludeTool(tool, { collectionName, config, availableChainedTools }));
 }
