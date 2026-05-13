@@ -95,6 +95,19 @@ export interface ToolDefinition<
   handler: ToolCallback<InputArgs>;
   /** Optional function to dynamically enable/disable the tool based on user context */
   enabled?: (user: TUser) => boolean;
+  /**
+   * Names of chained MCP tools this tool delegates to. When the registering
+   * server has gathered an `availableChainedTools` set (typically by calling
+   * `tools/list` against each connected chained server), `shouldIncludeTool`
+   * skips this tool if any dep is missing. The chained server's own
+   * authorization filtering (its `tools(user)` factories and per-tool
+   * `enabled` predicates) is therefore the source of truth for what this
+   * wrapper can actually run as the authenticated user.
+   *
+   * Leaving this empty registers the tool unconditionally, regardless of
+   * which chained tools are available.
+   */
+  chainedDeps?: readonly string[];
   /** Explicit slice assignment for categorization (empty array = always included) */
   slices: string[];
   /** Optional annotations for tool behavior hints */
