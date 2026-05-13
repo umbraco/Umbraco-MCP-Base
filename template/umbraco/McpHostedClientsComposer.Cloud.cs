@@ -34,8 +34,10 @@
 
 /*
 using System.Globalization;
+using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using Umbraco.Cms.Core.Composing;
+using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Events;
 using Umbraco.Cms.Core.Notifications;
 
@@ -46,6 +48,17 @@ public class McpHostedClientsComposer : IComposer
 {
     public void Compose(IUmbracoBuilder builder)
     {
+        // Keep the hosted MCP session alive when the same user signs into the
+        // backoffice. With the default (AllowConcurrentLogins = false), every
+        // successful backoffice login fires UserLoginSuccessNotification, which
+        // RevokeUserAuthenticationTokensNotificationHandler turns into a
+        // FindBySubjectAsync(userKey) + DeleteAsync over *every* OpenIddict
+        // token for that user — including the refresh token the hosted Worker
+        // is using — so the MCP connection dies as soon as the user opens the
+        // backoffice. Relaxing this only for users (members are unaffected)
+        // restores concurrent backoffice + MCP sessions.
+        builder.Services.Configure<SecuritySettings>(o => o.UserAllowConcurrentLogins = true);
+
         builder.AddNotificationAsyncHandler<UmbracoApplicationStartingNotification,
             RegisterMcpHostedClientsHandler>();
     }

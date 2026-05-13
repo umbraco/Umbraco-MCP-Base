@@ -1,5 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using Umbraco.Cms.Core.Composing;
+using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Events;
 using Umbraco.Cms.Core.Notifications;
 
@@ -13,6 +15,13 @@ public class McpOAuthComposer : IComposer
 {
     public void Compose(IUmbracoBuilder builder)
     {
+        // Keep the MCP session alive when the same user signs into the
+        // backoffice. With AllowConcurrentLogins = false (the default), every
+        // backoffice login revokes *every* OpenIddict token for that user,
+        // including the MCP refresh token. Mirrors the workaround shipped in
+        // the template/umbraco/Mcp*Composer files.
+        builder.Services.Configure<SecuritySettings>(o => o.UserAllowConcurrentLogins = true);
+
         builder.AddNotificationAsyncHandler<UmbracoApplicationStartingNotification,
             RegisterMcpClientHandler>();
     }
