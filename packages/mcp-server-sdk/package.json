@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js"
+    "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js",
+    "umbraco-mcp-generate-chained-deps": "./dist/cli/generate-chained-deps.js"
   },
   "exports": {
     ".": {

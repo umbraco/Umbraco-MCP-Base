@@ -10,6 +10,7 @@ export default defineConfig({
     "src/types/index.ts",
     "src/constants/index.ts",
     "src/cli/generate-tool-types.ts",
+    "src/cli/generate-chained-deps.ts",
   ],
   format: ["esm"],
   dts: true,
