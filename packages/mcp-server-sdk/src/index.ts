@@ -183,6 +183,8 @@ export {
   type ToolFilterContext,
 } from "./tool-filtering/tool-filter.js";
 
+export { gatherChainedTools } from "./tool-filtering/gather-chained-tools.js";
+
 export {
   validateSliceNames,
 } from "./tool-filtering/slice-matcher.js";
