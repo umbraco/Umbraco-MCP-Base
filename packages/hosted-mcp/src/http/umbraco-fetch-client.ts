@@ -153,14 +153,6 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
         : JSON.stringify(requestConfig.data);
     }
 
-    console.log("[hosted-fetch]", {
-      url: requestConfig.url,
-      method: requestConfig.method,
-      isWebFormData,
-      bodyKind: fetchOptions.body == null ? "null" : (fetchOptions.body as any)?.constructor?.name,
-      ctHeader: headers["Content-Type"] ?? null,
-    });
-
     let resp = await fetch(fullUrl, fetchOptions);
 
     // Handle token refresh on 401
