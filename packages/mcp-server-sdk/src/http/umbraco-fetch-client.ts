@@ -519,6 +519,29 @@ export function createUmbracoFetchClient(
       }
     }
 
+    console.log("[sdk-fetch] body shape:", {
+      url: config.url,
+      isWebFormData,
+      isStreamFormData,
+      dataKind: config.data == null ? "null" : (config.data as any)?.constructor?.name,
+      hasGetHeaders: typeof (config.data as any)?.getHeaders === "function",
+      hasPipe: typeof (config.data as any)?.pipe === "function",
+      globalFormDataExists: typeof (globalThis as any).FormData !== "undefined",
+      bodyKind: fetchOpts.body == null ? "null" : (fetchOpts.body as any)?.constructor?.name,
+      ctHeader: (fetchOpts.headers as Record<string, string>)?.["Content-Type"] ?? null,
+    });
+    if (isWebFormData) {
+      const fdEntries: Array<{ name: string; kind: string; size?: number }> = [];
+      for (const [k, v] of (config.data as any).entries()) {
+        fdEntries.push({
+          name: k,
+          kind: typeof v === "string" ? "string" : (v?.constructor?.name ?? typeof v),
+          size: typeof v === "string" ? v.length : v?.size,
+        });
+      }
+      console.log("[sdk-fetch] web formdata entries:", fdEntries);
+    }
+
     if (enableLogging) {
       console.log("Request:", config.method.toUpperCase(), config.url);
     }
