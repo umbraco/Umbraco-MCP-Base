@@ -194,6 +194,7 @@ describe("createUmbracoFetchClient", () => {
         status: 200,
         statusText: "OK",
         data: { id: "1", name: "Test" },
+        headers: { "content-type": "application/json" },
       });
     });
 
@@ -228,6 +229,7 @@ describe("createUmbracoFetchClient", () => {
         status: 404,
         statusText: "OK",
         data: expect.objectContaining({ status: 404 }),
+        headers: { "content-type": "application/json" },
       });
     });
 
@@ -262,6 +264,7 @@ describe("createUmbracoFetchClient", () => {
         status: 200,
         statusText: "OK",
         data: "OK",
+        headers: { "content-type": "text/plain" },
       });
     });
   });
@@ -326,6 +329,7 @@ describe("createUmbracoFetchClient", () => {
         status: 200,
         statusText: "OK",
         data: { id: "1", name: "Test" },
+        headers: { "content-type": "application/json" },
       });
       // Should have made 3 fetch calls: original (401), refresh, retry
       expect(mockFetch).toHaveBeenCalledTimes(3);
@@ -346,6 +350,7 @@ describe("createUmbracoFetchClient", () => {
         status: 401,
         statusText: "OK",
         data: { error: "unauthorized" },
+        headers: { "content-type": "application/json" },
       });
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
