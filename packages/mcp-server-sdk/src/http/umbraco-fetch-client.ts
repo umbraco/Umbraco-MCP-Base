@@ -246,16 +246,23 @@ async function doFetch<T>(
   const queryString = serializeParams(config.params);
   const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
 
-  // Detect stream-based FormData (from `form-data` npm package).
-  // It has getHeaders()/pipe() methods unlike web-standard FormData.
-  const isStreamFormData = config.data != null
+  // Detect FormData payloads. Two shapes are supported:
+  //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
+  //     Pass straight to fetch, which sets multipart Content-Type with boundary.
+  //   - Stream FormData (`form-data` npm package, Node-only) — has getHeaders()/pipe().
+  //     Caller supplies the multipart Content-Type via config.headers from getHeaders().
+  const isWebFormData = config.data != null
+    && typeof (globalThis as any).FormData !== "undefined"
+    && config.data instanceof (globalThis as any).FormData;
+  const isStreamFormData = !isWebFormData
+    && config.data != null
     && typeof (config.data as any).getHeaders === "function"
     && typeof (config.data as any).pipe === "function";
+  const skipDefaultContentType = isWebFormData || isStreamFormData;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
-    // Skip Content-Type for FormData — let the boundary header from FormData take precedence
-    ...(isStreamFormData ? {} : { "Content-Type": "application/json" }),
+    ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
     Accept: "application/json",
     ...config.headers,
     ...options?.headers,
@@ -268,7 +275,10 @@ async function doFetch<T>(
   };
 
   if (config.data !== undefined) {
-    if (isStreamFormData) {
+    if (isWebFormData) {
+      // Pass through; fetch sets multipart Content-Type + boundary.
+      fetchOptions.body = config.data as FormData;
+    } else if (isStreamFormData) {
       // Collect the stream-based FormData into a Buffer for native fetch.
       // The `form-data` package emits a CombinedStream which is not async-iterable,
       // so we collect chunks via the 'data' event.
@@ -470,13 +480,18 @@ export function createUmbracoFetchClient(
     const queryString = serializeParams(config.params);
     const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
 
-    const isStreamFormData = config.data != null
+    const isWebFormData = config.data != null
+      && typeof (globalThis as any).FormData !== "undefined"
+      && config.data instanceof (globalThis as any).FormData;
+    const isStreamFormData = !isWebFormData
+      && config.data != null
       && typeof (config.data as any).getHeaders === "function"
       && typeof (config.data as any).pipe === "function";
+    const skipDefaultContentType = isWebFormData || isStreamFormData;
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      ...(isStreamFormData ? {} : { "Content-Type": "application/json" }),
+      ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...config.headers,
     };
@@ -487,19 +502,44 @@ export function createUmbracoFetchClient(
     };
 
     if (config.data !== undefined) {
-      if (isStreamFormData) {
+      if (isWebFormData) {
+        fetchOpts.body = config.data as FormData;
+      } else if (isStreamFormData) {
         const fd = config.data as { pipe: Function; resume: Function; on: Function };
         fetchOpts.body = await new Promise<BodyInit>((resolve, reject) => {
           const chunks: Buffer[] = [];
           fd.on("data", (chunk: string | Buffer) =>
             chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
-          fd.on("end", () => resolve(Buffer.concat(chunks)));
+          fd.on("end", () => resolve(Buffer.concat(chunks) as unknown as BodyInit));
           fd.on("error", reject);
           fd.resume();
         });
       } else {
         fetchOpts.body = JSON.stringify(config.data);
       }
+    }
+
+    console.log("[sdk-fetch] body shape:", {
+      url: config.url,
+      isWebFormData,
+      isStreamFormData,
+      dataKind: config.data == null ? "null" : (config.data as any)?.constructor?.name,
+      hasGetHeaders: typeof (config.data as any)?.getHeaders === "function",
+      hasPipe: typeof (config.data as any)?.pipe === "function",
+      globalFormDataExists: typeof (globalThis as any).FormData !== "undefined",
+      bodyKind: fetchOpts.body == null ? "null" : (fetchOpts.body as any)?.constructor?.name,
+      ctHeader: (fetchOpts.headers as Record<string, string>)?.["Content-Type"] ?? null,
+    });
+    if (isWebFormData) {
+      const fdEntries: Array<{ name: string; kind: string; size?: number }> = [];
+      for (const [k, v] of (config.data as any).entries()) {
+        fdEntries.push({
+          name: k,
+          kind: typeof v === "string" ? "string" : (v?.constructor?.name ?? typeof v),
+          size: typeof v === "string" ? v.length : v?.size,
+        });
+      }
+      console.log("[sdk-fetch] web formdata entries:", fdEntries);
     }
 
     if (enableLogging) {

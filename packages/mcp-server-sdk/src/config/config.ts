@@ -202,16 +202,40 @@ let parseCliArgs: ((allFields: ConfigFieldDefinition[]) => CliArgs) | undefined;
 
 async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> {
   if (!parseCliArgs) {
+    // Detect runtimes that have no CLI args to parse (Cloudflare Workers,
+    // serverless, etc.). Workers expose process via nodejs_compat but
+    // process.argv is empty. In that case, skip yargs entirely and let
+    // env vars carry all config — avoids dynamic-importing yargs (which
+    // crashes on Workers because the package isn't bundled).
+    const hasCliArgs =
+      typeof process !== "undefined"
+      && Array.isArray(process.argv)
+      && process.argv.length >= 2;
+    if (!hasCliArgs) {
+      parseCliArgs = () => ({} as CliArgs);
+      return parseCliArgs(allFields);
+    }
+
     // Lazy-import yargs — this module is only needed in stdio/CLI mode,
     // never in Workers. The dynamic import ensures yargs's ESM shim
     // (which calls createRequire(import.meta.url) at module level) is
     // never evaluated in Worker builds where import.meta.url is undefined.
     // Use variable indirection to prevent esbuild/wrangler from statically
-    // analyzing and bundling yargs (which crashes in Worker runtime)
+    // analyzing and bundling yargs (which crashes in Worker runtime).
+    // Wrap in try/catch as a belt-and-braces guard: if yargs can't be
+    // resolved at runtime (e.g. a Worker where our hasCliArgs heuristic
+    // missed), fall back to env-vars-only rather than crashing.
     const yargsPath = "yargs";
     const helpersPath = "yargs/helpers";
-    const yargsModule = await import(/* @vite-ignore */ yargsPath) as any;
-    const helpersModule = await import(/* @vite-ignore */ helpersPath) as any;
+    let yargsModule: any;
+    let helpersModule: any;
+    try {
+      yargsModule = await import(/* @vite-ignore */ yargsPath);
+      helpersModule = await import(/* @vite-ignore */ helpersPath);
+    } catch {
+      parseCliArgs = () => ({} as CliArgs);
+      return parseCliArgs(allFields);
+    }
     // yargs ESM exports: default is the factory function in yargs@17,
     // but in yargs@18 the default export may be nested differently
     const yargs = typeof yargsModule.default === "function"

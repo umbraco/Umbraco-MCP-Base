@@ -129,9 +129,15 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     const queryString = serializeParams(requestConfig.params);
     const fullUrl = `${normalizedBaseUrl}${requestConfig.url}${queryString}`;
 
+    // Detect Web FormData (Cloudflare Workers + Node 18+). When present,
+    // pass straight to fetch — it sets multipart Content-Type with boundary.
+    const isWebFormData = requestConfig.data != null
+      && typeof (globalThis as any).FormData !== "undefined"
+      && requestConfig.data instanceof (globalThis as any).FormData;
+
     const headers: Record<string, string> = {
       Authorization: `Bearer ${currentToken}`,
-      "Content-Type": "application/json",
+      ...(isWebFormData ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...requestConfig.headers,
     };
@@ -142,7 +148,9 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     };
 
     if (requestConfig.data !== undefined) {
-      fetchOptions.body = JSON.stringify(requestConfig.data);
+      fetchOptions.body = isWebFormData
+        ? (requestConfig.data as FormData)
+        : JSON.stringify(requestConfig.data);
     }
 
     let resp = await fetch(fullUrl, fetchOptions);
@@ -195,10 +203,15 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
 
     // Return full response or just data based on options
     if (options?.returnFullResponse) {
+      const responseHeaders: Record<string, string> = {};
+      resp.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
       return {
         status: resp.status,
         statusText: resp.statusText,
         data,
+        headers: responseHeaders,
       } satisfies HttpResponse<T>;
     }
 
