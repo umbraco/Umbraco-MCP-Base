@@ -116,4 +116,18 @@ export interface ToolDefinition<
   pageSize?: number;
   /** @deprecated Use annotations.readOnlyHint instead - kept for backwards compatibility */
   isReadOnly?: boolean;
+  /**
+   * Forwarded verbatim to the MCP `tools/list` entry's `_meta` field when
+   * present. The host registration loop omits the key when this is undefined
+   * — set to an empty object to surface `_meta: {}` explicitly if you need
+   * to. Used for host-specific extensions like OpenAI's `openai/fileParams`
+   * (names the top-level input fields the host should treat as file
+   * uploads).
+   *
+   * @example
+   * ```typescript
+   * _meta: { "openai/fileParams": ["file"] }
+   * ```
+   */
+  _meta?: Record<string, unknown>;
 }

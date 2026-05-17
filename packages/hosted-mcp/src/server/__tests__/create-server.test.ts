@@ -1,10 +1,11 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections } from "@umbraco-cms/mcp-server-sdk";
+import { DEFAULT_COLLECTION_CONFIG } from "@umbraco-cms/mcp-server-sdk";
+import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections, CollectionConfiguration } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { SiteConfig } from "../../types/multi-site.js";
 import type { AuthProps, ConsentChoices } from "../../types/auth.js";
 import { getServerOptions, buildConsentToolConfig, type HostedMcpServerOptions } from "../worker-entry.js";
-import { mergeConsentChoices, resolveRequestSite, type SiteResolver } from "../create-server.js";
+import { mergeConsentChoices, registerCollectionTools, resolveRequestSite, type SiteResolver } from "../create-server.js";
 
 function createMockTool(name: string, slices: string[] = []): ToolDefinition<any, any> {
   return {
@@ -970,5 +971,64 @@ describe("getServerOptions with instructions", () => {
       allSliceNames: [],
     };
     expect(getServerOptions(hostedOptions).instructions).toBeUndefined();
+  });
+});
+
+describe("registerCollectionTools", () => {
+  function makeMockServer() {
+    return {
+      registerTool: jest.fn(),
+    } as unknown as Parameters<typeof registerCollectionTools>[0];
+  }
+
+  // Permissive filter config — every tool is included; we only care here
+  // about what gets *passed* to `registerTool`.
+  const allowAllConfig: CollectionConfiguration = { ...DEFAULT_COLLECTION_CONFIG };
+
+  it("forwards `_meta` declared on a ToolDefinition to registerTool", () => {
+    const fileTool: ToolDefinition<any, any> = {
+      ...createMockTool("create-media-from-file", ["create"]),
+      _meta: { "openai/fileParams": ["file"] },
+    };
+    const plainTool = createMockTool("plain-tool", ["read"]);
+
+    const server = makeMockServer();
+    registerCollectionTools(
+      server,
+      [createMockCollection("media", [fileTool, plainTool])],
+      {} as any,
+      allowAllConfig,
+    );
+
+    expect((server.registerTool as jest.Mock).mock.calls).toHaveLength(2);
+
+    const [, fileConfig] = (server.registerTool as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+    expect(fileConfig).toMatchObject({ _meta: { "openai/fileParams": ["file"] } });
+
+    const [, plainConfig] = (server.registerTool as jest.Mock).mock.calls[1] as [string, Record<string, unknown>];
+    // Tools that don't declare _meta must not have an empty `_meta: {}` key
+    // surfaced on them — keeps `tools/list` clean.
+    expect(plainConfig).not.toHaveProperty("_meta");
+  });
+
+  it("does not crash when a tool declares an empty `_meta` object", () => {
+    const tool: ToolDefinition<any, any> = {
+      ...createMockTool("with-empty-meta", ["read"]),
+      _meta: {},
+    };
+
+    const server = makeMockServer();
+    registerCollectionTools(
+      server,
+      [createMockCollection("misc", [tool])],
+      {} as any,
+      allowAllConfig,
+    );
+
+    expect(server.registerTool).toHaveBeenCalledTimes(1);
+    const [, config] = (server.registerTool as jest.Mock).mock.calls[0] as [string, Record<string, unknown>];
+    // An explicit empty object IS truthy in our spread guard — preserve the
+    // user's intent rather than second-guessing them.
+    expect(config).toHaveProperty("_meta", {});
   });
 });
