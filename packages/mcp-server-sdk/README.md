@@ -295,8 +295,30 @@ interface ToolDefinition<InputArgs, OutputArgs, TUser> {
   enabled?: (user: TUser) => boolean;
   slices: ToolSliceName[];
   annotations?: Partial<ToolAnnotations>;
+  _meta?: Record<string, unknown>;
 }
 ```
+
+`_meta` is forwarded verbatim to the MCP `tools/list` entry, so host-specific
+extensions reach the client. For example, ChatGPT's connector expects
+`_meta: { "openai/fileParams": ["fieldName"] }` to know which top-level input
+parameter is a user-attached file (and should be rewritten into a
+`{ download_url, file_id, mime_type, file_name }` object on the way through).
+
+```typescript
+{
+  name: "create-media-from-file",
+  description: "...",
+  inputSchema: { file: fileSchema, name: z.string(), mediaTypeName: z.string() },
+  _meta: { "openai/fileParams": ["file"] },
+  slices: ["create"],
+  handler: async ({ file, name, mediaTypeName }) => { /* ... */ },
+}
+```
+
+The `@umbraco-cms/mcp-hosted` registration loop forwards `_meta` when calling
+`McpServer.registerTool`, so collection-resident tools see it on the wire
+without any extra plumbing.
 
 #### `ToolCollectionExport`
 

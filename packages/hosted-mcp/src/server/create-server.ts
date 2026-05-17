@@ -35,16 +35,24 @@ import type { AuthProps, ConsentChoices } from "../types/auth.js";
 async function fetchCurrentUser(
   fetchClient: Awaited<ReturnType<typeof createFetchClientFromKV>> & {}
 ): Promise<Record<string, unknown>> {
+  let user: Record<string, unknown> = {};
   try {
-    const user = await fetchClient({
+    const fetched = await fetchClient({
       url: "/umbraco/management/api/v1/user/current",
       method: "GET",
     });
-    return (user ?? {}) as Record<string, unknown>;
+    user = (fetched ?? {}) as Record<string, unknown>;
   } catch {
-    // If we can't fetch the user, return empty object (tools will be unfiltered)
-    return {};
+    // If we can't fetch the user, fall through to defaults. Tools that
+    // gate on permissions will see empty arrays and refuse to expose
+    // themselves; the auth-expired surface handles the bad-token case.
   }
+  // Guarantee the array-shaped fields downstream policy predicates iterate
+  // over. Without this, every consumer has to guard with `?? []` against the
+  // empty-object fallback above (and against partial responses).
+  if (!Array.isArray(user.allowedSections)) user.allowedSections = [];
+  if (!Array.isArray(user.userGroupIds)) user.userGroupIds = [];
+  return user;
 }
 
 /**
@@ -331,9 +339,27 @@ export async function createPerRequestServer(
     configLoader.loadFromConfig(effectiveConfig);
 
   // Register tools from all collections (with filtering)
-  for (const collection of options.collections) {
+  registerCollectionTools(server, options.collections, currentUser, filterConfig);
+
+  return server;
+}
+
+/**
+ * Iterates collections, filters per the resolved `filterConfig`, and registers
+ * each surviving tool on the McpServer.
+ *
+ * `tool._meta` is forwarded verbatim to `tools/list` so host extensions like
+ * OpenAI's `openai/fileParams` reach the client.
+ */
+export function registerCollectionTools<TUser>(
+  server: McpServer,
+  collections: ToolCollectionExport[],
+  currentUser: TUser,
+  filterConfig: CollectionConfiguration,
+): void {
+  for (const collection of collections) {
     const collectionName = collection.metadata.name;
-    const tools = collection.tools(currentUser);
+    const tools = collection.tools(currentUser as any);
 
     for (const tool of tools) {
       if (!shouldIncludeTool(tool, { collectionName, config: filterConfig })) {
@@ -349,11 +375,10 @@ export async function createPerRequestServer(
           inputSchema: tool.inputSchema,
           outputSchema: tool.outputSchema,
           annotations,
+          ...(tool._meta ? { _meta: tool._meta } : {}),
         },
         tool.handler as ToolCallback<typeof tool.inputSchema>
       );
     }
   }
-
-  return server;
 }
