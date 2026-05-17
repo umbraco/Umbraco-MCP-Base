@@ -331,9 +331,29 @@ export async function createPerRequestServer(
     configLoader.loadFromConfig(effectiveConfig);
 
   // Register tools from all collections (with filtering)
-  for (const collection of options.collections) {
+  registerCollectionTools(server, options.collections, currentUser, filterConfig);
+
+  return server;
+}
+
+/**
+ * Iterates collections, filters per the resolved `filterConfig`, and registers
+ * each surviving tool on the McpServer. Extracted from `createPerRequestServer`
+ * so it can be unit-tested in isolation (especially the `_meta` passthrough).
+ *
+ * `tool._meta` is forwarded verbatim to `tools/list` so host extensions like
+ * OpenAI's `openai/fileParams` reach the client. The key is omitted entirely
+ * when undeclared so we don't surface a noisy `_meta: {}` on every tool.
+ */
+export function registerCollectionTools<TUser>(
+  server: McpServer,
+  collections: ToolCollectionExport[],
+  currentUser: TUser,
+  filterConfig: CollectionConfiguration,
+): void {
+  for (const collection of collections) {
     const collectionName = collection.metadata.name;
-    const tools = collection.tools(currentUser);
+    const tools = collection.tools(currentUser as any);
 
     for (const tool of tools) {
       if (!shouldIncludeTool(tool, { collectionName, config: filterConfig })) {
@@ -349,11 +369,10 @@ export async function createPerRequestServer(
           inputSchema: tool.inputSchema,
           outputSchema: tool.outputSchema,
           annotations,
+          ...(tool._meta ? { _meta: tool._meta } : {}),
         },
         tool.handler as ToolCallback<typeof tool.inputSchema>
       );
     }
   }
-
-  return server;
 }

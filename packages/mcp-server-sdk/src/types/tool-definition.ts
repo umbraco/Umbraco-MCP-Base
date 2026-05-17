@@ -116,4 +116,16 @@ export interface ToolDefinition<
   pageSize?: number;
   /** @deprecated Use annotations.readOnlyHint instead - kept for backwards compatibility */
   isReadOnly?: boolean;
+  /**
+   * Arbitrary metadata to pass through to the MCP `tools/list` entry's `_meta`
+   * field. The MCP SDK exposes this verbatim to clients — useful for host-
+   * specific extensions like OpenAI's `openai/fileParams` (which names which
+   * top-level input fields the host should treat as file uploads).
+   *
+   * @example
+   * ```typescript
+   * _meta: { "openai/fileParams": ["file"] }
+   * ```
+   */
+  _meta?: Record<string, unknown>;
 }
