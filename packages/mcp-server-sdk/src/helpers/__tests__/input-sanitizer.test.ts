@@ -416,6 +416,65 @@ describe("withInputSanitization", () => {
       expect(sanitized._meta).toEqual({ "openai/fileParams": ["file"] });
     });
 
+    it("fails loud on unsupported schema kinds (z.union with strings inside)", () => {
+      // Silent fall-through here would have meant nested string content
+      // reached the handler un-validated. The walker doesn't descend into
+      // unions/records/tuples/lazy — it has to error so authors notice.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        either: z.union([z.string(), z.literal("x")]),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      expect(() =>
+        sanitized.handler({ either: "anything" } as any, {} as any),
+      ).toThrow(/unsupported schema kind 'union'/);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("lets numbers, booleans, dates, enums pass through without erroring", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        count: z.number(),
+        flag: z.boolean(),
+        kind: z.enum(["a", "b"]),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      sanitized.handler({ count: 1, flag: true, kind: "a" } as any, {} as any);
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to string sanitisation for top-level keys not declared in the schema", () => {
+      // Defence-in-depth: the upstream MCP SDK normally strips unknown keys
+      // via Zod parse, but the decorator is exported standalone. An undeclared
+      // string with a control character shouldn't reach the handler.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = { name: z.string() };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      expect(() =>
+        sanitized.handler({ name: "clean", extra: "bad\x00value" } as any, {} as any),
+      ).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("ignores prototype-chain keys on the schema when looking up nested children", () => {
+      // `if (schema[k])` would have resolved `constructor`/`toString` to
+      // truthy prototype members; switched to hasOwnProperty. Confirm runtime
+      // keys named `constructor` don't trigger a descent.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = { wrapper: z.object({ ok: z.string() }) };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      sanitized.handler(
+        { wrapper: { ok: "clean", constructor: "harmless" } } as any,
+        {} as any,
+      );
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
     it("supports optional nested objects (z.object().optional()) without crashing", () => {
       const handler = jest.fn().mockReturnValue({ content: [] });
       const inputSchema = {

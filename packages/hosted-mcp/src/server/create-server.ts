@@ -227,6 +227,17 @@ export async function resolveRequestSite(
 }
 
 /**
+ * Replaces control characters (newlines, NULs, etc.) in a log token with `?`
+ * so user-tainted fields can't forge log lines on `wrangler tail`. Returns
+ * `<none>` for null/undefined.
+ */
+function sanitizeForLog(value: unknown): string {
+  if (value === null || value === undefined) return "<none>";
+  // eslint-disable-next-line no-control-regex
+  return String(value).replace(/[\x00-\x1F\x7F]/g, "?");
+}
+
+/**
  * Creates a per-request McpServer with tools registered and API client configured.
  *
  * This factory is called for each incoming MCP request to ensure:
@@ -249,10 +260,15 @@ export async function createPerRequestServer(
   // function) on every Durable Object start, but it's easy to lose track
   // of when that actually happens — particularly across hibernation wakes.
   // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
+  //
+  // `siteId` may come from a user-submitted consent form in static
+  // multi-site mode; strip control characters before logging so it can't
+  // forge log lines on `wrangler tail`.
   const initStartedAt = Date.now();
   const traceId = Math.random().toString(36).slice(2, 8);
+  const safeSiteId = sanitizeForLog(props.consentChoices?.siteId);
   console.log(
-    `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${props.consentChoices?.siteId ?? "<none>"}`
+    `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
   );
 
   const instructions =

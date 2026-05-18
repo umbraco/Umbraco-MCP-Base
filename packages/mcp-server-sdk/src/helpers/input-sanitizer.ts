@@ -149,9 +149,16 @@ export const RAW_FIELD_MARKER = "[raw]";
 /**
  * Walks past wrappers like `ZodOptional` / `ZodDefault` / `ZodNullable` to the
  * inner schema. Zod v4 chains these via `_def.innerType`.
+ *
+ * Capped at 32 hops as a defensive measure — Zod's real wrappers nest at most
+ * 2–3 deep; anything past that is either a hand-built malformed schema or a
+ * self-referential cycle, neither of which we want to spin a worker DO on.
  */
 function unwrapSchema(schema: any): any {
-  while (schema?._def?.innerType) schema = schema._def.innerType;
+  for (let i = 0; i < 32; i++) {
+    if (!schema?._def?.innerType) return schema;
+    schema = schema._def.innerType;
+  }
   return schema;
 }
 
@@ -182,16 +189,66 @@ function hasRawMarker(schema: any, inner: any): boolean {
 }
 
 /**
+ * Schema kinds the walker explicitly knows how to descend through. Anything
+ * else (`z.union`, `z.record`, `z.tuple`, `z.lazy`, etc.) triggers a fail-loud
+ * error at handler-invocation time rather than a silent bypass — the easy
+ * route is for the author to `.describe("[raw]")` the field after deciding
+ * how its contents should be validated.
+ */
+const SUPPORTED_SCHEMA_TAGS = new Set([
+  "string",
+  "object",
+  "array",
+  // Pure pass-throughs — sanitiser doesn't need to do anything for these
+  // since they can't carry agent-supplied string content.
+  "number",
+  "bigint",
+  "boolean",
+  "date",
+  "literal",
+  "enum",
+  "nativeEnum",
+  "null",
+  "undefined",
+  "void",
+  "never",
+  "any",
+  "unknown",
+]);
+
+/**
  * Recursively sanitises terminal `ZodString` leaves within `value`, descending
  * through `z.object()` and `z.array()` containers along the way. Never
  * reshapes the input — only throws on bad string content. A subtree marked
  * `[raw]` is skipped wholesale.
+ *
+ * Unsupported schema kinds (union / record / tuple / lazy / intersection /
+ * discriminatedUnion / map / set) throw — silent fall-through would leave
+ * nested string content un-sanitised, which is exactly what this decorator
+ * exists to prevent. Authors hitting the error should mark the field
+ * `[raw]` after deciding how to validate its contents.
  */
 function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): void {
   if (!schema) return;
   const inner = unwrapSchema(schema);
   if (hasRawMarker(schema, inner)) return;
   const tag = getZodTypeTag(inner);
+
+  // Fail loud BEFORE any per-value dispatch — a schema declaring an
+  // unsupported container kind (z.union, z.record, z.tuple, z.lazy,
+  // z.intersection, z.discriminatedUnion, z.map, z.set, …) would otherwise
+  // silently bypass sanitisation on nested strings depending on the runtime
+  // value's shape. Force the tool author to mark it `[raw]` after deciding
+  // how to validate the contents.
+  if (tag && !SUPPORTED_SCHEMA_TAGS.has(tag)) {
+    throw new Error(
+      `withInputSanitization: unsupported schema kind '${tag}' for field '${fieldPath}'. ` +
+      `Sanitiser only descends through z.object() and z.array(); other containers (z.union, z.record, ` +
+      `z.tuple, z.lazy, etc.) would silently bypass sanitisation on nested strings. ` +
+      `If the field is a host-injected payload whose shape you don't validate, mark it ` +
+      `'.describe("[raw]")'. Otherwise restructure as z.object()/z.array().`
+    );
+  }
 
   if (typeof value === "string") {
     if (tag === "string") sanitizeStringInput(value, fieldPath);
@@ -210,6 +267,7 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
     const shape = inner?.shape;
     if (shape && typeof shape === "object") {
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (!Object.prototype.hasOwnProperty.call(shape, k)) continue;
         const child = shape[k];
         if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`);
       }
@@ -249,7 +307,16 @@ export function withInputSanitization<
       if (args && typeof args === "object" && tool.inputSchema) {
         const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
-          if (schema[key]) sanitizeAgainstSchema(value, schema[key], key);
+          if (Object.prototype.hasOwnProperty.call(schema, key)) {
+            sanitizeAgainstSchema(value, schema[key], key);
+          } else if (typeof value === "string") {
+            // Top-level string not in the declared shape — the upstream MCP
+            // SDK strips unknown keys via Zod parse, but the decorator is
+            // standalone-consumable (in-process MCP, tests). Fall back to
+            // string sanitisation so a path-traversal/control-char value
+            // can't reach the handler if the caller didn't run validation.
+            sanitizeStringInput(value, key);
+          }
         }
       }
 
