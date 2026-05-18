@@ -138,19 +138,102 @@ export function sanitizeStringInput(
 }
 
 /**
- * Marker string that can be included in a Zod field's `.describe()` to skip sanitization.
- * Fields with `[raw]` in their description are assumed to contain user-provided content
- * (e.g., HTML body, markdown) and bypass the sanitizer.
+ * Marker that can appear in a Zod field's `.describe()` to skip sanitization.
+ * Honored on any field at any depth — strings, objects, arrays. Marking an
+ * object or array opts the whole subtree out (useful for host-injected payloads
+ * like ChatGPT's `openai/fileParams` file references, where the wire shape is
+ * the host's contract and must pass through verbatim).
  */
 export const RAW_FIELD_MARKER = "[raw]";
 
 /**
- * Decorator that automatically sanitizes all string input fields.
- * Walks the tool's inputSchema and runs sanitizeStringInput on each string value.
- * Fields with `[raw]` in their Zod `.describe()` are skipped.
+ * Walks past wrappers like `ZodOptional` / `ZodDefault` / `ZodNullable` to the
+ * inner schema. Zod v4 chains these via `_def.innerType`.
+ */
+function unwrapSchema(schema: any): any {
+  while (schema?._def?.innerType) schema = schema._def.innerType;
+  return schema;
+}
+
+/**
+ * Returns the Zod type tag normalised to lowercase ("string", "object", "array",
+ * etc.). Falls back to the legacy v3 `_def.typeName` for older mocks/tests.
+ */
+function getZodTypeTag(schema: any): string | undefined {
+  if (!schema?._def) return undefined;
+  if (typeof schema._def.type === "string") return schema._def.type;
+  if (typeof schema._def.typeName === "string") {
+    return schema._def.typeName.replace(/^Zod/, "").toLowerCase();
+  }
+  return undefined;
+}
+
+/**
+ * `[raw]` may appear on the user-facing schema OR on the unwrapped inner
+ * schema — check both. Avoids surprises like `.optional().describe("[raw]")`
+ * vs `.describe("[raw]").optional()`.
+ */
+function hasRawMarker(schema: any, inner: any): boolean {
+  const outerDesc = schema?.description;
+  if (typeof outerDesc === "string" && outerDesc.includes(RAW_FIELD_MARKER)) return true;
+  const innerDesc = inner?.description;
+  if (typeof innerDesc === "string" && innerDesc.includes(RAW_FIELD_MARKER)) return true;
+  return false;
+}
+
+/**
+ * Recursively sanitises terminal `ZodString` leaves within `value`, descending
+ * through `z.object()` and `z.array()` containers along the way. Never
+ * reshapes the input — only throws on bad string content. A subtree marked
+ * `[raw]` is skipped wholesale.
+ */
+function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): void {
+  if (!schema) return;
+  const inner = unwrapSchema(schema);
+  if (hasRawMarker(schema, inner)) return;
+  const tag = getZodTypeTag(inner);
+
+  if (typeof value === "string") {
+    if (tag === "string") sanitizeStringInput(value, fieldPath);
+    return;
+  }
+
+  if (Array.isArray(value) && tag === "array") {
+    const element = inner?._def?.element;
+    if (element) {
+      value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`));
+    }
+    return;
+  }
+
+  if (value && typeof value === "object" && tag === "object") {
+    const shape = inner?.shape;
+    if (shape && typeof shape === "object") {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        const child = shape[k];
+        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`);
+      }
+    }
+    return;
+  }
+}
+
+/**
+ * Decorator that sanitises terminal string inputs against agent hallucinations.
+ *
+ * Walks the tool's `inputSchema` recursively. Terminal `ZodString` leaves at
+ * any depth are passed through `sanitizeStringInput`. Nested `ZodObject` and
+ * `ZodArray` containers are descended into structurally — the handler receives
+ * the input verbatim (no reshaping, no key reordering, no copies).
+ *
+ * Fields whose `.describe()` contains the `[raw]` marker are skipped:
+ * - On a `ZodString` field → that string passes through unsanitised.
+ * - On a `ZodObject` or `ZodArray` field → the whole subtree passes through.
+ *   Use this for host-injected payloads (e.g. ChatGPT's `openai/fileParams`
+ *   file references) whose wire shape is fixed by the host.
  *
  * @param tool - The tool definition to wrap
- * @returns A new tool definition with input sanitization
+ * @returns A new tool definition with input sanitisation
  */
 export function withInputSanitization<
   Args extends undefined | import("zod").ZodRawShape,
@@ -163,23 +246,10 @@ export function withInputSanitization<
   return {
     ...tool,
     handler: ((args: Record<string, unknown>, context: any) => {
-      // Sanitize all string fields in the input
       if (args && typeof args === "object" && tool.inputSchema) {
-        const schema = tool.inputSchema as import("zod").ZodRawShape;
-
+        const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
-          if (typeof value !== "string") continue;
-
-          // Check if the field's Zod schema has [raw] in its description
-          const fieldSchema = schema[key];
-          if (fieldSchema && typeof fieldSchema === "object" && "description" in fieldSchema) {
-            const desc = (fieldSchema as any).description;
-            if (typeof desc === "string" && desc.includes(RAW_FIELD_MARKER)) {
-              continue; // Skip raw fields
-            }
-          }
-
-          sanitizeStringInput(value, key);
+          if (schema[key]) sanitizeAgainstSchema(value, schema[key], key);
         }
       }
 
