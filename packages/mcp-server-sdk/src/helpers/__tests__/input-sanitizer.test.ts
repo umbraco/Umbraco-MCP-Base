@@ -416,10 +416,11 @@ describe("withInputSanitization", () => {
       expect(sanitized._meta).toEqual({ "openai/fileParams": ["file"] });
     });
 
-    it("fails loud on unsupported schema kinds (z.union with strings inside)", () => {
-      // Silent fall-through here would have meant nested string content
-      // reached the handler un-validated. The walker doesn't descend into
-      // unions/records/tuples/lazy — it has to error so authors notice.
+    it("sanitises strings inside z.union options", () => {
+      // Orval-generated schemas use z.union heavily — pickng the
+      // option matching the runtime type and sanitising under it lets
+      // those schemas wrap in withStandardDecorators without losing
+      // protection on string content.
       const handler = jest.fn().mockReturnValue({ content: [] });
       const inputSchema = {
         either: z.union([z.string(), z.literal("x")]),
@@ -428,9 +429,46 @@ describe("withInputSanitization", () => {
       const sanitized = withInputSanitization(tool);
 
       expect(() =>
-        sanitized.handler({ either: "anything" } as any, {} as any),
-      ).toThrow(/unsupported schema kind 'union'/);
+        sanitized.handler({ either: "bad\x00content" } as any, {} as any),
+      ).toThrow(ToolValidationError);
       expect(handler).not.toHaveBeenCalled();
+
+      sanitized.handler({ either: "clean-value" } as any, {} as any);
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("sanitises string values inside z.record(z.string(), z.string()) (Orval header maps)", () => {
+      // Orval emits `z.record(z.string(), z.string())` for free-form
+      // header maps (webhooks, etc.). Walker must descend through every
+      // value using the value schema.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        headers: z.record(z.string(), z.string()),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      // Clean record → handler called
+      sanitized.handler({ headers: { "x-token": "abc", "x-id": "123" } } as any, {} as any);
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Bad string value → rejected
+      expect(() =>
+        sanitized.handler({ headers: { "x-token": "bad\x00val" } } as any, {} as any),
+      ).toThrow(ToolValidationError);
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("still fails loud on truly unsupported kinds (z.tuple, z.lazy, z.intersection, …)", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        pair: z.tuple([z.string(), z.string()]),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      expect(() =>
+        sanitized.handler({ pair: ["a", "b"] } as any, {} as any),
+      ).toThrow(/unsupported schema kind 'tuple'/);
     });
 
     it("lets numbers, booleans, dates, enums pass through without erroring", () => {

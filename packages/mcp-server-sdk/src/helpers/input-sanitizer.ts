@@ -189,18 +189,10 @@ function hasRawMarker(schema: any, inner: any): boolean {
 }
 
 /**
- * Schema kinds the walker explicitly knows how to descend through. Anything
- * else (`z.union`, `z.record`, `z.tuple`, `z.lazy`, etc.) triggers a fail-loud
- * error at handler-invocation time rather than a silent bypass — the easy
- * route is for the author to `.describe("[raw]")` the field after deciding
- * how its contents should be validated.
+ * Pass-through scalar schema kinds — sanitiser doesn't need to do anything
+ * because they can't carry agent-supplied string content.
  */
-const SUPPORTED_SCHEMA_TAGS = new Set([
-  "string",
-  "object",
-  "array",
-  // Pure pass-throughs — sanitiser doesn't need to do anything for these
-  // since they can't carry agent-supplied string content.
+const PASSTHROUGH_SCALAR_TAGS = new Set([
   "number",
   "bigint",
   "boolean",
@@ -217,15 +209,47 @@ const SUPPORTED_SCHEMA_TAGS = new Set([
 ]);
 
 /**
- * Recursively sanitises terminal `ZodString` leaves within `value`, descending
- * through `z.object()` and `z.array()` containers along the way. Never
- * reshapes the input — only throws on bad string content. A subtree marked
- * `[raw]` is skipped wholesale.
+ * Tries every option in a `z.union` / `z.discriminatedUnion` against the
+ * runtime value, sanitising under the first one whose tag is compatible
+ * with the value's JS type. Falls through silently if no option matches —
+ * Zod parse upstream of the handler is what enforces the shape; the
+ * sanitiser only needs to sanitise string content where the runtime
+ * value tells it where strings live.
+ */
+function sanitizeUnion(value: unknown, inner: any, fieldPath: string): void {
+  const options = inner?._def?.options;
+  if (!Array.isArray(options)) return;
+  for (const option of options) {
+    const optInner = unwrapSchema(option);
+    if (hasRawMarker(option, optInner)) return;
+    const optTag = getZodTypeTag(optInner);
+    const compatible =
+      (optTag === "string" && typeof value === "string") ||
+      (optTag === "array" && Array.isArray(value)) ||
+      (optTag === "object" && value !== null && typeof value === "object" && !Array.isArray(value)) ||
+      (optTag === "record" && value !== null && typeof value === "object" && !Array.isArray(value)) ||
+      (optTag === "number" && typeof value === "number") ||
+      (optTag === "boolean" && typeof value === "boolean") ||
+      (optTag === "null" && value === null) ||
+      (optTag === "undefined" && value === undefined) ||
+      (optTag && PASSTHROUGH_SCALAR_TAGS.has(optTag));
+    if (compatible) {
+      sanitizeAgainstSchema(value, option, fieldPath);
+      return;
+    }
+  }
+}
+
+/**
+ * Recursively sanitises terminal `ZodString` leaves within `value`,
+ * descending through `z.object()`, `z.array()`, `z.record()` and
+ * `z.union()` / `z.discriminatedUnion()` containers along the way. Never
+ * reshapes the input — only throws on bad string content. A subtree
+ * marked `[raw]` is skipped wholesale.
  *
- * Unsupported schema kinds (union / record / tuple / lazy / intersection /
- * discriminatedUnion / map / set) throw — silent fall-through would leave
- * nested string content un-sanitised, which is exactly what this decorator
- * exists to prevent. Authors hitting the error should mark the field
+ * Truly unknown schema kinds (`z.tuple`, `z.lazy`, `z.intersection`,
+ * `z.map`, `z.set`) throw — silent fall-through would leave nested string
+ * content un-sanitised. Authors hitting the error can mark the field
  * `[raw]` after deciding how to validate its contents.
  */
 function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): void {
@@ -234,37 +258,25 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
   if (hasRawMarker(schema, inner)) return;
   const tag = getZodTypeTag(inner);
 
-  // Fail loud BEFORE any per-value dispatch — a schema declaring an
-  // unsupported container kind (z.union, z.record, z.tuple, z.lazy,
-  // z.intersection, z.discriminatedUnion, z.map, z.set, …) would otherwise
-  // silently bypass sanitisation on nested strings depending on the runtime
-  // value's shape. Force the tool author to mark it `[raw]` after deciding
-  // how to validate the contents.
-  if (tag && !SUPPORTED_SCHEMA_TAGS.has(tag)) {
-    throw new Error(
-      `withInputSanitization: unsupported schema kind '${tag}' for field '${fieldPath}'. ` +
-      `Sanitiser only descends through z.object() and z.array(); other containers (z.union, z.record, ` +
-      `z.tuple, z.lazy, etc.) would silently bypass sanitisation on nested strings. ` +
-      `If the field is a host-injected payload whose shape you don't validate, mark it ` +
-      `'.describe("[raw]")'. Otherwise restructure as z.object()/z.array().`
-    );
-  }
+  if (!tag) return;
 
-  if (typeof value === "string") {
-    if (tag === "string") sanitizeStringInput(value, fieldPath);
+  if (tag === "string") {
+    if (typeof value === "string") sanitizeStringInput(value, fieldPath);
     return;
   }
 
-  if (Array.isArray(value) && tag === "array") {
-    const element = inner?._def?.element;
+  if (tag === "array") {
+    if (!Array.isArray(value)) return;
+    const element = inner._def?.element;
     if (element) {
       value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`));
     }
     return;
   }
 
-  if (value && typeof value === "object" && tag === "object") {
-    const shape = inner?.shape;
+  if (tag === "object") {
+    if (value === null || typeof value !== "object") return;
+    const shape = inner.shape;
     if (shape && typeof shape === "object") {
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         if (!Object.prototype.hasOwnProperty.call(shape, k)) continue;
@@ -274,6 +286,36 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
     }
     return;
   }
+
+  if (tag === "record") {
+    // `z.record(keySchema, valueSchema)` — every value in the runtime
+    // object is sanitised under the value schema. Orval emits this for
+    // free-form maps like webhook headers.
+    if (value === null || typeof value !== "object") return;
+    const valueSchema = inner._def?.valueType;
+    if (!valueSchema) return;
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`);
+    }
+    return;
+  }
+
+  if (tag === "union" || tag === "discriminatedUnion") {
+    sanitizeUnion(value, inner, fieldPath);
+    return;
+  }
+
+  if (PASSTHROUGH_SCALAR_TAGS.has(tag)) return;
+
+  // Unknown container — refuse to fail open. Mark the field `[raw]` if
+  // you don't validate its shape.
+  throw new Error(
+    `withInputSanitization: unsupported schema kind '${tag}' for field '${fieldPath}'. ` +
+    `Sanitiser walks z.object()/z.array()/z.record()/z.union() and primitives; other ` +
+    `containers (z.tuple, z.lazy, z.intersection, z.map, z.set, …) would silently bypass ` +
+    `sanitisation on nested strings. Mark the field '.describe("[raw]")' if you don't validate ` +
+    `its shape, or restructure as a supported kind.`
+  );
 }
 
 /**
