@@ -244,6 +244,17 @@ export async function createPerRequestServer(
   env: HostedMcpEnv,
   props: AuthProps
 ): Promise<McpServer> {
+  // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
+  // agents-mcp runtime is supposed to run `init()` (and therefore this
+  // function) on every Durable Object start, but it's easy to lose track
+  // of when that actually happens — particularly across hibernation wakes.
+  // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
+  const initStartedAt = Date.now();
+  const traceId = Math.random().toString(36).slice(2, 8);
+  console.log(
+    `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${props.consentChoices?.siteId ?? "<none>"}`
+  );
+
   const instructions =
     typeof options.instructions === "function"
       ? await options.instructions(props, env)
@@ -300,6 +311,9 @@ export async function createPerRequestServer(
         isError: true,
       })
     );
+    console.log(
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired tools=1 elapsedMs=${Date.now() - initStartedAt}`
+    );
     return server;
   }
 
@@ -339,8 +353,11 @@ export async function createPerRequestServer(
     configLoader.loadFromConfig(effectiveConfig);
 
   // Register tools from all collections (with filtering)
-  registerCollectionTools(server, options.collections, currentUser, filterConfig);
+  const registeredCount = registerCollectionTools(server, options.collections, currentUser, filterConfig);
 
+  console.log(
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${site?.id ?? "<single>"} elapsedMs=${Date.now() - initStartedAt}`
+  );
   return server;
 }
 
@@ -356,7 +373,8 @@ export function registerCollectionTools<TUser>(
   collections: ToolCollectionExport[],
   currentUser: TUser,
   filterConfig: CollectionConfiguration,
-): void {
+): number {
+  let registered = 0;
   for (const collection of collections) {
     const collectionName = collection.metadata.name;
     const tools = collection.tools(currentUser as any);
@@ -379,6 +397,8 @@ export function registerCollectionTools<TUser>(
         },
         tool.handler as ToolCallback<typeof tool.inputSchema>
       );
+      registered += 1;
     }
   }
+  return registered;
 }
