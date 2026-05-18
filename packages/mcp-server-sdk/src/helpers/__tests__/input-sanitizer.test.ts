@@ -5,6 +5,7 @@
  */
 
 import { jest, describe, it, expect } from "@jest/globals";
+import { z } from "zod";
 import {
   rejectControlCharacters,
   rejectPathTraversal,
@@ -231,5 +232,268 @@ describe("withInputSanitization", () => {
     // This contains path traversal but should pass because of [raw]
     sanitized.handler({ body: "../some/path" } as any, {} as any);
     expect(handler).toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Nested-object handling (issue umbraco/Umbraco-MCP-Base#133)
+  //
+  // Hosts like ChatGPT inject structured payloads via `_meta.openai/fileParams`
+  // — the handler MUST receive the object exactly as the host sent it. The
+  // sanitiser is allowed to walk INTO the object to reject bad string content
+  // at any depth, but is not allowed to reshape, reorder, or substitute it.
+  // ---------------------------------------------------------------------------
+  describe("nested object handling", () => {
+    it("passes a nested object through to the handler structurally intact", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        file: z.object({
+          download_url: z.string(),
+          file_id: z.string(),
+          mime_type: z.string().optional(),
+          file_name: z.string().optional(),
+        }),
+        name: z.string(),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      const fileObject = {
+        download_url: "https://files.example.com/abc",
+        file_id: "file-123",
+        mime_type: "image/png",
+        file_name: "photo.png",
+      };
+      sanitized.handler({ file: fileObject, name: "clean-name" } as any, {} as any);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      const receivedArgs = (handler.mock.calls[0] as any[])[0] as { file: typeof fileObject; name: string };
+      expect(receivedArgs.file).toBe(fileObject);
+      expect(receivedArgs.file).toEqual(fileObject);
+      expect(receivedArgs.name).toBe("clean-name");
+    });
+
+    it("passes an array of nested objects through structurally intact", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        files: z.array(
+          z.object({
+            download_url: z.string(),
+            file_id: z.string(),
+          })
+        ),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      const filesArray = [
+        { download_url: "https://files.example.com/a", file_id: "file-a" },
+        { download_url: "https://files.example.com/b", file_id: "file-b" },
+      ];
+      sanitized.handler({ files: filesArray } as any, {} as any);
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      const receivedArgs = (handler.mock.calls[0] as any[])[0] as { files: typeof filesArray };
+      expect(receivedArgs.files).toBe(filesArray);
+      expect(receivedArgs.files).toEqual(filesArray);
+    });
+
+    it("still rejects bad string content on top-level siblings of a nested object", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        file: z.object({ download_url: z.string() }),
+        name: z.string(),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      expect(() =>
+        sanitized.handler(
+          {
+            file: { download_url: "https://files.example.com/abc" },
+            name: "bad\x00name",
+          } as any,
+          {} as any,
+        ),
+      ).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("rejects bad string content inside a nested object (closes a silent hole)", () => {
+      // The old top-level-only walker silently let through control characters
+      // in nested fields. Recursive sanitisation should catch them.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        meta: z.object({ note: z.string() }),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      expect(() =>
+        sanitized.handler({ meta: { note: "bad\x00note" } } as any, {} as any),
+      ).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("rejects bad strings inside array element objects", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        items: z.array(z.object({ name: z.string() })),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      expect(() =>
+        sanitized.handler(
+          { items: [{ name: "ok" }, { name: "../bad" }] } as any,
+          {} as any,
+        ),
+      ).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("honors [raw] on an object schema — whole subtree passes through unsanitised", () => {
+      // Host-injected payloads (openai/fileParams) carry data we don't own. A
+      // `[raw]` marker on the object opts the whole subtree out of sanitisation,
+      // even if its string leaves contain characters the agent-input rules
+      // would otherwise reject.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        file: z
+          .object({
+            download_url: z.string(),
+            file_id: z.string(),
+          })
+          .describe(`[raw] Host-injected file reference. ${RAW_FIELD_MARKER}`),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      sanitized.handler(
+        {
+          file: {
+            // download URLs legitimately contain query params + percent-encoding
+            download_url: "https://files.example.com/abc?token=xyz&v=2%20draft",
+            file_id: "file-123",
+          },
+        } as any,
+        {} as any,
+      );
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("honors [raw] on an array schema — element strings pass through unsanitised", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        downloadUrls: z
+          .array(z.string())
+          .describe(`Pre-signed URLs from host. ${RAW_FIELD_MARKER}`),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      sanitized.handler(
+        { downloadUrls: ["https://x.example.com/a?t=1", "https://x.example.com/b%20c"] } as any,
+        {} as any,
+      );
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves the tool's `_meta` field when wrapping (openai/fileParams regression guard)", () => {
+      // The decorator stack is the only thing between a tool declaration and
+      // registerTool — if any wrapper strips _meta, the connector loses its
+      // file-injection contract (umbraco/Umbraco-MCP-Base#127, #133).
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const tool = {
+        name: "create-media-from-file",
+        description: "",
+        inputSchema: { file: z.object({ download_url: z.string() }) },
+        handler,
+        slices: [],
+        _meta: { "openai/fileParams": ["file"] },
+      } as any;
+
+      const sanitized = withInputSanitization(tool);
+      expect(sanitized._meta).toEqual({ "openai/fileParams": ["file"] });
+    });
+
+    it("fails loud on unsupported schema kinds (z.union with strings inside)", () => {
+      // Silent fall-through here would have meant nested string content
+      // reached the handler un-validated. The walker doesn't descend into
+      // unions/records/tuples/lazy — it has to error so authors notice.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        either: z.union([z.string(), z.literal("x")]),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      expect(() =>
+        sanitized.handler({ either: "anything" } as any, {} as any),
+      ).toThrow(/unsupported schema kind 'union'/);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("lets numbers, booleans, dates, enums pass through without erroring", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        count: z.number(),
+        flag: z.boolean(),
+        kind: z.enum(["a", "b"]),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      sanitized.handler({ count: 1, flag: true, kind: "a" } as any, {} as any);
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to string sanitisation for top-level keys not declared in the schema", () => {
+      // Defence-in-depth: the upstream MCP SDK normally strips unknown keys
+      // via Zod parse, but the decorator is exported standalone. An undeclared
+      // string with a control character shouldn't reach the handler.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = { name: z.string() };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      expect(() =>
+        sanitized.handler({ name: "clean", extra: "bad\x00value" } as any, {} as any),
+      ).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("ignores prototype-chain keys on the schema when looking up nested children", () => {
+      // `if (schema[k])` would have resolved `constructor`/`toString` to
+      // truthy prototype members; switched to hasOwnProperty. Confirm runtime
+      // keys named `constructor` don't trigger a descent.
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = { wrapper: z.object({ ok: z.string() }) };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+      sanitized.handler(
+        { wrapper: { ok: "clean", constructor: "harmless" } } as any,
+        {} as any,
+      );
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it("supports optional nested objects (z.object().optional()) without crashing", () => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const inputSchema = {
+        file: z.object({ download_url: z.string() }).optional(),
+        name: z.string(),
+      };
+      const tool = { name: "t", description: "", inputSchema, handler, slices: [] } as any;
+      const sanitized = withInputSanitization(tool);
+
+      // Missing optional field
+      sanitized.handler({ name: "ok" } as any, {} as any);
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Optional field present with valid content
+      sanitized.handler(
+        { file: { download_url: "https://files.example.com/abc" }, name: "ok" } as any,
+        {} as any,
+      );
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
   });
 });

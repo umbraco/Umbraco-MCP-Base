@@ -227,6 +227,17 @@ export async function resolveRequestSite(
 }
 
 /**
+ * Replaces control characters (newlines, NULs, etc.) in a log token with `?`
+ * so user-tainted fields can't forge log lines on `wrangler tail`. Returns
+ * `<none>` for null/undefined.
+ */
+function sanitizeForLog(value: unknown): string {
+  if (value === null || value === undefined) return "<none>";
+  // eslint-disable-next-line no-control-regex
+  return String(value).replace(/[\x00-\x1F\x7F]/g, "?");
+}
+
+/**
  * Creates a per-request McpServer with tools registered and API client configured.
  *
  * This factory is called for each incoming MCP request to ensure:
@@ -244,6 +255,22 @@ export async function createPerRequestServer(
   env: HostedMcpEnv,
   props: AuthProps
 ): Promise<McpServer> {
+  // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
+  // agents-mcp runtime is supposed to run `init()` (and therefore this
+  // function) on every Durable Object start, but it's easy to lose track
+  // of when that actually happens — particularly across hibernation wakes.
+  // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
+  //
+  // `siteId` may come from a user-submitted consent form in static
+  // multi-site mode; strip control characters before logging so it can't
+  // forge log lines on `wrangler tail`.
+  const initStartedAt = Date.now();
+  const traceId = Math.random().toString(36).slice(2, 8);
+  const safeSiteId = sanitizeForLog(props.consentChoices?.siteId);
+  console.log(
+    `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
+  );
+
   const instructions =
     typeof options.instructions === "function"
       ? await options.instructions(props, env)
@@ -300,6 +327,9 @@ export async function createPerRequestServer(
         isError: true,
       })
     );
+    console.log(
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired tools=1 elapsedMs=${Date.now() - initStartedAt}`
+    );
     return server;
   }
 
@@ -339,8 +369,11 @@ export async function createPerRequestServer(
     configLoader.loadFromConfig(effectiveConfig);
 
   // Register tools from all collections (with filtering)
-  registerCollectionTools(server, options.collections, currentUser, filterConfig);
+  const registeredCount = registerCollectionTools(server, options.collections, currentUser, filterConfig);
 
+  console.log(
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${site?.id ?? "<single>"} elapsedMs=${Date.now() - initStartedAt}`
+  );
   return server;
 }
 
@@ -356,7 +389,8 @@ export function registerCollectionTools<TUser>(
   collections: ToolCollectionExport[],
   currentUser: TUser,
   filterConfig: CollectionConfiguration,
-): void {
+): number {
+  let registered = 0;
   for (const collection of collections) {
     const collectionName = collection.metadata.name;
     const tools = collection.tools(currentUser as any);
@@ -379,6 +413,8 @@ export function registerCollectionTools<TUser>(
         },
         tool.handler as ToolCallback<typeof tool.inputSchema>
       );
+      registered += 1;
     }
   }
+  return registered;
 }
