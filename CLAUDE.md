@@ -177,6 +177,8 @@ git push -u origin chore/merge-main-to-dev
 gh pr create --base dev --title "Merge main into dev after <version> release"
 ```
 
+**The branch name must be exactly `chore/merge-main-to-dev`** — do not add a version suffix. The `test.yml` workflow skips its full CI suite for the PR by exact-matching this branch name (the sync only fast-forwards version-bump commits that already passed CI on their way into main). Any other name re-runs the entire suite needlessly.
+
 ### Version scheme
 
 - Prerelease: `17.0.0-beta.N` (published with `--tag beta` dist-tag)

@@ -8,6 +8,13 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    # Skip on the main→dev release-sync PR: it only fast-forwards version-bump
+    # commits that already passed full CI on their way into main. The sync
+    # always uses the fixed branch name `chore/merge-main-to-dev` (see the
+    # release process in CLAUDE.md). A job-level skip reports "skipped" (counts
+    # as success for branch protection), unlike a paths/branch filter which
+    # would leave a required check stuck pending.
+    if: ${{ github.head_ref != 'chore/merge-main-to-dev' }}
 
     env:
       UMBRACO_CLIENT_ID: umbraco-back-office-mcp
@@ -204,6 +211,8 @@ jobs:
   cli-e2e:
     name: New-instance & Existing-instance E2E
     runs-on: ubuntu-latest
+    # See note on the `test` job: skip the main→dev release-sync PR.
+    if: ${{ github.head_ref != 'chore/merge-main-to-dev' }}
 
     services:
       sqlserver:
