@@ -161,8 +161,17 @@ All packages are versioned together and published from the `main` branch via Azu
 5. Commit, push, and create a PR from the release branch into `main`
 6. CI runs all tests including LLM evals and skill E2E (release PRs only)
 7. Merge when all checks pass — Azure Pipelines publishes packages to npm
-8. Create a GitHub Release tagged `v<version>` from the merge commit
+8. GitHub Release tagged `v<version>` is created **automatically** (see below)
 9. Merge `main` back into `dev` — **automated** (see below)
+
+### Post-release: tag the release (automated)
+
+When the release merge reaches `main`, **`.github/workflows/release-tag.yml`** creates the `v<version>` git tag and a GitHub Release:
+
+- **Trigger:** any push to `main`. The version is read from `package.json` on the pushed commit, so the tag always matches what landed.
+- **Idempotent:** if `v<version>` already exists the run is a no-op, so re-pushes and manual `workflow_dispatch` runs are safe.
+- **Notes:** uses the curated changelog from the release PR body (`headRef: release/*`); falls back to GitHub's auto-generated notes if none is found.
+- **Prerelease:** flagged automatically when the version has a prerelease suffix (e.g. `-beta.N`).
 
 ### Post-release: merge main to dev (automated)
 

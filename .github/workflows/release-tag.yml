@@ -1,0 +1,79 @@
+name: Tag release
+
+# When a release reaches main, create the matching `v<version>` git tag and a
+# GitHub Release. This replaces the manual "Create a GitHub Release" step, which
+# was being skipped (e.g. beta.27 / beta.28 shipped to npm with no tag).
+#
+# Trigger: push to main. The version is read from package.json on the pushed
+# commit, so the tag always matches what just landed. Idempotent — if the tag
+# already exists the run is a no-op, so re-pushes and manual dispatch are safe.
+#
+# Release notes: prefer the curated changelog from the release PR body (the
+# `/release` skill writes one); fall back to GitHub's auto-generated notes.
+#
+# Prerelease flag: set when the version carries a prerelease suffix (e.g.
+# `-beta.N`), matching the existing beta releases.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Create release tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: v
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag v$VERSION already exists — nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          case "$VERSION" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Create tag + GitHub Release
+        if: steps.v.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          ARGS=(--target "$GITHUB_SHA" --title "v$VERSION")
+          [ "${{ steps.v.outputs.prerelease }}" = "true" ] && ARGS+=(--prerelease)
+
+          # Pull the curated changelog from the release PR that this commit
+          # merged (head branch `release/*` into main). Fall back to auto-notes.
+          gh api "repos/${{ github.repository }}/commits/${GITHUB_SHA}/pulls" \
+            --jq '[.[] | select(.base.ref == "main" and (.head.ref | startswith("release/")))][0].body // empty' \
+            > /tmp/release-notes.md 2>/dev/null || true
+
+          if [ -s /tmp/release-notes.md ]; then
+            echo "Using release PR body as notes."
+            gh release create "v$VERSION" "${ARGS[@]}" --notes-file /tmp/release-notes.md
+          else
+            echo "No release PR body found — generating notes automatically."
+            gh release create "v$VERSION" "${ARGS[@]}" --generate-notes
+          fi
+          echo "Created release v$VERSION"
