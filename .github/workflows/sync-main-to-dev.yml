@@ -1,0 +1,83 @@
+name: Sync main → dev
+
+# After a release reaches main, dev is left behind on the version-bump commits.
+# This workflow performs the post-release sync deterministically: it recreates
+# the fixed `chore/merge-main-to-dev` branch from dev, merges main into it, and
+# opens + merges a PR into dev. No human step on the happy path.
+#
+# Trigger: push to main. `main` only ever moves on a release, and it moves
+# exactly when the version bump lands — a more reliable signal than
+# `release: published` (GitHub Releases here are cut late / out of order).
+#
+# No recursion: this writes to the sync branch and dev, never to main.
+#
+# Conflict policy: a non-clean merge fails the run loudly. Resolve manually per
+# the "Post-release: merge main to dev" section in CLAUDE.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-main-to-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge main into dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Build sync branch
+        id: build
+        run: |
+          git fetch origin main dev
+          # Fixed branch name — test.yml skips its full suite by exact-matching it.
+          git checkout -B chore/merge-main-to-dev origin/dev
+          if ! git merge origin/main --no-edit; then
+            echo "::error::main → dev merge has conflicts; resolve manually (see CLAUDE.md → Post-release: merge main to dev)."
+            exit 1
+          fi
+          if git diff --quiet origin/dev HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "dev already contains main — nothing to sync."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch
+        if: steps.build.outputs.changed == 'true'
+        run: git push --force-with-lease origin chore/merge-main-to-dev
+
+      - name: Open and merge PR
+        if: steps.build.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if ! gh pr view chore/merge-main-to-dev --json number >/dev/null 2>&1; then
+            gh pr create \
+              --base dev \
+              --head chore/merge-main-to-dev \
+              --title "Merge main into dev after ${VERSION} release" \
+              --body "Automated main → dev sync after \`${VERSION}\` reached main. Fast-forwards the version-bump commits that already passed full CI on their way into main. Created and merged by \`.github/workflows/sync-main-to-dev.yml\`."
+          fi
+          # dev's ruleset requires a PR but 0 approvals and no required checks,
+          # so an immediate merge with GITHUB_TOKEN succeeds.
+          gh pr merge chore/merge-main-to-dev --merge --delete-branch
