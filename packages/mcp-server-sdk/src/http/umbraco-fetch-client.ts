@@ -304,7 +304,11 @@ async function doFetch<T>(
   // Parse response body
   let data: T;
   const contentType = resp.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
+  // Parse anything JSON: `application/json` plus the `+json` structured-syntax
+  // suffix (RFC 6839), e.g. `application/problem+json` used by RFC 7807 error
+  // bodies. Umbraco 18 returns Management API errors as `application/problem+json`,
+  // so without the suffix check they'd pass through unparsed as raw strings.
+  if (contentType.includes("application/json") || contentType.includes("+json")) {
     data = (await resp.json()) as T;
   } else {
     const text = await resp.text();
@@ -555,7 +559,11 @@ export function createUmbracoFetchClient(
     // Parse response body
     let data: T;
     const contentType = resp.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
+    // Parse anything JSON: `application/json` plus the `+json` structured-syntax
+    // suffix (RFC 6839), e.g. `application/problem+json` used by RFC 7807 error
+    // bodies. Umbraco 18 returns Management API errors as `application/problem+json`,
+    // so without the suffix check they'd pass through unparsed as raw strings.
+    if (contentType.includes("application/json") || contentType.includes("+json")) {
       data = (await resp.json()) as T;
     } else {
       const text = await resp.text();
