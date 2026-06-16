@@ -322,6 +322,7 @@ stages:
           displayName: Publish CLI to npm
           workingDirectory: $(Pipeline.Workspace)/cli-package
 
-# GitHub Release is created manually after npm publish.
-# To automate, add a GitHubRelease@1 stage here once a GitHub service
-# connection is configured in Azure DevOps.
+# The git tag + GitHub Release are created automatically by the
+# .github/workflows/release-tag.yml GitHub Actions workflow, which triggers on
+# push to main (i.e. when this release merge lands). It is independent of this
+# npm publish — see CLAUDE.md "Post-release: tag the release (automated)".

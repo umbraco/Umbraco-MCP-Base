@@ -161,12 +161,27 @@ All packages are versioned together and published from the `main` branch via Azu
 5. Commit, push, and create a PR from the release branch into `main`
 6. CI runs all tests including LLM evals and skill E2E (release PRs only)
 7. Merge when all checks pass — Azure Pipelines publishes packages to npm
-8. Create a GitHub Release tagged `v<version>` from the merge commit
-9. Merge `main` back into `dev` via PR (to sync version numbers)
+8. GitHub Release tagged `v<version>` is created **automatically** (see below)
+9. Merge `main` back into `dev` — **automated** (see below)
 
-### Post-release: merge main to dev
+### Post-release: tag the release (automated)
 
-After a release is published, main has the version bump commit that dev doesn't. Create a PR to merge main back:
+When the release merge reaches `main`, **`.github/workflows/release-tag.yml`** creates the `v<version>` git tag and a GitHub Release:
+
+- **Trigger:** any push to `main`. The version is read from `package.json` on the pushed commit, so the tag always matches what landed.
+- **Idempotent:** if `v<version>` already exists the run is a no-op, so re-pushes and manual `workflow_dispatch` runs are safe.
+- **Notes:** uses the curated changelog from the release PR body (`headRef: release/*`); falls back to GitHub's auto-generated notes if none is found.
+- **Prerelease:** flagged automatically when the version has a prerelease suffix (e.g. `-beta.N`).
+
+### Post-release: merge main to dev (automated)
+
+After a release reaches `main`, `dev` is left behind on the version-bump commit. This sync is handled automatically by the **`.github/workflows/sync-main-to-dev.yml`** workflow:
+
+- **Trigger:** any push to `main` (which only happens on a release).
+- **Action:** recreates the `chore/merge-main-to-dev` branch from `dev`, merges `main` into it, then opens and immediately merges a PR into `dev`. `dev`'s ruleset requires a PR but 0 approvals and no required checks, so the bot can self-merge.
+- **No human step** on the happy path.
+
+**Conflict / manual fallback.** If the merge isn't clean, the workflow fails loudly and you do it by hand:
 
 ```bash
 git checkout dev && git pull
@@ -176,6 +191,8 @@ git merge origin/main --no-edit
 git push -u origin chore/merge-main-to-dev
 gh pr create --base dev --title "Merge main into dev after <version> release"
 ```
+
+**The branch name must be exactly `chore/merge-main-to-dev`** — do not add a version suffix. Both the sync workflow and `test.yml` key off this exact name: `test.yml` skips its full CI suite for the PR (the sync only fast-forwards version-bump commits that already passed CI on their way into main). Any other name re-runs the entire suite needlessly.
 
 ### Version scheme
 

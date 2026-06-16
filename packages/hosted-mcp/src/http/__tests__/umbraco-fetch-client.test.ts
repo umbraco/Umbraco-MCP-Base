@@ -267,6 +267,38 @@ describe("createUmbracoFetchClient", () => {
         headers: { "content-type": "text/plain" },
       });
     });
+
+    // Regression for #143: Umbraco 18 returns error bodies as
+    // `application/problem+json` (RFC 7807), which does not contain
+    // `application/json`. These must still be parsed as objects.
+    it("parses application/problem+json error bodies as objects", async () => {
+      const problemBody = {
+        type: "Error",
+        title: "The folder could not be found",
+        status: 404,
+        operationStatus: "NotFound",
+      };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(problemBody), {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "application/problem+json; charset=utf-8" },
+        })
+      );
+
+      const client = createUmbracoFetchClient(baseConfig);
+      const result = await client(
+        { method: "delete", url: "/api/data-type/folder/x" },
+        CAPTURE_RAW_HTTP_RESPONSE
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          status: 404,
+          data: problemBody,
+        })
+      );
+    });
   });
 
   describe("token refresh", () => {
