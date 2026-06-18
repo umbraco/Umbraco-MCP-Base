@@ -47,3 +47,26 @@ export async function getLatestStableVersion(): Promise<string | undefined> {
     return undefined;
   }
 }
+
+/**
+ * Get the latest Umbraco version for a specific major (e.g. 17 or 18).
+ * Used to pin E2E test legs to a given major regardless of which major is
+ * currently "latest stable". Prereleases (RC/beta) are excluded unless
+ * `includePrerelease` is set — needed for majors that have no stable yet.
+ * Returns undefined if the NuGet API is unreachable or no match is found.
+ */
+export async function getLatestVersionForMajor(
+  major: number,
+  opts: { includePrerelease?: boolean } = {},
+): Promise<string | undefined> {
+  try {
+    const versions = await fetchUmbracoVersions();
+    return versions.find((v) => {
+      if (parseInt(v.split(".")[0], 10) !== major) return false;
+      if (!opts.includePrerelease && v.includes("-")) return false;
+      return true;
+    });
+  } catch {
+    return undefined;
+  }
+}

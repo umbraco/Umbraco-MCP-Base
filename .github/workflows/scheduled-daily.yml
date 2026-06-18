@@ -13,6 +13,14 @@ name: Scheduled — Daily CLI checks
 #                           dependencies or transitive tooling surface without
 #                           waiting for a PR.
 #
+#                          Runs as a matrix over Umbraco majors (17 LTS + 18) so
+#                          both the legacy `swagger` and new `openapi` API-spec
+#                          conventions are exercised end-to-end. The 18 leg pins
+#                          the latest 18.x (incl. prerelease) and may fail on
+#                          upstream RC churn — `fail-fast: false` keeps the 17
+#                          leg independent. The existing-instance suite runs only
+#                          on the 17 leg (its fixture is pinned to Umbraco 17).
+#
 # Failure notifications: relies on GitHub's built-in emails for scheduled
 # workflows — the user who last modified this file receives an email when a
 # scheduled run fails (if Actions notifications are enabled in their GitHub
@@ -86,9 +94,20 @@ jobs:
         run: npm run compile
 
   cli-e2e:
-    name: New-instance & Existing-instance E2E (scheduled)
+    name: E2E — Umbraco ${{ matrix.umbraco_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - umbraco_name: "17 (LTS)"
+            major: 17
+            prerelease_flag: ""
+          - umbraco_name: "18"
+            major: 18
+            prerelease_flag: "--prerelease"
 
     services:
       sqlserver:
@@ -142,10 +161,22 @@ jobs:
       - name: Build
         run: npm run build && npm run build -w packages/hosted-mcp && npm run build -w packages/create-mcp-server
 
-      - name: Run new-instance E2E tests
+      - name: Resolve latest Umbraco ${{ matrix.umbraco_name }} version
+        id: umbraco_version
+        run: |
+          VER=$(npx tsx packages/create-mcp-server/scripts/resolve-umbraco-version.ts ${{ matrix.major }} ${{ matrix.prerelease_flag }})
+          echo "Resolved Umbraco ${{ matrix.major }}.x → $VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Run new-instance E2E tests (Umbraco ${{ matrix.umbraco_name }})
+        env:
+          TEST_UMBRACO_VERSION: ${{ steps.umbraco_version.outputs.version }}
         run: npm run test:e2e -w packages/create-mcp-server
         timeout-minutes: 20
 
+      # The existing-instance fixture (tests/umbraco-instance) is pinned to
+      # Umbraco 17, so only run it on the 17 leg.
       - name: Run existing-instance E2E tests
+        if: matrix.major == 17
         run: npm run test:e2e:existing -w packages/create-mcp-server
         timeout-minutes: 10
