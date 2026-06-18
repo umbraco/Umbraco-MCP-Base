@@ -27,6 +27,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 // Umbraco version to install. Override with TEST_UMBRACO_VERSION env var.
 // By default, fetches the latest stable (non-prerelease) version from NuGet.
 import { getLatestStableVersion } from "../../src/init/nuget-versions.js";
+import { docsUiCandidates } from "../../src/discover/api-spec-conventions.js";
 
 const resolvedVersion = process.env.TEST_UMBRACO_VERSION || await getLatestStableVersion();
 if (resolvedVersion) console.log(`[new-instance-e2e] Using Umbraco ${resolvedVersion} (latest stable)`);
@@ -383,14 +384,16 @@ describeOrSkip("new-instance E2E", () => {
       }
 
       try {
-        const resp = await fetch(`${detectedUrl}/umbraco/swagger/`, {
-          signal: AbortSignal.timeout(5_000),
-        });
-        if (resp.ok) {
-          healthy = true;
-          baseUrl = detectedUrl;
-          break;
+        // Probe the API docs UI: /umbraco/openapi/ on Umbraco 18+, /umbraco/swagger/ on ≤17.
+        for (const uiUrl of docsUiCandidates(detectedUrl)) {
+          const resp = await fetch(uiUrl, { signal: AbortSignal.timeout(5_000) });
+          if (resp.ok) {
+            healthy = true;
+            baseUrl = detectedUrl;
+            break;
+          }
         }
+        if (healthy) break;
       } catch {
         // Not ready yet
       }
@@ -579,7 +582,8 @@ describeOrSkip("new-instance E2E", () => {
 
     const written = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     expect(written.apiName).toBeDefined();
-    expect(written.swaggerUrl).toContain("/umbraco/swagger/");
+    // Umbraco 18+ exposes specs at /umbraco/openapi/{name}.json; ≤17 at /umbraco/swagger/.
+    expect(written.swaggerUrl).toMatch(/\/umbraco\/(openapi|swagger)\//);
     expect(written.baseUrl).toBe(baseUrl);
     expect(Array.isArray(written.collections)).toBe(true);
     expect(written.collections.length).toBeGreaterThan(0);

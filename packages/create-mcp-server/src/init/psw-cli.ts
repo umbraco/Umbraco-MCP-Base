@@ -22,6 +22,25 @@ export interface PswBuildOptions {
   adminPassword?: string;
   /** Umbraco version to install (e.g. "17.3.1" LTS, "18.0.0", "18.0.0-rc4"). Defaults to latest. */
   umbracoVersion?: string;
+  /**
+   * Version of `packageName` to install (e.g. "18.0.0-rc2"). Pins the add-on to
+   * a CMS-compatible version via PSW's "Name|Version" syntax. Defaults to PSW's
+   * latest resolution when omitted.
+   */
+  packageVersion?: string;
+  /**
+   * Additional packages to install alongside `packageName`, each with an
+   * optional version. Installed via PSW's comma-separated "Name|Version" list so
+   * their versions land correctly in Directory.Packages.props (central package
+   * management) — unlike a separate post-build `dotnet add package`.
+   */
+  extraPackages?: Array<{ name: string; version?: string }>;
+  /**
+   * Starter kit to install (PSW `-k`), e.g. "clean". Omit/undefined to install no
+   * starter kit — required on Umbraco 18+, where the "clean" kit (no 18-compatible
+   * release) crashes the unattended upgrade with a removed-API MethodNotFound.
+   */
+  starterKit?: string;
 }
 
 export interface PswBuildResult {
@@ -127,12 +146,21 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
   const env = buildEnv();
   const cwd = opts.runDir;
 
+  // PSW's -p accepts a comma-separated list of "Name|Version" tokens (bare
+  // "Name" = latest). Pin each package so versions land in Directory.Packages.props.
+  const token = (name: string, version?: string) =>
+    version ? `${name}|${version}` : name;
+  const packageArg = [
+    token(opts.packageName, opts.packageVersion),
+    ...(opts.extraPackages ?? []).map((p) => token(p.name, p.version)),
+  ].join(",");
+
   const args: string[] = [
     "-d", // IMPORTANT: --default is required to generate the full script (solution, project, packages). Without it PSW only generates the "Add Packages" step.
-    "-p", opts.packageName,
+    "-p", packageArg,
     "-n", opts.projectName,
     "-s", opts.solutionName,
-    "-k", "clean",
+    ...(opts.starterKit ? ["-k", opts.starterKit] : []),
     "--database-type", opts.databaseType,
     "--admin-email", opts.adminEmail ?? "admin@test.com",
     "--admin-password", opts.adminPassword ?? "SecurePass1234",

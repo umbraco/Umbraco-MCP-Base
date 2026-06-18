@@ -11,8 +11,19 @@
 import pkg from "../../package.json" with { type: "json" };
 const MIN_MAJOR = parseInt(pkg.version.split(".")[0], 10);
 
-const NUGET_INDEX_URL =
-  "https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json";
+/**
+ * Fetch all published versions of any NuGet package, newest first.
+ * Includes stable and prerelease (RC, beta, alpha). Returns [] on any error.
+ */
+export async function fetchNugetVersions(packageId: string): Promise<string[]> {
+  const url = `https://api.nuget.org/v3-flatcontainer/${packageId.toLowerCase()}/index.json`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!resp.ok) return [];
+
+  const data = (await resp.json()) as { versions?: string[] };
+  // NuGet's flatcontainer lists versions oldest-first; reverse to newest-first.
+  return (data.versions ?? []).slice().reverse();
+}
 
 /**
  * Fetch Umbraco CMS versions from NuGet, newest first.
@@ -20,19 +31,8 @@ const NUGET_INDEX_URL =
  * Includes stable and prerelease (RC, beta, alpha).
  */
 export async function fetchUmbracoVersions(): Promise<string[]> {
-  const resp = await fetch(NUGET_INDEX_URL, {
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!resp.ok) return [];
-
-  const data = (await resp.json()) as { versions: string[] };
-
-  return data.versions
-    .filter((v) => {
-      const major = parseInt(v.split(".")[0], 10);
-      return major >= MIN_MAJOR;
-    })
-    .reverse();
+  const versions = await fetchNugetVersions("umbraco.cms");
+  return versions.filter((v) => parseInt(v.split(".")[0], 10) >= MIN_MAJOR);
 }
 
 /**
@@ -61,12 +61,43 @@ export async function getLatestVersionForMajor(
 ): Promise<string | undefined> {
   try {
     const versions = await fetchUmbracoVersions();
-    return versions.find((v) => {
-      if (parseInt(v.split(".")[0], 10) !== major) return false;
-      if (!opts.includePrerelease && v.includes("-")) return false;
-      return true;
-    });
+    return pickLatestForMajor(versions, major, opts);
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Get the latest version of an arbitrary NuGet package for a specific major.
+ *
+ * Used to keep an Umbraco add-on (e.g. Umbraco.Forms) in step with the CMS
+ * major being installed: a CMS-17 add-on dropped onto a CMS-18 site fails to
+ * boot (Umbraco 18 removed Swashbuckle, which 17.x add-ons reference). Returns
+ * undefined when NuGet is unreachable or the package has no version for that
+ * major — callers should then fall back to PSW's default (latest) resolution.
+ */
+export async function getLatestPackageVersionForMajor(
+  packageId: string,
+  major: number,
+  opts: { includePrerelease?: boolean } = {},
+): Promise<string | undefined> {
+  try {
+    const versions = await fetchNugetVersions(packageId);
+    return pickLatestForMajor(versions, major, opts);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pick the newest version matching `major` from a newest-first list. */
+function pickLatestForMajor(
+  versions: string[],
+  major: number,
+  opts: { includePrerelease?: boolean },
+): string | undefined {
+  return versions.find((v) => {
+    if (parseInt(v.split(".")[0], 10) !== major) return false;
+    if (!opts.includePrerelease && v.includes("-")) return false;
+    return true;
+  });
 }
