@@ -101,6 +101,18 @@ function setupStandardFetch() {
   ]);
 }
 
+// Umbraco 18+ (Microsoft.AspNetCore.OpenApi): docs UI under /umbraco/openapi/,
+// config emits root-relative spec URLs, specs at /umbraco/openapi/{name}.json.
+function setupV18Fetch() {
+  const openapiUiJs = `var configObject = JSON.parse('{"urls":[{"url":"/umbraco/openapi/commerce.json","name":"Commerce API"}]}');`;
+
+  globalThis.fetch = createMockFetch([
+    { pattern: "/umbraco/openapi/commerce.json", body: sampleSpec },
+    { pattern: "/umbraco/openapi/index.js", body: openapiUiJs },
+    { pattern: "/umbraco/openapi/", body: openapiUiJs },
+  ]);
+}
+
 beforeEach(() => {
   mockFs.reset();
   jest.clearAllMocks();
@@ -216,6 +228,35 @@ describe("runDiscover", () => {
       const manifest = JSON.parse(mockFs.files.get(manifestPath)!);
       expect(manifest.apiName).toBe("Commerce API");
       expect(manifest.baseUrl).toBe(BASE_URL);
+      expect(manifest.collections).toContain("product");
+      expect(manifest.collections).toContain("order");
+    });
+  });
+
+  describe("happy path (Umbraco 18 openapi)", () => {
+    it("should discover via /umbraco/openapi/ and write manifest", async () => {
+      setupV18Fetch();
+      mockPromptBaseUrl.mockResolvedValue(BASE_URL);
+      mockPromptApiSelection.mockResolvedValue({
+        url: `${BASE_URL}/umbraco/openapi/commerce.json`,
+        name: "Commerce API",
+      });
+      mockPromptConfirmOrval.mockResolvedValue(false);
+      mockPromptConfirmGenerate.mockResolvedValue(false);
+      mockPromptGroupSelection.mockImplementation(async (groups: unknown[]) => groups);
+      mockPromptUpdateModeRegistry.mockResolvedValue(false);
+      mockExecSync.mockImplementation(() => {
+        throw new Error("claude not found");
+      });
+
+      await runDiscover(PROJECT_DIR);
+
+      const manifestPath = path.resolve(PROJECT_DIR, ".discover.json");
+      expect(mockFs.files.has(manifestPath)).toBe(true);
+
+      const manifest = JSON.parse(mockFs.files.get(manifestPath)!);
+      expect(manifest.apiName).toBe("Commerce API");
+      expect(manifest.swaggerUrl).toBe(`${BASE_URL}/umbraco/openapi/commerce.json`);
       expect(manifest.collections).toContain("product");
       expect(manifest.collections).toContain("order");
     });

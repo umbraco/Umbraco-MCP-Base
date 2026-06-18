@@ -21,8 +21,10 @@ import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
 export const UmbManagementApiOrvalConfig = defineConfig({
   "umbraco-management-api": {
     input: {
-      // Update this URL to your Umbraco instance
-      target: "http://localhost:44391/umbraco/swagger/management/swagger.json",
+      // Update this URL to your Umbraco instance.
+      // Umbraco 18+: /umbraco/openapi/management.json
+      // Umbraco 17:  /umbraco/swagger/management/swagger.json
+      target: "http://localhost:44391/umbraco/openapi/management.json",
       validation: false,
       // Optional: filter out specific endpoints
       // filters: {
@@ -53,7 +55,7 @@ export const UmbManagementApiOrvalConfig = defineConfig({
   // Optional: Generate Zod schemas for runtime validation
   // "umbraco-management-api-zod": {
   //   input: {
-  //     target: "http://localhost:44391/umbraco/swagger/management/swagger.json",
+  //     target: "http://localhost:44391/umbraco/openapi/management.json",
   //     validation: false,
   //   },
   //   output: {

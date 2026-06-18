@@ -275,6 +275,25 @@ describe("parseSwaggerUiHtml", () => {
     expect(endpoints[1].name).toBe("Umbraco Commerce API");
   });
 
+  it("should resolve root-relative URLs against the origin (Umbraco 18+ openapi)", () => {
+    // Umbraco 18 (Microsoft.AspNetCore.OpenApi) emits absolute root-relative spec paths.
+    const html = `
+      <script>
+        var configObject = JSON.parse('{"urls":[{"url":"/umbraco/openapi/management.json","name":"Umbraco Management API"},{"url":"/umbraco/openapi/delivery.json","name":"Umbraco Delivery API"}]}');
+      </script>
+    `;
+
+    const endpoints = parseSwaggerUiHtml(html, "https://localhost:44331");
+
+    expect(endpoints).toHaveLength(2);
+    expect(endpoints[0].url).toBe(
+      "https://localhost:44331/umbraco/openapi/management.json"
+    );
+    expect(endpoints[1].url).toBe(
+      "https://localhost:44331/umbraco/openapi/delivery.json"
+    );
+  });
+
   it("should handle absolute URLs in config", () => {
     const html = `
       <script>

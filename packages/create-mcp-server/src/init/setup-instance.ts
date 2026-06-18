@@ -9,7 +9,7 @@ export interface SetupInstanceOptions {
   projectDir: string;
   instanceName?: string;
   connectionString?: string;
-  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  /** Umbraco version to install (e.g. "17.3.1" LTS, "18.0.0", "18.0.0-rc4"). Defaults to latest. */
   umbracoVersion?: string;
 }
 

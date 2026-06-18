@@ -11,8 +11,9 @@ import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
  *
  * Example OpenAPI spec sources:
  * - Local file: "./src/umbraco-api/api/openapi.yaml"
- * - Local Umbraco: "http://localhost:44391/umbraco/swagger/management/swagger.json"
- * - Remote URL: "https://api.example.com/swagger.json"
+ * - Local Umbraco 18+: "http://localhost:44391/umbraco/openapi/management.json"
+ * - Local Umbraco 17:  "http://localhost:44391/umbraco/swagger/management/swagger.json"
+ * - Remote URL: "https://api.example.com/openapi.json"
  */
 export default defineConfig({
   // Main API client generation
