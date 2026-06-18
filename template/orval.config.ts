@@ -1,5 +1,7 @@
-import { defineConfig } from "orval";
+import { defineConfig, type HookFunction } from "orval";
 import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
+import { relaxUntypedArrays } from "./src/umbraco-api/orval/relax-untyped-arrays.js";
+import { postProcessZodFiles } from "./src/umbraco-api/orval/zod-post-process.js";
 
 /**
  * Orval Configuration
@@ -14,6 +16,9 @@ import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
  * - Local Umbraco 18+: "http://localhost:44391/umbraco/openapi/management.json"
  * - Local Umbraco 17:  "http://localhost:44391/umbraco/swagger/management/swagger.json"
  * - Remote URL: "https://api.example.com/openapi.json"
+ *
+ * Umbraco 18 emits OpenAPI 3.1; this config uses orval 8 with workarounds for a
+ * few Umbraco-specific quirks (see relax-untyped-arrays.ts and zod-post-process.ts).
  */
 export default defineConfig({
   // Main API client generation
@@ -22,7 +27,10 @@ export default defineConfig({
       // Use the included example OpenAPI spec
       // Replace with your add-on's spec path or URL
       target: "./src/umbraco-api/api/openapi.yaml",
-      validation: false,
+      unsafeDisableValidation: true,
+      override: {
+        transformer: relaxUntypedArrays,
+      },
     },
     output: {
       target: "./src/umbraco-api/api/generated/exampleApi.ts",
@@ -37,7 +45,7 @@ export default defineConfig({
       },
     },
     hooks: {
-      afterAllFilesWrite: orvalImportFixer,
+      afterAllFilesWrite: orvalImportFixer as HookFunction,
     },
   },
 
@@ -45,13 +53,31 @@ export default defineConfig({
   exampleApiZod: {
     input: {
       target: "./src/umbraco-api/api/openapi.yaml",
-      validation: false,
+      unsafeDisableValidation: true,
+      override: {
+        transformer: relaxUntypedArrays,
+      },
     },
     output: {
       target: "./src/umbraco-api/api/generated/exampleApi.zod.ts",
       client: "zod",
       mode: "single",
       clean: false,
+      override: {
+        zod: {
+          dateTimeOptions: {
+            local: true,
+            offset: true,
+          },
+          coerce: {
+            query: ["number", "boolean"],
+          },
+        },
+      },
+    },
+    hooks: {
+      // Keep the generated zod surface stable across the orval 7 -> 8 upgrade.
+      afterAllFilesWrite: postProcessZodFiles as HookFunction,
     },
   },
 });

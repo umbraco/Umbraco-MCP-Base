@@ -1,22 +1,30 @@
 /**
- * Example Orval Configuration for Umbraco Management API
+ * Example Orval Configuration for the Umbraco Management API
  *
  * Orval generates TypeScript API clients from OpenAPI specifications.
- * This example shows how to configure it for Umbraco's Management API.
+ * This example shows a full orval 8 setup for Umbraco's Management API,
+ * including the workarounds Umbraco's spec needs.
  *
  * Setup:
  * 1. Install Orval: npm install -D orval
  * 2. Rename this file to umb-management-api.ts (remove .example)
- * 3. Update the target URL to your Umbraco instance
- * 4. Run: npx orval --config src/orval/umb-management-api.ts
+ * 3. Point orval.config.ts at this config
+ * 4. Update the target URL to your Umbraco instance
+ * 5. Run: npm run generate
  *
  * The SDK provides:
- * - UmbracoManagementClient: Pre-configured Orval mutator with OAuth auth
- * - orvalImportFixer: Hook to fix ESM imports in generated code
+ * - UmbracoManagementClient: pre-configured Orval mutator with OAuth auth
+ * - orvalImportFixer: hook to fix ESM imports in generated code
+ *
+ * Sibling helpers (also in this folder):
+ * - relaxUntypedArrays: input transformer for Umbraco's untyped-array schemas
+ * - postProcessZodFiles: keeps the generated zod surface stable across orval 7 -> 8
  */
 
-import { defineConfig } from "orval";
+import { defineConfig, type HookFunction } from "orval";
 import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
+import { relaxUntypedArrays } from "./relax-untyped-arrays.js";
+import { postProcessZodFiles } from "./zod-post-process.js";
 
 export const UmbManagementApiOrvalConfig = defineConfig({
   "umbraco-management-api": {
@@ -25,7 +33,10 @@ export const UmbManagementApiOrvalConfig = defineConfig({
       // Umbraco 18+: /umbraco/openapi/management.json
       // Umbraco 17:  /umbraco/swagger/management/swagger.json
       target: "http://localhost:44391/umbraco/openapi/management.json",
-      validation: false,
+      unsafeDisableValidation: true,
+      override: {
+        transformer: relaxUntypedArrays,
+      },
       // Optional: filter out specific endpoints
       // filters: {
       //   mode: "exclude",
@@ -48,31 +59,46 @@ export const UmbManagementApiOrvalConfig = defineConfig({
     },
     hooks: {
       // Fix ESM imports in generated files
-      afterAllFilesWrite: orvalImportFixer,
+      afterAllFilesWrite: orvalImportFixer as HookFunction,
     },
   },
 
-  // Optional: Generate Zod schemas for runtime validation
-  // "umbraco-management-api-zod": {
-  //   input: {
-  //     target: "http://localhost:44391/umbraco/openapi/management.json",
-  //     validation: false,
-  //   },
-  //   output: {
-  //     mode: "split",
-  //     client: "zod",
-  //     target: "./src/umbraco-api/api/",
-  //     fileExtension: ".zod.ts",
-  //     override: {
-  //       zod: {
-  //         generate: {
-  //           param: true,
-  //           query: true,
-  //           body: true,
-  //           response: true,
-  //         },
-  //       },
-  //     },
-  //   },
-  // },
+  // Generate Zod schemas for runtime validation
+  "umbraco-management-api-zod": {
+    input: {
+      target: "http://localhost:44391/umbraco/openapi/management.json",
+      unsafeDisableValidation: true,
+      override: {
+        transformer: relaxUntypedArrays,
+      },
+    },
+    output: {
+      mode: "split",
+      client: "zod",
+      target: "./src/umbraco-api/api/",
+      fileExtension: ".zod.ts",
+      override: {
+        zod: {
+          dateTimeOptions: {
+            local: true,
+            offset: true,
+          },
+          coerce: {
+            query: ["number", "boolean"],
+          },
+          generate: {
+            param: true,
+            query: true,
+            header: true,
+            body: true,
+            response: true,
+          },
+        },
+      },
+    },
+    hooks: {
+      // Keep the generated zod surface stable across the orval 7 -> 8 upgrade.
+      afterAllFilesWrite: postProcessZodFiles as HookFunction,
+    },
+  },
 });
