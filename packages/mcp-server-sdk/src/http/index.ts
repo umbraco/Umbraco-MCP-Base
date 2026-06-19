@@ -23,3 +23,14 @@ export {
 } from "./umbraco-fetch-client.js";
 
 export { orvalImportFixer } from "./orval-import-fixer.js";
+export {
+  relaxUntypedArrays,
+  type OpenApiDocumentLike,
+} from "./orval-relax-untyped-arrays.js";
+export {
+  collectZodFiles,
+  relaxUuidToGuid,
+  camelCaseZodExports,
+  restoreV7OptionalDefaults,
+  postProcessZodFiles,
+} from "./orval-zod-post-process.js";

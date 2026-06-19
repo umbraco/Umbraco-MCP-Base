@@ -4,11 +4,11 @@ import path from "node:path";
 /**
  * Post-processing for orval-generated `.zod.ts` files.
  *
- * Orval 8 changed a few things about the zod output relative to orval 7. These
- * helpers re-align the generated code so that hand-written tools and tests keep
- * working unchanged across the upgrade — i.e. the generated surface stays the
- * same structure orval 7 produced. Wire `postProcessZodFiles` into the zod
- * config's `afterAllFilesWrite` hook.
+ * Orval 8 changed a few things about its zod output relative to orval 7. These
+ * helpers re-align the generated code so hand-written tools and tests keep working
+ * unchanged across the upgrade — the generated surface stays the structure orval 7
+ * produced. Wire `postProcessZodFiles` into the zod config's `afterAllFilesWrite`
+ * hook (cast to orval's `HookFunction` if the config types require it).
  */
 
 /** Resolve the `.zod.ts` files from the list of paths an orval hook receives. */

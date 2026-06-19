@@ -16,15 +16,17 @@
  * - UmbracoManagementClient: pre-configured Orval mutator with OAuth auth
  * - orvalImportFixer: hook to fix ESM imports in generated code
  *
- * Sibling helpers (also in this folder):
+ * SDK helpers used here:
  * - relaxUntypedArrays: input transformer for Umbraco's untyped-array schemas
  * - postProcessZodFiles: keeps the generated zod surface stable across orval 7 -> 8
  */
 
 import { defineConfig, type HookFunction } from "orval";
-import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
-import { relaxUntypedArrays } from "./relax-untyped-arrays.js";
-import { postProcessZodFiles } from "./zod-post-process.js";
+import {
+  orvalImportFixer,
+  relaxUntypedArrays,
+  postProcessZodFiles,
+} from "@umbraco-cms/mcp-server-sdk";
 
 export const UmbManagementApiOrvalConfig = defineConfig({
   "umbraco-management-api": {

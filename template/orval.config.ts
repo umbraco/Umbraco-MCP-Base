@@ -1,7 +1,9 @@
 import { defineConfig, type HookFunction } from "orval";
-import { orvalImportFixer } from "@umbraco-cms/mcp-server-sdk";
-import { relaxUntypedArrays } from "./src/umbraco-api/orval/relax-untyped-arrays.js";
-import { postProcessZodFiles } from "./src/umbraco-api/orval/zod-post-process.js";
+import {
+  orvalImportFixer,
+  relaxUntypedArrays,
+  postProcessZodFiles,
+} from "@umbraco-cms/mcp-server-sdk";
 
 /**
  * Orval Configuration
