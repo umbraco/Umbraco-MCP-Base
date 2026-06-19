@@ -37,14 +37,15 @@ export interface PswBuildOptions {
   extraPackages?: Array<{ name: string; version?: string }>;
   /**
    * Starter kit to install (PSW `-k`), optionally version-pinned via "kit|version"
-   * (e.g. "clean" or "clean|8.0.0-rc1"). Omit/undefined to install no starter kit.
+   * (e.g. "clean" or "clean|8.0.0-rc1"). Defaults to "clean" when omitted; pass
+   * `false` to explicitly install no starter kit.
    *
    * Pin a version on Umbraco 18+: the stable "clean" kit (7.x) targets Umbraco 17
    * and crashes the unattended upgrade on 18 with a removed-API MethodNotFound, so
    * a prerelease CMS must use clean's matching prerelease (its 8.x line). See
    * resolveStarterKit() in setup-instance.ts.
    */
-  starterKit?: string;
+  starterKit?: string | false;
 }
 
 export interface PswBuildResult {
@@ -159,12 +160,16 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
     ...(opts.extraPackages ?? []).map((p) => token(p.name, p.version)),
   ].join(",");
 
+  // Install the "clean" starter kit by default; only skip it when explicitly
+  // disabled with `starterKit: false`.
+  const starterKit = opts.starterKit === undefined ? "clean" : opts.starterKit;
+
   const args: string[] = [
     "-d", // IMPORTANT: --default is required to generate the full script (solution, project, packages). Without it PSW only generates the "Add Packages" step.
     "-p", packageArg,
     "-n", opts.projectName,
     "-s", opts.solutionName,
-    ...(opts.starterKit ? ["-k", opts.starterKit] : []),
+    ...(starterKit ? ["-k", starterKit] : []),
     "--database-type", opts.databaseType,
     "--admin-email", opts.adminEmail ?? "admin@test.com",
     "--admin-password", opts.adminPassword ?? "SecurePass1234",

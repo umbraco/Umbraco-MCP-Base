@@ -9,7 +9,7 @@
  * 1. Install Orval: npm install -D orval
  * 2. Rename this file to umb-management-api.ts (remove .example)
  * 3. Point orval.config.ts at this config
- * 4. Update the target URL to your Umbraco instance
+ * 4. Set SPEC_URL below (or the UMBRACO_OPENAPI_SPEC env var) for your instance
  * 5. Run: npm run generate
  *
  * The SDK provides:
@@ -28,13 +28,20 @@ import {
   postProcessZodFiles,
 } from "@umbraco-cms/mcp-server-sdk";
 
+/**
+ * OpenAPI spec URL for your Umbraco instance. The path differs by Umbraco version:
+ *   Umbraco 18+: /umbraco/openapi/management.json   (Microsoft.AspNetCore.OpenApi)
+ *   Umbraco 17:  /umbraco/swagger/management/swagger.json   (Swashbuckle)
+ * Set the UMBRACO_OPENAPI_SPEC env var to point at either, or edit the default.
+ */
+const SPEC_URL =
+  process.env.UMBRACO_OPENAPI_SPEC ??
+  "http://localhost:44391/umbraco/openapi/management.json";
+
 export const UmbManagementApiOrvalConfig = defineConfig({
   "umbraco-management-api": {
     input: {
-      // Update this URL to your Umbraco instance.
-      // Umbraco 18+: /umbraco/openapi/management.json
-      // Umbraco 17:  /umbraco/swagger/management/swagger.json
-      target: "http://localhost:44391/umbraco/openapi/management.json",
+      target: SPEC_URL,
       unsafeDisableValidation: true,
       override: {
         transformer: relaxUntypedArrays,
@@ -68,7 +75,7 @@ export const UmbManagementApiOrvalConfig = defineConfig({
   // Generate Zod schemas for runtime validation
   "umbraco-management-api-zod": {
     input: {
-      target: "http://localhost:44391/umbraco/openapi/management.json",
+      target: SPEC_URL,
       unsafeDisableValidation: true,
       override: {
         transformer: relaxUntypedArrays,
