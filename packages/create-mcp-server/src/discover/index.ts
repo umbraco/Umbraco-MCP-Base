@@ -371,9 +371,10 @@ function readOrvalBaseUrl(projectDir: string): string | undefined {
 
   const content = fs.readFileSync(orvalPath, "utf-8");
 
-  // Match a remote URL target (not the default local yaml)
+  // Match a remote URL target (not the default local yaml).
+  // Umbraco 18+ uses /umbraco/openapi/; Umbraco 17 and earlier use /umbraco/swagger/.
   const match = content.match(
-    /target:\s*["'](https?:\/\/[^"']+\/umbraco\/swagger\/[^"']+)["']/
+    /target:\s*["'](https?:\/\/[^"']+\/umbraco\/(?:openapi|swagger)\/[^"']+)["']/
   );
   if (match) {
     try {

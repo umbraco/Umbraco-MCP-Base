@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
 import pc from "picocolors";
+import { oauthRedirectCandidates } from "./api-spec-conventions.js";
 
 const TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
 const LOGIN_PATH = "/umbraco/management/api/v1/security/back-office/login";
@@ -222,6 +223,36 @@ async function tryCreateApiUser(
 }
 
 /**
+ * Resolve the OAuth2 redirect URI registered for the pre-registered Swagger client.
+ *
+ * Umbraco 18+ (Microsoft.AspNetCore.OpenApi) serves the redirect page — and
+ * registers it as the allowed redirect_uri — at /umbraco/openapi/oauth2-redirect.html.
+ * Umbraco 17 and earlier (Swashbuckle) use /umbraco/swagger/oauth2-redirect.html.
+ * The redirect_uri must match the server-registered value exactly, so probe the
+ * newer path first and fall back to the legacy one.
+ */
+async function resolveOAuthRedirectUri(baseUrl: string): Promise<string> {
+  const candidates = oauthRedirectCandidates(baseUrl);
+
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok) {
+        return url;
+      }
+    } catch {
+      // Try next candidate
+    }
+  }
+
+  // Default to the modern path if neither probe succeeds.
+  return candidates[0];
+}
+
+/**
  * Obtain a bearer token using the OAuth authorization code flow with PKCE.
  * Uses the pre-registered Swagger client (available in development mode).
  *
@@ -232,7 +263,7 @@ async function getBearerToken(baseUrl: string, cookies: string): Promise<string 
   const codeVerifier = randomBytes(32).toString("base64url");
   const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
 
-  const redirectUri = `${baseUrl}/umbraco/swagger/oauth2-redirect.html`;
+  const redirectUri = await resolveOAuthRedirectUri(baseUrl);
 
   // Request authorization code — server returns a 302 redirect with ?code=...
   const authorizeUrl = new URL(`${baseUrl}${AUTHORIZE_PATH}`);

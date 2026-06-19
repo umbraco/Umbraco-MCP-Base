@@ -1,23 +1,32 @@
+import { docsUiCandidates } from "./api-spec-conventions.js";
+
 export interface HealthCheckResult {
   healthy: boolean;
   error?: string;
 }
 
 export async function checkHealth(baseUrl: string): Promise<HealthCheckResult> {
-  const swaggerUiUrl = `${baseUrl}/umbraco/swagger/`;
+  // Umbraco 18+ serves the API docs UI at /umbraco/openapi/; Umbraco 17 and
+  // earlier at /umbraco/swagger/. docsUiCandidates() probes openapi first.
+  const uiUrls = docsUiCandidates(baseUrl);
 
+  let lastStatus: number | undefined;
   try {
-    const response = await fetch(swaggerUiUrl, {
-      signal: AbortSignal.timeout(10_000),
-    });
+    for (const uiUrl of uiUrls) {
+      const response = await fetch(uiUrl, {
+        signal: AbortSignal.timeout(10_000),
+      });
 
-    if (response.ok) {
-      return { healthy: true };
+      if (response.ok) {
+        return { healthy: true };
+      }
+
+      lastStatus = response.status;
     }
 
     return {
       healthy: false,
-      error: `Swagger UI returned HTTP ${response.status}`,
+      error: `API documentation UI returned HTTP ${lastStatus}`,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

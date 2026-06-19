@@ -1,7 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import pc from "picocolors";
 import { buildWithPsw } from "./psw-cli.js";
+import { fetchNugetVersions, getLatestPackageVersionForMajor } from "./nuget-versions.js";
+
+const DEVELOPMENT_MODE_PACKAGE = "Umbraco.Cms.DevelopmentMode.Backoffice";
 
 export interface SetupInstanceOptions {
   packageName: string;
@@ -9,7 +12,7 @@ export interface SetupInstanceOptions {
   projectDir: string;
   instanceName?: string;
   connectionString?: string;
-  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  /** Umbraco version to install (e.g. "17.3.1" LTS, "18.0.0", "18.0.0-rc4"). Defaults to latest. */
   umbracoVersion?: string;
 }
 
@@ -54,6 +57,28 @@ export async function setupInstance(
   const adminEmail = "admin@test.com";
   const adminPassword = "SecurePass1234";
 
+  // Resolve the chosen add-on to a version matching the CMS major (PSW installs
+  // latest stable by default, which on a prerelease/older CMS would be the wrong
+  // major). DevelopmentMode registers the umbraco-swagger OAuth client that
+  // checkApiUser needs for the discover flow.
+  const [packageVersion, extraPackages] = await Promise.all([
+    resolvePackageVersion(opts.packageName, opts.umbracoVersion),
+    resolveExtraPackages(opts.umbracoVersion),
+  ]);
+  if (packageVersion) {
+    console.log(
+      pc.dim(`  Pinning ${opts.packageName} to ${packageVersion} to match Umbraco ${opts.umbracoVersion}`),
+    );
+  }
+
+  // Pin the starter kit to a CMS-compatible version. "clean" versions on its own
+  // line (7.x → Umbraco 17, 8.x → 18), NOT in lockstep with the CMS major, and PSW
+  // installs the latest STABLE — which lags a prerelease CMS. Installing the stable
+  // clean (7.x) on Umbraco 18 fails the boot: its package migration calls APIs
+  // removed in 18 (MethodNotFound: PublishResult.Content). So for a prerelease CMS,
+  // use the latest clean prerelease (the build that targets the new major).
+  const starterKit = await resolveStarterKit("clean", opts.umbracoVersion);
+
   buildWithPsw({
     packageName: opts.packageName,
     projectName: dirName,
@@ -64,26 +89,10 @@ export async function setupInstance(
     adminEmail,
     adminPassword,
     umbracoVersion: opts.umbracoVersion,
+    packageVersion,
+    extraPackages,
+    starterKit,
   });
-
-  // Add DevelopmentMode package — required for the discover flow.
-  // This package registers the umbraco-swagger OAuth client which is used
-  // by checkApiUser to create API users via PKCE. PSW doesn't include it.
-  // Note: On Umbraco 17.3, the client is only registered on second boot
-  // (see https://github.com/umbraco/Umbraco-CMS/issues/22356)
-  const csprojFiles = fs.readdirSync(instanceDir).filter(f => f.endsWith(".csproj"));
-  if (csprojFiles.length > 0) {
-    try {
-      execFileSync("dotnet", ["add", "package", "Umbraco.Cms.DevelopmentMode.Backoffice"], {
-        cwd: instanceDir,
-        encoding: "utf-8",
-        timeout: 60_000,
-        stdio: "inherit",
-      });
-    } catch {
-      // Non-fatal — DevelopmentMode is optional (only needed for discover flow)
-    }
-  }
 
   // Write connection string and unattended install config to appsettings
   if (opts.connectionString) {
@@ -113,6 +122,66 @@ export async function setupInstance(
     adminEmail,
     adminPassword,
   };
+}
+
+/**
+ * Resolve the add-on package version to install for a given Umbraco version.
+ *
+ * Returns the package's latest version sharing the CMS major (matching the
+ * CMS's prerelease state), or undefined when no Umbraco version was requested,
+ * NuGet is unreachable, or the package has no version for that major — in which
+ * case PSW falls back to its default (latest) resolution.
+ */
+export async function resolvePackageVersion(
+  packageName: string,
+  umbracoVersion?: string,
+): Promise<string | undefined> {
+  if (!umbracoVersion) return undefined;
+
+  const major = parseInt(umbracoVersion.split(".")[0], 10);
+  if (Number.isNaN(major)) return undefined;
+
+  const includePrerelease = umbracoVersion.includes("-");
+  return getLatestPackageVersionForMajor(packageName, major, { includePrerelease });
+}
+
+/**
+ * Build the list of supporting packages PSW should install alongside the chosen
+ * add-on. Currently just DevelopmentMode — which registers the umbraco-swagger
+ * OAuth client the discover flow authenticates with — version-matched to the CMS
+ * major (PSW installs latest stable by default, the wrong major for a prerelease
+ * or older CMS).
+ */
+export async function resolveExtraPackages(
+  umbracoVersion?: string,
+): Promise<Array<{ name: string; version?: string }>> {
+  return [
+    { name: DEVELOPMENT_MODE_PACKAGE, version: await resolvePackageVersion(DEVELOPMENT_MODE_PACKAGE, umbracoVersion) },
+  ];
+}
+
+/**
+ * Resolve the PSW starter-kit argument, pinning a version when needed.
+ *
+ * Starter kits version on their own line, not in lockstep with the CMS major, so
+ * the major-matching used for add-ons doesn't apply. PSW installs the latest
+ * STABLE kit, which is correct for a stable CMS but lags a prerelease CMS (e.g.
+ * clean 7.x stable vs the clean 8.0.0-rc that targets Umbraco 18). So:
+ *  - stable / unspecified CMS → return the bare kit name (PSW picks latest stable),
+ *  - prerelease CMS → pin to the kit's latest version (incl. prerelease), which is
+ *    the build targeting the new major, via PSW's "kit|version" syntax.
+ *
+ * Returns undefined only if the kit can't be resolved, leaving PSW to default.
+ */
+export async function resolveStarterKit(
+  kit: string,
+  umbracoVersion?: string,
+): Promise<string> {
+  if (!umbracoVersion || !umbracoVersion.includes("-")) return kit;
+
+  const versions = await fetchNugetVersions(kit); // newest-first, incl. prerelease
+  const latest = versions[0];
+  return latest ? `${kit}|${latest}` : kit;
 }
 
 /**

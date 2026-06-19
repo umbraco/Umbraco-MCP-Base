@@ -403,4 +403,18 @@ describe("detectBaseUrl priority", () => {
     expect(result.url).toBe("https://localhost:33333");
     expect(result.source).toBe("orval.config.ts");
   });
+
+  it("should detect base URL from an Umbraco 18 openapi orval target", () => {
+    const orvalPath = path.resolve(PROJECT_DIR, "orval.config.ts");
+    let orvalContent = mockFs.files.get(orvalPath)!;
+    orvalContent = orvalContent.replace(
+      /target:\s*["'][^"']+["']/,
+      'target: "https://localhost:33333/umbraco/openapi/management.json"'
+    );
+    mockFs.files.set(orvalPath, orvalContent);
+
+    const result = detectBaseUrl(PROJECT_DIR);
+    expect(result.url).toBe("https://localhost:33333");
+    expect(result.source).toBe("orval.config.ts");
+  });
 });

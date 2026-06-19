@@ -20,8 +20,32 @@ export interface PswBuildOptions {
   connectionString?: string;
   adminEmail?: string;
   adminPassword?: string;
-  /** Umbraco version to install (e.g. "17.2.2", "17.3.1", "17.0.0-rc4"). Defaults to latest. */
+  /** Umbraco version to install (e.g. "17.3.1" LTS, "18.0.0", "18.0.0-rc4"). Defaults to latest. */
   umbracoVersion?: string;
+  /**
+   * Version of `packageName` to install (e.g. "18.0.0-rc2"). Pins the add-on to
+   * a CMS-compatible version via PSW's "Name|Version" syntax. Defaults to PSW's
+   * latest resolution when omitted.
+   */
+  packageVersion?: string;
+  /**
+   * Additional packages to install alongside `packageName`, each with an
+   * optional version. Installed via PSW's comma-separated "Name|Version" list so
+   * their versions land correctly in Directory.Packages.props (central package
+   * management) — unlike a separate post-build `dotnet add package`.
+   */
+  extraPackages?: Array<{ name: string; version?: string }>;
+  /**
+   * Starter kit to install (PSW `-k`), optionally version-pinned via "kit|version"
+   * (e.g. "clean" or "clean|8.0.0-rc1"). Defaults to "clean" when omitted; pass
+   * `false` to explicitly install no starter kit.
+   *
+   * Pin a version on Umbraco 18+: the stable "clean" kit (7.x) targets Umbraco 17
+   * and crashes the unattended upgrade on 18 with a removed-API MethodNotFound, so
+   * a prerelease CMS must use clean's matching prerelease (its 8.x line). See
+   * resolveStarterKit() in setup-instance.ts.
+   */
+  starterKit?: string | false;
 }
 
 export interface PswBuildResult {
@@ -127,12 +151,25 @@ export function buildWithPsw(opts: PswBuildOptions): PswBuildResult {
   const env = buildEnv();
   const cwd = opts.runDir;
 
+  // PSW's -p accepts a comma-separated list of "Name|Version" tokens (bare
+  // "Name" = latest). Pin each package so versions land in Directory.Packages.props.
+  const token = (name: string, version?: string) =>
+    version ? `${name}|${version}` : name;
+  const packageArg = [
+    token(opts.packageName, opts.packageVersion),
+    ...(opts.extraPackages ?? []).map((p) => token(p.name, p.version)),
+  ].join(",");
+
+  // Install the "clean" starter kit by default; only skip it when explicitly
+  // disabled with `starterKit: false`.
+  const starterKit = opts.starterKit === undefined ? "clean" : opts.starterKit;
+
   const args: string[] = [
     "-d", // IMPORTANT: --default is required to generate the full script (solution, project, packages). Without it PSW only generates the "Add Packages" step.
-    "-p", opts.packageName,
+    "-p", packageArg,
     "-n", opts.projectName,
     "-s", opts.solutionName,
-    "-k", "clean",
+    ...(starterKit ? ["-k", starterKit] : []),
     "--database-type", opts.databaseType,
     "--admin-email", opts.adminEmail ?? "admin@test.com",
     "--admin-password", opts.adminPassword ?? "SecurePass1234",
