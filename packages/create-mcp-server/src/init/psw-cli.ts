@@ -36,9 +36,13 @@ export interface PswBuildOptions {
    */
   extraPackages?: Array<{ name: string; version?: string }>;
   /**
-   * Starter kit to install (PSW `-k`), e.g. "clean". Omit/undefined to install no
-   * starter kit — required on Umbraco 18+, where the "clean" kit (no 18-compatible
-   * release) crashes the unattended upgrade with a removed-API MethodNotFound.
+   * Starter kit to install (PSW `-k`), optionally version-pinned via "kit|version"
+   * (e.g. "clean" or "clean|8.0.0-rc1"). Omit/undefined to install no starter kit.
+   *
+   * Pin a version on Umbraco 18+: the stable "clean" kit (7.x) targets Umbraco 17
+   * and crashes the unattended upgrade on 18 with a removed-API MethodNotFound, so
+   * a prerelease CMS must use clean's matching prerelease (its 8.x line). See
+   * resolveStarterKit() in setup-instance.ts.
    */
   starterKit?: string;
 }
