@@ -154,6 +154,8 @@ The full workflow lives in the **`release-and-branching` skill** (`.claude/skill
 
 ### Release process
 
+> Follow the **`release-and-branching` skill** for the workflow (branch, merge style, sync-back). The steps below are the project-specific release mechanics the skill refers to.
+
 1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.9`)
 2. Bump the version in **all** files (use find-and-replace for the old version string):
    - `package.json` (root)
