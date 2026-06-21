@@ -20,7 +20,7 @@
     }
   },
   "peerDependencies": {
-    "@playwright/test": ">=1.40.0"
+    "@playwright/test": "^1.61.0"
   },
   "peerDependenciesMeta": {
     "@playwright/test": {
