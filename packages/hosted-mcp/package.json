@@ -41,7 +41,7 @@
     "@cfworker/json-schema": "^4.1.1",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@umbraco-cms/mcp-server-sdk": "file:../mcp-server-sdk",
-    "zod": "^4.2.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",
