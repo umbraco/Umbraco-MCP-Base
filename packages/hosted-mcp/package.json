@@ -44,7 +44,7 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250214.0",
+    "@cloudflare/workers-types": "^4.20260621.1",
     "@types/jest": "^29.5.14",
     "jest": "^29.7.0",
     "jest-junit": "^16.0.0",
