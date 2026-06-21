@@ -5,7 +5,7 @@ import {
 } from "../nuget-versions.js";
 
 // NuGet flatcontainer returns versions oldest-first; fetchUmbracoVersions
-// filters to >= the package major (17) and reverses to newest-first.
+// filters to >= the supported Umbraco floor (17) and reverses to newest-first.
 const NUGET_VERSIONS = [
   "16.2.0",
   "17.0.0",
@@ -49,7 +49,7 @@ describe("getLatestVersionForMajor", () => {
     expect(await getLatestVersionForMajor(18)).toBeUndefined();
   });
 
-  it("ignores versions below the package major (filtered upstream)", async () => {
+  it("ignores versions below the supported Umbraco floor (filtered upstream)", async () => {
     mockNuget(NUGET_VERSIONS);
     expect(await getLatestVersionForMajor(16)).toBeUndefined();
   });
