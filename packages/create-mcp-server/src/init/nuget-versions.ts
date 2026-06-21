@@ -8,8 +8,10 @@
  * (e.g. 17.0.0-beta.8 → major 17) so it stays in sync automatically.
  */
 
-import pkg from "../../package.json" with { type: "json" };
-const MIN_MAJOR = parseInt(pkg.version.split(".")[0], 10);
+// Minimum Umbraco major version this tool supports (17 LTS). Kept independent of
+// this package's own version — the SDK/tooling versions on its own line and no
+// longer tracks the Umbraco major.
+const MIN_MAJOR = 17;
 
 /**
  * Fetch all published versions of any NuGet package, newest first.
