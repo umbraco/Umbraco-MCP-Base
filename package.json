@@ -1,6 +1,6 @@
 {
   "name": "umbraco-mcp-server-sdk-monorepo",
-  "version": "17.0.0-beta.29",
+  "version": "1.0.0-beta.30",
   "private": true,
   "description": "Umbraco MCP Server SDK monorepo",
   "workspaces": [

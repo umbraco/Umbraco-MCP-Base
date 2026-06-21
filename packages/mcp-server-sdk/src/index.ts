@@ -297,6 +297,13 @@ export {
   createUmbracoFetchClient,
   // Orval helpers
   orvalImportFixer,
+  relaxUntypedArrays,
+  collectZodFiles,
+  relaxUuidToGuid,
+  camelCaseZodExports,
+  restoreV7OptionalDefaults,
+  postProcessZodFiles,
+  type OpenApiDocumentLike,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,

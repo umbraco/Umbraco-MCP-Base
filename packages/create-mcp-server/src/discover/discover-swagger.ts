@@ -1,3 +1,10 @@
+import {
+  SWAGGER_UI_BASE_PATH,
+  normalizeOrigin,
+  specUrlCandidates,
+  uiConfigSources,
+} from "./api-spec-conventions.js";
+
 export interface SwaggerEndpoint {
   url: string;
   name: string;
@@ -15,14 +22,10 @@ const KNOWN_API_NAMES = [
 export async function discoverSwaggerEndpoints(
   baseUrl: string
 ): Promise<SwaggerEndpoint[]> {
-  const base = baseUrl.replace(/\/+$/, "");
-
-  // The Swagger UI config is in index.js, not embedded in the HTML
-  const sources = [
-    `${base}/umbraco/swagger/index.js`,
-    `${base}/umbraco/swagger/`,
-    `${base}/umbraco/swagger/index.html`,
-  ];
+  // The OpenAPI/Swagger UI config is in index.js, not embedded in the HTML.
+  // uiConfigSources() yields both conventions (openapi first, swagger fallback);
+  // see api-spec-conventions.ts for the Umbraco 18 switch this codifies.
+  const sources = uiConfigSources(baseUrl);
 
   for (const url of sources) {
     try {
@@ -99,30 +102,43 @@ function toAbsoluteUrl(relativeOrAbsolute: string, baseUrl: string): string {
     return relativeOrAbsolute;
   }
 
-  const base = baseUrl.replace(/\/+$/, "");
-  const swaggerBase = `${base}/umbraco/swagger`;
+  const origin = normalizeOrigin(baseUrl);
+
+  // Umbraco 18+ emits root-relative spec URLs (e.g. "/umbraco/openapi/management.json").
+  // Resolve these against the origin only.
+  if (relativeOrAbsolute.startsWith("/")) {
+    return `${origin}${relativeOrAbsolute}`;
+  }
+
+  // Umbraco 17 (Swashbuckle) emits bare-relative URLs (e.g. "management/swagger.json")
+  // relative to the Swagger UI base path.
   const relative = relativeOrAbsolute.replace(/^\/+/, "");
-  return `${swaggerBase}/${relative}`;
+  return `${origin}${SWAGGER_UI_BASE_PATH}/${relative}`;
 }
 
 async function fallbackProbe(baseUrl: string): Promise<SwaggerEndpoint[]> {
   const found: SwaggerEndpoint[] = [];
 
   for (const name of KNOWN_API_NAMES) {
-    const url = `${baseUrl.replace(/\/+$/, "")}/umbraco/swagger/${name}/swagger.json`;
-    try {
-      const response = await fetch(url, {
-        method: "HEAD",
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (response.ok) {
-        found.push({
-          url,
-          name: `Umbraco ${name.charAt(0).toUpperCase() + name.slice(1)} API`,
+    // openapi ({name}.json) probed before swagger ({name}/swagger.json).
+    const candidates = specUrlCandidates(baseUrl, name);
+
+    for (const url of candidates) {
+      try {
+        const response = await fetch(url, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(5_000),
         });
+        if (response.ok) {
+          found.push({
+            url,
+            name: `Umbraco ${name.charAt(0).toUpperCase() + name.slice(1)} API`,
+          });
+          break;
+        }
+      } catch {
+        // Skip unreachable endpoints
       }
-    } catch {
-      // Skip unreachable endpoints
     }
   }
 
