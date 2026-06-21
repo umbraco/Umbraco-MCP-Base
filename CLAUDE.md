@@ -144,7 +144,17 @@ The local Umbraco instance uses HTTPS with self-signed certs. TLS rejection must
 
 All packages are versioned together and published from the `main` branch via Azure Pipelines.
 
+### Branching & merging
+
+The full workflow lives in the **`release-and-branching` skill** (`.claude/skills/`). In short:
+
+- **Never commit directly to `dev` or `main`** (both protected). Do all work on a `feature/…`, `fix/…`, or `chore/…` branch cut from `dev`.
+- **Normal PRs → squash-merge into `dev`** (one commit per PR).
+- **Releases → merge-commit (not squash) into `main`** via a `release/<version>` branch (see below); the real version-bump commit on `main` is what the tag + `main`→`dev` automation keys off.
+
 ### Release process
+
+> Follow the **`release-and-branching` skill** for the workflow (branch, merge style, sync-back). The steps below are the project-specific release mechanics the skill refers to.
 
 1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.9`)
 2. Bump the version in **all** files (use find-and-replace for the old version string):
@@ -160,7 +170,7 @@ All packages are versioned together and published from the `main` branch via Azu
 4. Verify no stale versions: `grep -r "beta.OLD" package.json packages/*/package.json template/package.json plugins/umbraco-mcp-skills/package.json plugins/umbraco-mcp-skills/.claude-plugin/plugin.json .claude-plugin/marketplace.json`
 5. Commit, push, and create a PR from the release branch into `main`
 6. CI runs all tests including LLM evals and skill E2E (release PRs only)
-7. Merge when all checks pass — Azure Pipelines publishes packages to npm
+7. Merge when all checks pass — **use a merge commit, not squash** (preserves the version-bump commit the automation needs). Azure Pipelines then publishes packages to npm
 8. GitHub Release tagged `v<version>` is created **automatically** (see below)
 9. Merge `main` back into `dev` — **automated** (see below)
 
