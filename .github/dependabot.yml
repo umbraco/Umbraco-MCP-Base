@@ -1,7 +1,10 @@
 # Dependabot configuration.
 #
-# Version-update PRs target `dev` (not the default branch `main`) so they fit the
-# branch-into-dev workflow — see the `release-and-branching` skill / CLAUDE.md.
+# Policy: monthly cadence, minor + patch updates batched into a single grouped PR
+# per ecosystem, and major updates raised as individual PRs (they need a
+# deliberate review). Version-update PRs target `dev` (not the default branch
+# `main`) so they fit the branch-into-dev workflow — see the
+# `release-and-branching` skill / CLAUDE.md.
 #
 # NOTE: Dependabot *security* updates always target the repository's default
 # branch (`main`) and cannot be redirected with `target-branch`. Only the
@@ -11,13 +14,27 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     target-branch: "dev"
     open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     target-branch: "dev"
     open-pull-requests-limit: 5
+    groups:
+      github-actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
