@@ -1,0 +1,23 @@
+# Dependabot configuration.
+#
+# Version-update PRs target `dev` (not the default branch `main`) so they fit the
+# branch-into-dev workflow — see the `release-and-branching` skill / CLAUDE.md.
+#
+# NOTE: Dependabot *security* updates always target the repository's default
+# branch (`main`) and cannot be redirected with `target-branch`. Only the
+# scheduled version updates below honour it.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev"
+    open-pull-requests-limit: 5
