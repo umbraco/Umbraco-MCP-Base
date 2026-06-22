@@ -48,7 +48,7 @@
     "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
     "agents": "^0.6.0",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.4.2",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",
     "zod": "^4.2.1"
