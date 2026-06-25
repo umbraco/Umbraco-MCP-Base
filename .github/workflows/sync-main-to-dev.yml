@@ -71,13 +71,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if ! gh pr view chore/merge-main-to-dev --json number >/dev/null 2>&1; then
-            gh pr create \
+          # The branch name is reused every release, so `gh pr view <branch>` also
+          # matches the PREVIOUS release's already-merged PR — which would make us
+          # skip creation and then no-op the merge, leaving dev un-synced (exit 0).
+          # Only an OPEN PR for this head→base counts; create one if none exists.
+          PR=$(gh pr list --head chore/merge-main-to-dev --base dev --state open --json number --jq '.[0].number')
+          if [ -z "$PR" ]; then
+            PR=$(gh pr create \
               --base dev \
               --head chore/merge-main-to-dev \
               --title "Merge main into dev after ${VERSION} release" \
-              --body "Automated main → dev sync after \`${VERSION}\` reached main. Fast-forwards the version-bump commits that already passed full CI on their way into main. Created and merged by \`.github/workflows/sync-main-to-dev.yml\`."
+              --body "Automated main → dev sync after \`${VERSION}\` reached main. Fast-forwards the version-bump commits that already passed full CI on their way into main. Created and merged by \`.github/workflows/sync-main-to-dev.yml\`.")
           fi
           # dev's ruleset requires a PR but 0 approvals and no required checks,
-          # so an immediate merge with GITHUB_TOKEN succeeds.
-          gh pr merge chore/merge-main-to-dev --merge --delete-branch
+          # so an immediate merge with GITHUB_TOKEN succeeds. Merge by explicit
+          # number — never by branch name, which can resolve to a stale merged PR.
+          gh pr merge "$PR" --merge --delete-branch
+
+      - name: Verify dev now contains main
+        if: steps.build.outputs.changed == 'true'
+        run: |
+          git fetch origin main dev
+          # A silent no-op (e.g. merge resolving to a stale PR) must not pass as green.
+          if [ -n "$(git log --oneline origin/dev..origin/main)" ]; then
+            echo "::error::dev still missing commits from main after sync — the merge did not land. See CLAUDE.md → Post-release: merge main to dev."
+            git log --oneline origin/dev..origin/main
+            exit 1
+          fi
+          echo "dev contains all of main — sync verified."
