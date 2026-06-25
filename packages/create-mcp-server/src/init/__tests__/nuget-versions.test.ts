@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals
 import {
   getLatestStableVersion,
   getLatestVersionForMajor,
+  getLatestVersionByDependencyMajor,
 } from "../nuget-versions.js";
 
 // NuGet flatcontainer returns versions oldest-first; fetchUmbracoVersions
@@ -57,5 +58,94 @@ describe("getLatestVersionForMajor", () => {
   it("still resolves the overall latest stable", async () => {
     mockNuget(NUGET_VERSIONS);
     expect(await getLatestStableVersion()).toBe("17.4.2");
+  });
+});
+
+describe("getLatestVersionByDependencyMajor", () => {
+  // Mirrors the real "clean" starter kit: its own version (7.x/8.x) tracks the
+  // CMS major only via its Umbraco.Cms.Web.Website dependency, not its own number.
+  const KIT_VERSIONS = [
+    "7.0.6",
+    "7.0.7",
+    "8.0.0-beta01",
+    "8.0.0-rc1",
+  ];
+  const KIT_DEP_MAJOR: Record<string, number> = {
+    "7.0.6": 17,
+    "7.0.7": 17,
+    "8.0.0-beta01": 18,
+    "8.0.0-rc1": 18,
+  };
+
+  /**
+   * Mock both NuGet endpoints the resolver hits: the flatcontainer version index
+   * (oldest-first) and the gz-semver2 registration index (dependency ranges).
+   */
+  function mockKitNuget(
+    versions: string[],
+    depMajor: Record<string, number>,
+  ) {
+    globalThis.fetch = jest.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("flatcontainer")) {
+        return { ok: true, json: async () => ({ versions }) };
+      }
+      // registration index: one inline page of leaves with dependency groups
+      const items = versions.map((v) => ({
+        catalogEntry: {
+          version: v,
+          dependencyGroups: [
+            {
+              dependencies: [
+                {
+                  id: "Umbraco.Cms.Web.Website",
+                  range: `[${depMajor[v]}.0.0, )`,
+                },
+              ],
+            },
+          ],
+        },
+      }));
+      return { ok: true, json: async () => ({ items: [{ items }] }) };
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  it("picks the latest stable kit whose Umbraco dependency matches the major", async () => {
+    mockKitNuget(KIT_VERSIONS, KIT_DEP_MAJOR);
+    expect(
+      await getLatestVersionByDependencyMajor("clean", "Umbraco.Cms.Web.Website", 17),
+    ).toBe("7.0.7");
+  });
+
+  it("falls back to the newest prerelease when a major has no stable kit", async () => {
+    mockKitNuget(KIT_VERSIONS, KIT_DEP_MAJOR);
+    expect(
+      await getLatestVersionByDependencyMajor("clean", "Umbraco.Cms.Web.Website", 18),
+    ).toBe("8.0.0-rc1");
+  });
+
+  it("prefers a stable kit over a newer prerelease of the same major", async () => {
+    // 8.0.1-rc1 is newer than the 8.0.0 stable, but stable wins for its major.
+    const versions = ["8.0.0", "8.0.1-rc1"];
+    mockKitNuget(versions, { "8.0.0": 18, "8.0.1-rc1": 18 });
+    expect(
+      await getLatestVersionByDependencyMajor("clean", "Umbraco.Cms.Web.Website", 18),
+    ).toBe("8.0.0");
+  });
+
+  it("returns undefined when no kit version targets the major", async () => {
+    mockKitNuget(KIT_VERSIONS, KIT_DEP_MAJOR);
+    expect(
+      await getLatestVersionByDependencyMajor("clean", "Umbraco.Cms.Web.Website", 99),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when NuGet is unreachable", async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new Error("network down");
+    }) as unknown as typeof globalThis.fetch;
+    expect(
+      await getLatestVersionByDependencyMajor("clean", "Umbraco.Cms.Web.Website", 18),
+    ).toBeUndefined();
   });
 });
