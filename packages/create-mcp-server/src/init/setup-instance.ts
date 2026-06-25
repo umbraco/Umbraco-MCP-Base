@@ -2,9 +2,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import pc from "picocolors";
 import { buildWithPsw } from "./psw-cli.js";
-import { fetchNugetVersions, getLatestPackageVersionForMajor } from "./nuget-versions.js";
+import {
+  getLatestPackageVersionForMajor,
+  getLatestVersionByDependencyMajor,
+} from "./nuget-versions.js";
 
 const DEVELOPMENT_MODE_PACKAGE = "Umbraco.Cms.DevelopmentMode.Backoffice";
+
+// The starter kit's dependency that tracks the CMS major (clean 7.x depends on
+// Umbraco.Cms.Web.Website 17.x, clean 8.x on 18.x). We match the kit version by
+// this dependency rather than the kit's own version, which versions separately.
+const KIT_CMS_DEPENDENCY = "Umbraco.Cms.Web.Website";
 
 export interface SetupInstanceOptions {
   packageName: string;
@@ -72,11 +80,12 @@ export async function setupInstance(
   }
 
   // Pin the starter kit to a CMS-compatible version. "clean" versions on its own
-  // line (7.x → Umbraco 17, 8.x → 18), NOT in lockstep with the CMS major, and PSW
-  // installs the latest STABLE — which lags a prerelease CMS. Installing the stable
-  // clean (7.x) on Umbraco 18 fails the boot: its package migration calls APIs
-  // removed in 18 (MethodNotFound: PublishResult.Content). So for a prerelease CMS,
-  // use the latest clean prerelease (the build that targets the new major).
+  // line (7.x → Umbraco 17, 8.x → 18), NOT in lockstep with the CMS major, and a
+  // bare "clean" resolves to the single latest-stable kit overall — which only
+  // ever suits one major. Dropping the wrong major's kit onto a site aborts boot
+  // (a 17 kit on Umbraco 18 drags in Swashbuckle, which 18 removed; a kit's package
+  // migration may also call APIs the other major removed). So always pin to the kit
+  // version whose Umbraco dependency matches the CMS major.
   const starterKit = await resolveStarterKit("clean", opts.umbracoVersion);
 
   buildWithPsw({
@@ -161,27 +170,46 @@ export async function resolveExtraPackages(
 }
 
 /**
- * Resolve the PSW starter-kit argument, pinning a version when needed.
+ * Resolve the PSW starter-kit argument, pinning the kit version to the one whose
+ * Umbraco dependency matches the CMS major.
  *
- * Starter kits version on their own line, not in lockstep with the CMS major, so
- * the major-matching used for add-ons doesn't apply. PSW installs the latest
- * STABLE kit, which is correct for a stable CMS but lags a prerelease CMS (e.g.
- * clean 7.x stable vs the clean 8.0.0-rc that targets Umbraco 18). So:
- *  - stable / unspecified CMS → return the bare kit name (PSW picks latest stable),
- *  - prerelease CMS → pin to the kit's latest version (incl. prerelease), which is
- *    the build targeting the new major, via PSW's "kit|version" syntax.
+ * Starter kits version on their own line, not in lockstep with the CMS major, and
+ * a bare kit name resolves to the single latest-stable kit overall — which only
+ * suits whichever major happens to be "latest stable" right now (clean 7.0.7 → 17
+ * today; once clean 8.x goes stable, that would flip to 18 and break the 17 leg).
+ * Matching by the kit's Umbraco dependency keeps every CMS major correct: stable
+ * when one exists, the newest prerelease otherwise (Umbraco 18 has only clean
+ * 8.x prereleases today).
  *
- * Returns undefined only if the kit can't be resolved, leaving PSW to default.
+ * Throws when no kit version targets the CMS major (or NuGet is unreachable) —
+ * we fail loudly rather than let PSW silently install a mismatched kit that
+ * aborts the site's boot. Returns the bare kit name only when no CMS version is
+ * known (interactive default), where PSW's latest-stable pick is acceptable.
  */
 export async function resolveStarterKit(
   kit: string,
   umbracoVersion?: string,
 ): Promise<string> {
-  if (!umbracoVersion || !umbracoVersion.includes("-")) return kit;
+  if (!umbracoVersion) return kit;
 
-  const versions = await fetchNugetVersions(kit); // newest-first, incl. prerelease
-  const latest = versions[0];
-  return latest ? `${kit}|${latest}` : kit;
+  const major = parseInt(umbracoVersion.split(".")[0], 10);
+  if (Number.isNaN(major)) return kit;
+
+  const version = await getLatestVersionByDependencyMajor(
+    kit,
+    KIT_CMS_DEPENDENCY,
+    major,
+  );
+  if (!version) {
+    throw new Error(
+      `No "${kit}" starter-kit version found targeting Umbraco ${major} ` +
+        `(checked its ${KIT_CMS_DEPENDENCY} dependency on NuGet). A kit built for ` +
+        `a different CMS major aborts the site's boot, so refusing to scaffold with ` +
+        `a mismatched kit. Pin a compatible kit version, pick another kit, or retry ` +
+        `if NuGet was unreachable.`,
+    );
+  }
+  return `${kit}|${version}`;
 }
 
 /**

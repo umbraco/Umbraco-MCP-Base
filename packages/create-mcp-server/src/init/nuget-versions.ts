@@ -103,3 +103,103 @@ function pickLatestForMajor(
     return true;
   });
 }
+
+/**
+ * Pick the newest version of a package whose dependency on `dependencyId`
+ * targets `major`, preferring stable and falling back to the newest prerelease.
+ *
+ * This is how a starter kit (e.g. "clean") is matched to the CMS major. Unlike an
+ * add-on, a kit's own version does NOT track the CMS major (clean 7.x → Umbraco
+ * 17, 8.x → 18), so `getLatestPackageVersionForMajor` can't be used — we match on
+ * what Umbraco the kit *depends on* instead, read from NuGet's registration index.
+ * Preferring stable but falling back to prerelease keeps both matrix legs green
+ * even while a major has no stable kit yet: for Umbraco 18 today this yields the
+ * latest clean 8.x prerelease (no stable 8.x exists), and for 17 the latest stable
+ * 7.x. When a stable clean 8.x ships it is picked automatically.
+ *
+ * Returns undefined when NuGet is unreachable or no version targets the major.
+ */
+export async function getLatestVersionByDependencyMajor(
+  packageId: string,
+  dependencyId: string,
+  major: number,
+): Promise<string | undefined> {
+  try {
+    const [versions, depMajors] = await Promise.all([
+      fetchNugetVersions(packageId), // newest-first
+      fetchDependencyMajors(packageId, dependencyId),
+    ]);
+    const matching = versions.filter((v) => depMajors.get(v) === major);
+    // matching is newest-first: prefer the newest stable, else newest prerelease.
+    return matching.find((v) => !v.includes("-")) ?? matching[0];
+  } catch {
+    return undefined;
+  }
+}
+
+interface RegistrationIndex {
+  items?: RegistrationPage[];
+}
+interface RegistrationPage {
+  "@id"?: string;
+  items?: RegistrationLeaf[];
+}
+interface RegistrationLeaf {
+  catalogEntry: CatalogEntry;
+}
+interface CatalogEntry {
+  version: string;
+  dependencyGroups?: Array<{
+    dependencies?: Array<{ id: string; range?: string }>;
+  }>;
+}
+
+/**
+ * Map each published version of `packageId` to the lower-bound major of its
+ * declared dependency on `dependencyId`, read from NuGet's registration index.
+ * Returns an empty map on any error (caller then finds no match).
+ */
+async function fetchDependencyMajors(
+  packageId: string,
+  dependencyId: string,
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const url = `https://api.nuget.org/v3/registration5-gz-semver2/${packageId.toLowerCase()}/index.json`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!resp.ok) return result;
+
+  const data = (await resp.json()) as RegistrationIndex;
+  for (const page of data.items ?? []) {
+    let leaves = page.items;
+    // Large packages page their registration: a page may omit inline items and
+    // expose them via its own @id. Starter kits are small (single inline page),
+    // but fetch sub-pages defensively so this stays correct for any package.
+    if (!leaves && page["@id"]) {
+      const pageResp = await fetch(page["@id"], {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (pageResp.ok) leaves = ((await pageResp.json()) as RegistrationPage).items;
+    }
+    for (const leaf of leaves ?? []) {
+      const major = dependencyMajor(leaf.catalogEntry, dependencyId);
+      if (major !== undefined) result.set(leaf.catalogEntry.version, major);
+    }
+  }
+  return result;
+}
+
+/** Read the lower-bound major of a catalog entry's dependency on `dependencyId`. */
+function dependencyMajor(
+  cat: CatalogEntry,
+  dependencyId: string,
+): number | undefined {
+  for (const group of cat.dependencyGroups ?? []) {
+    for (const dep of group.dependencies ?? []) {
+      if (dep.id.toLowerCase() !== dependencyId.toLowerCase()) continue;
+      // range like "[18.0.0-beta2, )" or "17.1.0" — first integer is the major.
+      const match = /\d+/.exec(dep.range ?? "");
+      if (match) return parseInt(match[0], 10);
+    }
+  }
+  return undefined;
+}
