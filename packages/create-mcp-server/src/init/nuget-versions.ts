@@ -13,13 +13,59 @@
 // longer tracks the Umbraco major.
 const MIN_MAJOR = 17;
 
+// Transient NuGet failures (5xx, 429, request timeout, network blips) are retried
+// with exponential backoff. Without this, a single hiccup returns an empty list
+// that reads as "no versions exist" — which is exactly how one flaky request once
+// failed the whole Umbraco-18 leg of the scheduled E2E check with a misleading
+// "No Umbraco 18.x version found on NuGet".
+const NUGET_RETRY_ATTEMPTS = 3;
+const NUGET_RETRY_BASE_MS = 250;
+
+/** HTTP statuses worth retrying — the server is up but the request didn't stick. */
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Fetch a NuGet URL, retrying transient failures with exponential backoff.
+ *
+ * Non-transient responses (2xx, 404, ...) are returned as-is for the caller to
+ * interpret. Throws only once every attempt has failed with a transient error
+ * or network fault, so callers can tell "NuGet was unreachable" apart from a
+ * legitimate empty/absent result.
+ */
+async function fetchNuget(url: string): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < NUGET_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+      if (!isTransientStatus(resp.status)) return resp;
+      lastError = new Error(`NuGet returned HTTP ${resp.status} for ${url}`);
+    } catch (err) {
+      lastError = err; // network error or request timeout
+    }
+    if (attempt < NUGET_RETRY_ATTEMPTS - 1) {
+      const backoff = NUGET_RETRY_BASE_MS * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
+  }
+  throw new Error(
+    `NuGet request failed after ${NUGET_RETRY_ATTEMPTS} attempts: ${url}`,
+    { cause: lastError },
+  );
+}
+
 /**
  * Fetch all published versions of any NuGet package, newest first.
- * Includes stable and prerelease (RC, beta, alpha). Returns [] on any error.
+ * Includes stable and prerelease (RC, beta, alpha).
+ *
+ * Retries transient failures (see {@link fetchNuget}); throws if NuGet stays
+ * unreachable across every attempt. Returns [] only for a genuine non-OK
+ * response such as 404 (the package has no published versions).
  */
 export async function fetchNugetVersions(packageId: string): Promise<string[]> {
   const url = `https://api.nuget.org/v3-flatcontainer/${packageId.toLowerCase()}/index.json`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  const resp = await fetchNuget(url);
   if (!resp.ok) return [];
 
   const data = (await resp.json()) as { versions?: string[] };
@@ -62,11 +108,27 @@ export async function getLatestVersionForMajor(
   opts: { includePrerelease?: boolean } = {},
 ): Promise<string | undefined> {
   try {
-    const versions = await fetchUmbracoVersions();
-    return pickLatestForMajor(versions, major, opts);
+    return await getLatestVersionForMajorStrict(major, opts);
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Like {@link getLatestVersionForMajor} but propagates NuGet request failures
+ * instead of swallowing them to `undefined`.
+ *
+ * Lets a caller distinguish "NuGet was unreachable" (throws) from "no such
+ * version exists" (resolves to `undefined`) — two cases the lenient variant
+ * collapses together. Used by the scheduled E2E resolve step so a transient
+ * NuGet outage surfaces as an outage rather than a phantom "no version found".
+ */
+export async function getLatestVersionForMajorStrict(
+  major: number,
+  opts: { includePrerelease?: boolean } = {},
+): Promise<string | undefined> {
+  const versions = await fetchUmbracoVersions();
+  return pickLatestForMajor(versions, major, opts);
 }
 
 /**
@@ -165,7 +227,7 @@ async function fetchDependencyMajors(
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   const url = `https://api.nuget.org/v3/registration5-gz-semver2/${packageId.toLowerCase()}/index.json`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  const resp = await fetchNuget(url);
   if (!resp.ok) return result;
 
   const data = (await resp.json()) as RegistrationIndex;
@@ -175,9 +237,7 @@ async function fetchDependencyMajors(
     // expose them via its own @id. Starter kits are small (single inline page),
     // but fetch sub-pages defensively so this stays correct for any package.
     if (!leaves && page["@id"]) {
-      const pageResp = await fetch(page["@id"], {
-        signal: AbortSignal.timeout(10_000),
-      });
+      const pageResp = await fetchNuget(page["@id"]);
       if (pageResp.ok) leaves = ((await pageResp.json()) as RegistrationPage).items;
     }
     for (const leaf of leaves ?? []) {

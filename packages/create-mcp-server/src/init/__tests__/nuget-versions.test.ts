@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import {
+  fetchNugetVersions,
   getLatestStableVersion,
   getLatestVersionForMajor,
+  getLatestVersionForMajorStrict,
   getLatestVersionByDependencyMajor,
 } from "../nuget-versions.js";
 
@@ -58,6 +60,56 @@ describe("getLatestVersionForMajor", () => {
   it("still resolves the overall latest stable", async () => {
     mockNuget(NUGET_VERSIONS);
     expect(await getLatestStableVersion()).toBe("17.4.2");
+  });
+});
+
+describe("transient NuGet failures", () => {
+  // A response whose status marks it retryable (server up, request didn't stick).
+  const transient = () => ({ ok: false, status: 503, json: async () => ({}) });
+  const success = (versions: string[]) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ versions }),
+  });
+
+  it("retries a transient failure and then succeeds", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(transient())
+      .mockResolvedValueOnce(transient())
+      .mockResolvedValueOnce(success(NUGET_VERSIONS));
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    expect(await getLatestVersionForMajor(17)).toBe("17.4.2");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("getLatestVersionForMajor swallows an exhausted outage to undefined", async () => {
+    globalThis.fetch = jest.fn(async () =>
+      transient(),
+    ) as unknown as typeof globalThis.fetch;
+    expect(await getLatestVersionForMajor(17)).toBeUndefined();
+  });
+
+  it("getLatestVersionForMajorStrict throws when NuGet stays unreachable", async () => {
+    const fetchMock = jest.fn(async () => transient());
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    await expect(getLatestVersionForMajorStrict(17)).rejects.toThrow(/failed after/i);
+    // Three attempts, no more (backoff between them, not after the last).
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a non-transient 404 (package has no versions)", async () => {
+    const fetchMock = jest.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    expect(await fetchNugetVersions("does.not.exist")).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
