@@ -47,7 +47,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
-    "agents": "^0.16.2",
+    "agents": "^0.6.0",
     "dotenv": "^16.5.0",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",
