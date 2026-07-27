@@ -59,6 +59,7 @@
     "tedious": "^19.2.1",
     "ts-jest": "^29.4.11",
     "tsup": "^8.4.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "wrangler": "^4.104.0"
   }
 }
