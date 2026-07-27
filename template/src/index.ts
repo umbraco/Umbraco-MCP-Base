@@ -20,7 +20,13 @@ import {
   createCollectionConfigLoader,
   shouldIncludeTool,
   handleCliCommands,
+  checkUmbracoVersion,
+  configureVersionCheckHook,
+  getVersionCheckMessage,
+  UmbracoManagementClient,
+  CAPTURE_RAW_HTTP_RESPONSE,
   type CollectionConfiguration,
+  type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
 
 // Import the Orval-generated API client
@@ -52,26 +58,6 @@ if (clientId) {
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
 configureApiClient(() => getExampleUmbracoAddOnAPI());
-
-// ============================================================================
-// MCP Server Setup
-// ============================================================================
-
-// Create MCP server.
-// Pass an optional `instructions` string in the second argument to send
-// server-level guidance to clients during `initialize`. Most clients fold
-// this into the model's system prompt, so it applies implicitly without
-// per-tool repetition. Mirror the same value in `worker.ts` so stdio and
-// hosted deployments behave consistently.
-//
-// const server = new McpServer(
-//   { name: "my-umbraco-mcp", version: packageJson.version },
-//   { instructions: "When summarising results, refer to items by name, not by ID." },
-// );
-const server = new McpServer({
-  name: "my-umbraco-mcp",
-  version: packageJson.version,
-});
 
 // ============================================================================
 // Tool Filtering Setup
@@ -109,6 +95,62 @@ await handleCliCommands(collections, {
   filterConfig,
   serverConfig: serverConfig.umbraco,
 });
+
+// ============================================================================
+// Version Check
+// ============================================================================
+//
+// Verify the connected Umbraco major version matches this MCP server's
+// major version. `checkUmbracoVersion` never throws and always logs a
+// mismatch/error to stderr (console.error — stdio-transport safe), but that
+// alone isn't enough to surface the warning to the user or pause tool
+// execution. Two more calls close that gap:
+//   - `configureVersionCheckHook()` bridges the result into
+//     `withPreExecutionCheck` (applied to every tool via
+//     `withStandardDecorators`), so a mismatch blocks the first tool call
+//     with the warning until the user deliberately retries.
+//   - `getVersionCheckMessage()` lets us fold the same warning into the
+//     server's `instructions`, so it reaches the model/user directly rather
+//     than only the server log.
+// Skipped when no client credentials are configured (matches the
+// `initializeUmbracoFetch` gate above) so CLI introspection / offline usage
+// never makes a live network call.
+if (clientId) {
+  await checkUmbracoVersion({
+    mcpVersion: packageJson.version,
+    client: {
+      getServerInformation: async () => {
+        const response = (await UmbracoManagementClient<{ version: string }>(
+          { url: "/umbraco/management/api/v1/server/information", method: "GET" },
+          CAPTURE_RAW_HTTP_RESPONSE,
+        )) as unknown as HttpResponse<{ version: string }>;
+        return { version: response.data.version };
+      },
+    },
+  });
+  configureVersionCheckHook();
+}
+
+const versionCheckMessage = getVersionCheckMessage();
+
+// ============================================================================
+// MCP Server Setup
+// ============================================================================
+
+// Create MCP server.
+// Pass an optional `instructions` string in the second argument to send
+// server-level guidance to clients during `initialize`. Most clients fold
+// this into the model's system prompt, so it applies implicitly without
+// per-tool repetition. Mirror the same value in `worker.ts` so stdio and
+// hosted deployments behave consistently.
+//
+// Here it's used to surface a version-mismatch warning (see "Version Check"
+// above) — extend the string if you also want custom guidance, e.g.:
+// { instructions: [versionCheckMessage, "When summarising results, refer to items by name, not by ID."].filter(Boolean).join("\n\n") }
+const server = new McpServer(
+  { name: "my-umbraco-mcp", version: packageJson.version },
+  versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
+);
 
 // ============================================================================
 // Register Tools with Filtering
