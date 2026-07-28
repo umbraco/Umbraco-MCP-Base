@@ -38,7 +38,14 @@ import { mcpClientManager } from "./umbraco-api/mcp-client.js";
 import { mcpServers } from "./config/mcp-servers.js";
 
 // Import registries for tool filtering
-import { allModes, allModeNames, allSliceNames, loadServerConfig, clearConfigCache } from "./config/index.js";
+import {
+  allModes,
+  allModeNames,
+  allSliceNames,
+  loadServerConfig,
+  clearConfigCache,
+  UMBRACO_TARGET_MAJOR,
+} from "./config/index.js";
 
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
