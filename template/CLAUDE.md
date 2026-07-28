@@ -197,6 +197,7 @@ The template includes a Cloudflare Worker entry point for hosted deployment. Key
 - `new_sqlite_classes` in `wrangler.toml` migrations (agents library requires SQLite-backed DOs)
 - `.dev.vars` — local secrets including `UMBRACO_SERVER_URL` for self-signed cert workaround
 - Umbraco needs the Worker registered as an authorization_code OpenIdDict client via a C# Composer (backoffice UI only supports client_credentials)
+- Registered OAuth client ID: `umbraco-back-office-hosted-mcp` (via `McpOAuthComposer.cs`) — must match `UMBRACO_OAUTH_CLIENT_ID` in `.dev.vars`
 
 Run locally: `npx wrangler dev --port 8787`
 Test with MCP Inspector in Direct mode: `http://localhost:8787/`
