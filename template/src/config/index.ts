@@ -25,3 +25,5 @@ export {
   type ServerConfig,
   type MyServerCustomConfig,
 } from "./server-config.js";
+
+export { UMBRACO_TARGET_MAJOR } from "./umbraco-target.js";

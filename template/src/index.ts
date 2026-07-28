@@ -44,7 +44,14 @@ import { mcpClientManager } from "./umbraco-api/mcp-client.js";
 import { mcpServers } from "./config/mcp-servers.js";
 
 // Import registries for tool filtering
-import { allModes, allModeNames, allSliceNames, loadServerConfig, clearConfigCache } from "./config/index.js";
+import {
+  allModes,
+  allModeNames,
+  allSliceNames,
+  loadServerConfig,
+  clearConfigCache,
+  UMBRACO_TARGET_MAJOR,
+} from "./config/index.js";
 
 // Initialize the SDK's fetch client for real Umbraco API calls.
 // This enables the Orval-generated client to authenticate via client_credentials.
@@ -101,10 +108,13 @@ await handleCliCommands(collections, {
 // ============================================================================
 //
 // Verify the connected Umbraco major version matches the major version this
-// server declares it targets. The check is **opt-in**: it only runs when you
-// set `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major` (see
-// `config/server-config.ts`). Unset — the default for a freshly scaffolded
-// project — nothing is compared, nothing is logged and nothing is blocked.
+// server declares it targets. The SDK-side check is **opt-in**: it only runs
+// when `expectedUmbracoMajor` is set. This template defaults that to
+// `UMBRACO_TARGET_MAJOR` (`config/umbraco-target.ts`, kept in sync with
+// `tests/umbraco-instance/TestUmbraco.csproj`'s Umbraco major), so the check
+// works out of the box; `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major`
+// (see `config/server-config.ts`) overrides it for a project that
+// deliberately targets a different Umbraco major.
 //
 // It deliberately does *not* compare against this package's own version:
 // a new project starts at "1.0.0", which says nothing about which Umbraco
@@ -129,7 +139,7 @@ await handleCliCommands(collections, {
 if (clientId) {
   await checkUmbracoVersion({
     mcpVersion: packageJson.version,
-    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor,
+    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR,
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(

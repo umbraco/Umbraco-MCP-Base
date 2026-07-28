@@ -33,7 +33,9 @@ export interface MyServerCustomConfig {
    * Explicit Umbraco major version this server targets (e.g. "17").
    * Opts in to the startup version-compatibility check: when set, connecting
    * to a different Umbraco major warns and blocks the first tool call.
-   * Leave unset (the default) to skip the check entirely.
+   * Leave unset to fall back to `UMBRACO_TARGET_MAJOR`
+   * (`config/umbraco-target.ts`) — set this only to override that default,
+   * e.g. when deliberately targeting a different Umbraco major.
    */
   expectedUmbracoMajor?: string;
   /** Enable experimental features */

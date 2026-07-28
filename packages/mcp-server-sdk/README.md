@@ -515,15 +515,22 @@ clearVersionCheckMessage();
 
 ### Wiring in scaffolded projects
 
-`template/src/index.ts` shows the full wiring, and `template/src/config/server-config.ts`
-exposes the target major as a custom config field so users can opt in without editing code:
+`template/src/index.ts` shows the full wiring. The SDK's own default (`expectedUmbracoMajor`
+omitted = no check) is right for the SDK, which can't assume a target — but a scaffolded
+project *does* know its target: `template/src/config/umbraco-target.ts` declares
+`UMBRACO_TARGET_MAJOR` (kept in sync with `tests/umbraco-instance/TestUmbraco.csproj`'s
+Umbraco major), and the template passes
+`serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` into `checkUmbracoVersion`,
+so the check runs out of the box. `template/src/config/server-config.ts` exposes the custom
+config field so users can override that default without editing code:
 
 | Env var | CLI flag | Effect |
 |---------|----------|--------|
-| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Umbraco major this server targets, e.g. `17`. Set it to enable the mismatch warning + first-call block. Unset (default) = no check. |
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides `UMBRACO_TARGET_MAJOR` for a project that deliberately targets a different Umbraco major. Unset (default) = use `UMBRACO_TARGET_MAJOR`. |
 
-The template reads it as `serverConfig.custom.expectedUmbracoMajor` and passes it straight
-into `checkUmbracoVersion`, then calls `configureVersionCheckHook()` unconditionally.
+The template then calls `configureVersionCheckHook()` unconditionally — harmless even in the
+(now purely theoretical, since the template always resolves to some target major) case
+where nothing is ever compared.
 
 ## Eval Testing
 

@@ -1,11 +1,14 @@
 /**
  * CLI Version Check Integration Tests
  *
- * The version check is **opt-in**: it only runs when the server declares which
- * Umbraco major it targets, via `UMBRACO_EXPECTED_MAJOR` /
- * `--umbraco-expected-major` (wired through `template/src/config/server-config.ts`
- * into `checkUmbracoVersion`). With nothing declared, no comparison happens at
- * all — no stderr warning, no `instructions`, no blocked tool call.
+ * The SDK-side check is **opt-in**: `checkUmbracoVersion` only compares when
+ * an `expectedUmbracoMajor` is supplied. The template wires this from
+ * `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR`
+ * (`template/src/config/umbraco-target.ts`), so a fresh scaffold's *default*
+ * target is `UMBRACO_TARGET_MAJOR`, not "no check at all". `UMBRACO_EXPECTED_MAJOR`
+ * / `--umbraco-expected-major` (`template/src/config/server-config.ts`)
+ * overrides that default for a project that deliberately targets a different
+ * Umbraco major.
  *
  * History:
  *  - umbraco/Umbraco-MCP-Base#201 / #212: `checkUmbracoVersion` computed a
@@ -15,17 +18,28 @@
  *    package version, which is `1.0.0` in every freshly scaffolded project and
  *    unrelated to the Umbraco major it targets. Every new server therefore had
  *    its first tool call falsely blocked. The comparison is now against an
- *    explicit target major, defaulting to no check at all.
+ *    explicit target major.
+ *  - umbraco/Umbraco-MCP-Base#221 review: making the SDK check opt-in-and-off
+ *    by default shipped the feature dark for every scaffold. The template now
+ *    defaults `expectedUmbracoMajor` to `UMBRACO_TARGET_MAJOR` (kept in sync
+ *    with `tests/umbraco-instance/TestUmbraco.csproj` — see
+ *    `template/src/config/__tests__/umbraco-target.test.ts`), so the check
+ *    runs out of the box against the Umbraco major this repo actually targets.
  *
  * These tests boot the *built* template binary (dist/index.js) against a tiny
  * local HTTP server standing in for Umbraco's OAuth token + server
  * information endpoints, and assert:
- *   1. no target major declared → complete silence, tools work (the #220 fix)
- *   2. target major declared + mismatch → warning reaches stderr, the MCP
+ *   1. no override, connected Umbraco matches `UMBRACO_TARGET_MAJOR` →
+ *      complete silence, tools work (the #220 fix, still true with a real
+ *      default target instead of no check)
+ *   2. no override, connected Umbraco differs from `UMBRACO_TARGET_MAJOR` →
+ *      the template default alone is enough to warn and block (the #221
+ *      review fix — this is the case that was silently broken before it)
+ *   3. explicit override + mismatch → warning reaches stderr, the MCP
  *      `initialize` response's `instructions`, and the first tool call
  *      (configureVersionCheckHook → withPreExecutionCheck), with a deliberate
  *      retry then succeeding
- *   3. target major declared + match → silence, tools work
+ *   4. explicit override + match → silence, tools work
  */
 
 import { createServer, type Server } from "node:http";
@@ -64,7 +78,10 @@ function startMockUmbracoServer(version: string): Promise<{ server: Server; base
 describe("Version Check (CLI)", () => {
   // Regression proof for #220: a scaffolded server (package version "1.0.0")
   // pointed at a real Umbraco must not be treated as a version mismatch.
-  describe("no expected major declared", () => {
+  // No explicit override here — the template's UMBRACO_TARGET_MAJOR ("17")
+  // applies, and the mock happens to match it, so this stays silent same as
+  // before #221 (where it was silent because no check ran at all).
+  describe("no override, connected Umbraco matches the template default", () => {
     let mockServer: Server;
     let client: CliTestClient;
 
@@ -89,6 +106,39 @@ describe("Version Check (CLI)", () => {
 
       const result = await client.callTool("list-examples", {});
       expect(result.isError).toBeFalsy();
+    });
+  });
+
+  // #221 review: the SDK check is agnostic, but the template must default it
+  // to a real target major (UMBRACO_TARGET_MAJOR = "17") so mismatches are
+  // caught without the user ever discovering UMBRACO_EXPECTED_MAJOR exists.
+  describe("no override, connected Umbraco differs from the template default", () => {
+    let mockServer: Server;
+    let client: CliTestClient;
+
+    beforeAll(async () => {
+      const mock = await startMockUmbracoServer("16.0.0");
+      mockServer = mock.server;
+      client = await createCliTestClient({
+        captureStderr: true,
+        // Deliberately no UMBRACO_EXPECTED_MAJOR: the template default ("17")
+        // must be enough on its own to catch this mismatch.
+        env: { UMBRACO_BASE_URL: mock.baseUrl },
+      });
+    });
+
+    afterAll(async () => {
+      await client?.close();
+      await new Promise<void>((r) => mockServer.close(() => r()));
+    });
+
+    it("warns and blocks the first tool call using the template default target", async () => {
+      expect(client.getStderr()).toContain("⚠️ Version Mismatch");
+      expect(client.getInstructions()).toContain("⚠️ Version Mismatch");
+
+      const blocked = await client.callTool("list-examples", {});
+      expect(blocked.isError).toBe(true);
+      expect(JSON.stringify(blocked.content)).toContain("⚠️ Version Mismatch");
     });
   });
 
