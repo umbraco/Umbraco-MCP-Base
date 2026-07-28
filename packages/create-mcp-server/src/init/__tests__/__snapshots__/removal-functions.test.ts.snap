@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`combined removals should snapshot index.ts after chaining-first removal order 1`] = `
 "#!/usr/bin/env node
@@ -9,7 +9,7 @@ exports[`combined removals should snapshot index.ts after chaining-first removal
  * Customize this to add your tool collections.
  */
 
-import "dotenv/config";
+import "./load-env.js";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -156,7 +156,7 @@ exports[`combined removals should snapshot index.ts after examples + chaining re
  * Customize this to add your tool collections.
  */
 
-import "dotenv/config";
+import "./load-env.js";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -303,7 +303,7 @@ exports[`removeChaining should snapshot index.ts after removal 1`] = `
  * Customize this to add your tool collections.
  */
 
-import "dotenv/config";
+import "./load-env.js";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -452,7 +452,7 @@ exports[`removeExamples should snapshot index.ts after removal 1`] = `
  * Customize this to add your tool collections.
  */
 
-import "dotenv/config";
+import "./load-env.js";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

@@ -129,7 +129,7 @@ npm run build
 npm run test:evals
 
 # Run specific test file
-npm run test:evals -- --testPathPattern="entity"
+npm run test:evals -- --testPathPatterns="entity"
 
 # Verbose output (see full conversation)
 E2E_VERBOSITY=verbose npm run test:evals

@@ -196,7 +196,7 @@ Only test the read/list tools — do not create tests for mutations.`, {
         [
           "--experimental-vm-modules",
           "node_modules/jest/bin/jest.js",
-          `--testPathPattern=${targetCollection}/__tests__`,
+          `--testPathPatterns=${targetCollection}/__tests__`,
           "--runInBand",
         ],
         {

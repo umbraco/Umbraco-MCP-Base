@@ -7,7 +7,9 @@
   "exports": {
     ".": "./dist/index.js",
     "./collections": "./dist/collections.js",
-    "./tool-types": { "types": "./dist/tool-types.d.ts" }
+    "./tool-types": {
+      "types": "./dist/tool-types.d.ts"
+    }
   },
   "bin": {
     "my-umbraco-mcp": "dist/index.js"
@@ -21,9 +23,9 @@
     "generate": "orval --config orval.config.ts",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand",
     "test:evals": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
     "test:e2e": "npx playwright test --config tests/hosted-e2e/playwright.config.ts",
     "dev:worker": "npx wrangler dev",
     "deploy:worker": "npx wrangler deploy"
@@ -48,25 +50,25 @@
     "@umbraco-cms/mcp-hosted": "file:../packages/hosted-mcp",
     "@umbraco-cms/mcp-server-sdk": "file:../packages/mcp-server-sdk",
     "agents": "^0.6.0",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.4.2",
     "uuid": "^11.1.0",
     "yargs": "^18.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@jest/types": "^29.6.3",
-    "@types/jest": "^29.5.14",
-    "@types/node": "^22.14.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.2",
     "@types/uuid": "^10.0.0",
     "@types/yargs": "^17.0.33",
-    "jest": "^29.7.0",
+    "jest": "^30.4.2",
     "msw": "^2.14.6",
     "orval": "^8.19.0",
     "rimraf": "^6.1.3",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
     "tsup": "^8.4.0",
-    "undici": "^7.28.0",
+    "undici": "^8.9.0",
     "@playwright/test": "^1.61.1",
     "typescript": "^5.8.3",
     "wrangler": "^4.104.0"

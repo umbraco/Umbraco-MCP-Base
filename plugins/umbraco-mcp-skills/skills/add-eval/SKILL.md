@@ -96,7 +96,7 @@ npm run build
 ```
 
 ```bash
-npm run test:evals -- --testPathPattern="{collection}"
+npm run test:evals -- --testPathPatterns="{collection}"
 ```
 
 If the test fails, iterate on the prompt. Common fixes:
@@ -115,7 +115,7 @@ npm run build
 ```
 
 ```bash
-npm run test:evals -- --testPathPattern="{collection}-{workflow}"
+npm run test:evals -- --testPathPatterns="{collection}-{workflow}"
 ```
 
 Iterate on the prompt until the test passes reliably.

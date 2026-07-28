@@ -6,7 +6,7 @@
  * Customize this to add your tool collections.
  */
 
-import "dotenv/config";
+import "./load-env.js";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

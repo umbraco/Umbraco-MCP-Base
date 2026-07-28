@@ -137,7 +137,7 @@ npm run build
 npm run test:evals
 
 # Run specific eval file
-npm run test:evals -- --testPathPattern="entity"
+npm run test:evals -- --testPathPatterns="entity"
 
 # Verbose mode shows full LLM conversation
 E2E_VERBOSITY=verbose npm run test:evals
@@ -159,7 +159,7 @@ E2E_VERBOSITY=verbose npm run test:evals
 E2E_VERBOSITY=verbose npm run test:evals
 
 # Run specific eval file
-npm run test:evals -- --testPathPattern="entity"
+npm run test:evals -- --testPathPatterns="entity"
 ```
 
 ## Common Issues

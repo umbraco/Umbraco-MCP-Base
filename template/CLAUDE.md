@@ -18,7 +18,7 @@ npm run test:evals     # LLM eval tests (requires Claude Code subscription or AN
 npm run test:all       # Both unit and eval tests
 ```
 
-**Single test:** `npm test -- --testPathPattern=src/path/__tests__/file.test.ts`
+**Single test:** `npm test -- --testPathPatterns=src/path/__tests__/file.test.ts`
 
 **Always use npm scripts** (`npm run compile`, `npm test`, `npm run build`) — never run `node`, `npx tsc`, or `jest` directly.
 
