@@ -329,7 +329,7 @@ async function main() {
   } else {
     // Run evals and capture output
     const testCmd = collection
-      ? `npm run test:evals -- --testPathPattern="${collection}" 2>&1`
+      ? `npm run test:evals -- --testPathPatterns="${collection}" 2>&1`
       : 'npm run test:evals 2>&1';
 
     console.log(`Running: ${testCmd}`);

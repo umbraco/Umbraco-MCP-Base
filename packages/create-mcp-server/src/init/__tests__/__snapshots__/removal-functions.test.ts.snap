@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`combined removals should snapshot index.ts after chaining-first removal order 1`] = `
 "#!/usr/bin/env node

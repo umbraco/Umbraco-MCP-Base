@@ -5,17 +5,17 @@
   "type": "module",
   "description": "Skills and agents for building Umbraco MCP servers",
   "scripts": {
-    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --passWithNoTests",
-    "test:evals": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --testTimeout=120000 --forceExit",
-    "test:evals:verbose": "E2E_VERBOSITY=verbose node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPattern=__evals__ --runInBand --testTimeout=120000 --forceExit",
+    "test": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand --passWithNoTests",
+    "test:evals": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPatterns=__evals__ --runInBand --testTimeout=120000 --forceExit",
+    "test:evals:verbose": "E2E_VERBOSITY=verbose node --experimental-vm-modules $(npm root)/jest/bin/jest.js --testPathPatterns=__evals__ --runInBand --testTimeout=120000 --forceExit",
     "test:all": "node --experimental-vm-modules $(npm root)/jest/bin/jest.js --runInBand --testTimeout=120000 --forceExit"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.191",
     "@jest/globals": "^30.4.1",
-    "@types/jest": "^29.5.14",
+    "@types/jest": "^30.0.0",
     "@types/node": "^26.1.2",
-    "jest": "^29.7.0",
+    "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
     "typescript": "^5.6.3"
   }
