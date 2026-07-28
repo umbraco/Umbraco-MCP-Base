@@ -87,15 +87,26 @@ await handleCliCommands(collections, {
 // Version Check
 // ============================================================================
 //
-// Verify the connected Umbraco major version matches this MCP server's
-// major version. \`checkUmbracoVersion\` never throws and always logs a
-// mismatch/error to stderr (console.error — stdio-transport safe), but that
-// alone isn't enough to surface the warning to the user or pause tool
-// execution. Two more calls close that gap:
+// Verify the connected Umbraco major version matches the major version this
+// server declares it targets. The check is **opt-in**: it only runs when you
+// set \`UMBRACO_EXPECTED_MAJOR\` / \`--umbraco-expected-major\` (see
+// \`config/server-config.ts\`). Unset — the default for a freshly scaffolded
+// project — nothing is compared, nothing is logged and nothing is blocked.
+//
+// It deliberately does *not* compare against this package's own version:
+// a new project starts at "1.0.0", which says nothing about which Umbraco
+// major it targets, so an implicit comparison falsely blocked the first tool
+// call of every new server (see Umbraco-MCP-Base#220).
+//
+// \`checkUmbracoVersion\` never throws and always logs a mismatch/error to
+// stderr (console.error — stdio-transport safe), but that alone isn't enough
+// to surface the warning to the user or pause tool execution. Two more calls
+// close that gap:
 //   - \`configureVersionCheckHook()\` bridges the result into
 //     \`withPreExecutionCheck\` (applied to every tool via
 //     \`withStandardDecorators\`), so a mismatch blocks the first tool call
-//     with the warning until the user deliberately retries.
+//     with the warning until the user deliberately retries. Safe to call
+//     unconditionally — with no expected major it never blocks anything.
 //   - \`getVersionCheckMessage()\` lets us fold the same warning into the
 //     server's \`instructions\`, so it reaches the model/user directly rather
 //     than only the server log.
@@ -105,6 +116,7 @@ await handleCliCommands(collections, {
 if (clientId) {
   await checkUmbracoVersion({
     mcpVersion: packageJson.version,
+    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor,
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(
@@ -275,15 +287,26 @@ await handleCliCommands(collections, {
 // Version Check
 // ============================================================================
 //
-// Verify the connected Umbraco major version matches this MCP server's
-// major version. \`checkUmbracoVersion\` never throws and always logs a
-// mismatch/error to stderr (console.error — stdio-transport safe), but that
-// alone isn't enough to surface the warning to the user or pause tool
-// execution. Two more calls close that gap:
+// Verify the connected Umbraco major version matches the major version this
+// server declares it targets. The check is **opt-in**: it only runs when you
+// set \`UMBRACO_EXPECTED_MAJOR\` / \`--umbraco-expected-major\` (see
+// \`config/server-config.ts\`). Unset — the default for a freshly scaffolded
+// project — nothing is compared, nothing is logged and nothing is blocked.
+//
+// It deliberately does *not* compare against this package's own version:
+// a new project starts at "1.0.0", which says nothing about which Umbraco
+// major it targets, so an implicit comparison falsely blocked the first tool
+// call of every new server (see Umbraco-MCP-Base#220).
+//
+// \`checkUmbracoVersion\` never throws and always logs a mismatch/error to
+// stderr (console.error — stdio-transport safe), but that alone isn't enough
+// to surface the warning to the user or pause tool execution. Two more calls
+// close that gap:
 //   - \`configureVersionCheckHook()\` bridges the result into
 //     \`withPreExecutionCheck\` (applied to every tool via
 //     \`withStandardDecorators\`), so a mismatch blocks the first tool call
-//     with the warning until the user deliberately retries.
+//     with the warning until the user deliberately retries. Safe to call
+//     unconditionally — with no expected major it never blocks anything.
 //   - \`getVersionCheckMessage()\` lets us fold the same warning into the
 //     server's \`instructions\`, so it reaches the model/user directly rather
 //     than only the server log.
@@ -293,6 +316,7 @@ await handleCliCommands(collections, {
 if (clientId) {
   await checkUmbracoVersion({
     mcpVersion: packageJson.version,
+    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor,
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(
@@ -465,15 +489,26 @@ await handleCliCommands(collections, {
 // Version Check
 // ============================================================================
 //
-// Verify the connected Umbraco major version matches this MCP server's
-// major version. \`checkUmbracoVersion\` never throws and always logs a
-// mismatch/error to stderr (console.error — stdio-transport safe), but that
-// alone isn't enough to surface the warning to the user or pause tool
-// execution. Two more calls close that gap:
+// Verify the connected Umbraco major version matches the major version this
+// server declares it targets. The check is **opt-in**: it only runs when you
+// set \`UMBRACO_EXPECTED_MAJOR\` / \`--umbraco-expected-major\` (see
+// \`config/server-config.ts\`). Unset — the default for a freshly scaffolded
+// project — nothing is compared, nothing is logged and nothing is blocked.
+//
+// It deliberately does *not* compare against this package's own version:
+// a new project starts at "1.0.0", which says nothing about which Umbraco
+// major it targets, so an implicit comparison falsely blocked the first tool
+// call of every new server (see Umbraco-MCP-Base#220).
+//
+// \`checkUmbracoVersion\` never throws and always logs a mismatch/error to
+// stderr (console.error — stdio-transport safe), but that alone isn't enough
+// to surface the warning to the user or pause tool execution. Two more calls
+// close that gap:
 //   - \`configureVersionCheckHook()\` bridges the result into
 //     \`withPreExecutionCheck\` (applied to every tool via
 //     \`withStandardDecorators\`), so a mismatch blocks the first tool call
-//     with the warning until the user deliberately retries.
+//     with the warning until the user deliberately retries. Safe to call
+//     unconditionally — with no expected major it never blocks anything.
 //   - \`getVersionCheckMessage()\` lets us fold the same warning into the
 //     server's \`instructions\`, so it reaches the model/user directly rather
 //     than only the server log.
@@ -483,6 +518,7 @@ await handleCliCommands(collections, {
 if (clientId) {
   await checkUmbracoVersion({
     mcpVersion: packageJson.version,
+    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor,
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(
@@ -667,15 +703,26 @@ await handleCliCommands(collections, {
 // Version Check
 // ============================================================================
 //
-// Verify the connected Umbraco major version matches this MCP server's
-// major version. \`checkUmbracoVersion\` never throws and always logs a
-// mismatch/error to stderr (console.error — stdio-transport safe), but that
-// alone isn't enough to surface the warning to the user or pause tool
-// execution. Two more calls close that gap:
+// Verify the connected Umbraco major version matches the major version this
+// server declares it targets. The check is **opt-in**: it only runs when you
+// set \`UMBRACO_EXPECTED_MAJOR\` / \`--umbraco-expected-major\` (see
+// \`config/server-config.ts\`). Unset — the default for a freshly scaffolded
+// project — nothing is compared, nothing is logged and nothing is blocked.
+//
+// It deliberately does *not* compare against this package's own version:
+// a new project starts at "1.0.0", which says nothing about which Umbraco
+// major it targets, so an implicit comparison falsely blocked the first tool
+// call of every new server (see Umbraco-MCP-Base#220).
+//
+// \`checkUmbracoVersion\` never throws and always logs a mismatch/error to
+// stderr (console.error — stdio-transport safe), but that alone isn't enough
+// to surface the warning to the user or pause tool execution. Two more calls
+// close that gap:
 //   - \`configureVersionCheckHook()\` bridges the result into
 //     \`withPreExecutionCheck\` (applied to every tool via
 //     \`withStandardDecorators\`), so a mismatch blocks the first tool call
-//     with the warning until the user deliberately retries.
+//     with the warning until the user deliberately retries. Safe to call
+//     unconditionally — with no expected major it never blocks anything.
 //   - \`getVersionCheckMessage()\` lets us fold the same warning into the
 //     server's \`instructions\`, so it reaches the model/user directly rather
 //     than only the server log.
@@ -685,6 +732,7 @@ await handleCliCommands(collections, {
 if (clientId) {
   await checkUmbracoVersion({
     mcpVersion: packageJson.version,
+    expectedUmbracoMajor: serverConfig.custom.expectedUmbracoMajor,
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(
