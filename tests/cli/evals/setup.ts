@@ -153,14 +153,15 @@ async function executeQuery(
         }
       }
     } catch (err) {
-      // Some SDK versions throw instead of yielding a "result" message with
-      // subtype error_max_turns/error_prompt_too_long when a turn/length
-      // ceiling is hit. Tests deliberately probe these ceilings (tight
-      // maxTurns baselines) and only need the partial transcript, not a
-      // hard failure — so treat these specific ceilings as an unsuccessful
-      // (not fatal) result and let anything else propagate.
+      // Some SDK versions throw "Claude Code returned an error result: <reason>"
+      // instead of yielding a graceful "result" message (subtype error_max_turns /
+      // error_max_budget_usd / etc.) when a turn, budget, or prompt-length ceiling
+      // is hit. Tests deliberately probe these ceilings (tight maxTurns/maxBudget
+      // baselines) and only need the partial transcript, not a hard failure — so
+      // treat any SDK-reported ceiling as an unsuccessful (not fatal) result and
+      // let anything else (a genuine bug, not a resource ceiling) propagate.
       const message = err instanceof Error ? err.message : String(err);
-      if (/reached maximum number of turns|prompt is too long/i.test(message)) {
+      if (/^claude code returned an error result:/i.test(message)) {
         return {
           finalResult: assistantText.trim(),
           success: false,
