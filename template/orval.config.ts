@@ -3,7 +3,25 @@ import {
   orvalImportFixer,
   relaxUntypedArrays,
   postProcessZodFiles,
+  createUmbracoTargetMajorTransformer,
 } from "@umbraco-cms/mcp-server-sdk";
+
+/**
+ * Stamps the Umbraco major version this server targets into a generated
+ * constant, derived from the spec's `info.version`.
+ *
+ * Orval's input transformer is the only extension point that sees the parsed
+ * OpenAPI document (the `afterAllFilesWrite` hook only gets file paths), so it
+ * works identically for a local spec file and a live Umbraco spec URL — after
+ * `init`/`discover` repoints `input.target` below, regenerating updates the
+ * constant with no extra step and no value to maintain by hand.
+ *
+ * The generated file is committed so a fresh scaffold has a working value
+ * before anyone runs `generate` themselves.
+ */
+const stampTargetMajor = createUmbracoTargetMajorTransformer({
+  outputPath: "./src/config/umbraco-target.generated.ts",
+});
 
 /**
  * Orval Configuration
@@ -31,7 +49,10 @@ export default defineConfig({
       target: "./src/umbraco-api/api/openapi.yaml",
       unsafeDisableValidation: true,
       override: {
-        transformer: relaxUntypedArrays,
+        // Transformers compose. `stampTargetMajor` leaves the spec untouched —
+        // it only writes src/config/umbraco-target.generated.ts as a side
+        // effect of getting to see `info.version`.
+        transformer: (spec) => stampTargetMajor(relaxUntypedArrays(spec)),
       },
     },
     output: {

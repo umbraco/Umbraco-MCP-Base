@@ -30,12 +30,15 @@ export interface MyServerCustomConfig {
   /** Disable MCP server chaining (useful for testing or isolated deployments) */
   disableMcpChaining?: boolean;
   /**
-   * Explicit Umbraco major version this server targets (e.g. "17").
-   * Opts in to the startup version-compatibility check: when set, connecting
-   * to a different Umbraco major warns and blocks the first tool call.
-   * Leave unset to fall back to `UMBRACO_TARGET_MAJOR`
-   * (`config/umbraco-target.ts`) — set this only to override that default,
-   * e.g. when deliberately targeting a different Umbraco major.
+   * Overrides the Umbraco major version this server targets (e.g. "17") for the
+   * startup version-compatibility check: connecting to a different major warns
+   * and blocks the first tool call until the user retries.
+   *
+   * Leave unset (the normal case) to use `UMBRACO_TARGET_MAJOR` from
+   * `config/umbraco-target.generated.ts`, which `npm run generate` derives from
+   * the OpenAPI spec's `info.version` — i.e. the Umbraco version the tools were
+   * actually generated against. Set this only to deliberately point the server
+   * at a different Umbraco major.
    */
   expectedUmbracoMajor?: string;
   /** Enable experimental features */

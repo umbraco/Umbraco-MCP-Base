@@ -14,11 +14,6 @@ export const SCAFFOLD_EXCLUSIONS = [
   "test-results/",
   ".env",
 
-  // Monorepo-only guard test: asserts UMBRACO_TARGET_MAJOR (config/umbraco-target.ts)
-  // matches tests/umbraco-instance/TestUmbraco.csproj by relative path — that path
-  // only exists inside this monorepo, so the test must not ship to scaffolded projects.
-  "src/config/__tests__/umbraco-target.test.ts",
-
   // Add files to remove from scaffolded projects here:
   // 'src/tools/example/',
   // 'src/tools/example-2/',

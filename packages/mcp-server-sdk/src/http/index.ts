@@ -28,6 +28,14 @@ export {
   type OpenApiDocumentLike,
 } from "./orval-relax-untyped-arrays.js";
 export {
+  createUmbracoTargetMajorTransformer,
+  extractSpecMajor,
+  renderTargetMajorModule,
+  DEFAULT_TARGET_MAJOR_CONSTANT,
+  type OpenApiDocumentWithInfo,
+  type UmbracoTargetMajorOptions,
+} from "./orval-target-major-writer.js";
+export {
   collectZodFiles,
   relaxUuidToGuid,
   camelCaseZodExports,

@@ -1,14 +1,20 @@
 /**
  * CLI Version Check Integration Tests
  *
- * The SDK-side check is **opt-in**: `checkUmbracoVersion` only compares when
- * an `expectedUmbracoMajor` is supplied. The template wires this from
- * `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR`
- * (`template/src/config/umbraco-target.ts`), so a fresh scaffold's *default*
- * target is `UMBRACO_TARGET_MAJOR`, not "no check at all". `UMBRACO_EXPECTED_MAJOR`
- * / `--umbraco-expected-major` (`template/src/config/server-config.ts`)
- * overrides that default for a project that deliberately targets a different
- * Umbraco major.
+ * `checkUmbracoVersion`'s `expectedUmbracoMajor` is a **required** SDK field —
+ * there is no "unset, so no check" state any more. The value is derived from the
+ * OpenAPI spec the tools are generated from: `npm run generate` (orval) stamps
+ * the leading component of the spec's `info.version` into
+ * `template/src/config/umbraco-target.generated.ts` as `UMBRACO_TARGET_MAJOR`,
+ * and the template passes
+ * `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR`.
+ *
+ * So there are exactly two sources of the compared major:
+ *   - the generated, spec-derived default (`UMBRACO_TARGET_MAJOR`, "17" here,
+ *     from the template spec's `info.version: 17.4.0`, which tracks the
+ *     `Umbraco.Cms` version pinned by `tests/umbraco-instance`)
+ *   - an explicit runtime override via `UMBRACO_EXPECTED_MAJOR` /
+ *     `--umbraco-expected-major` (`template/src/config/server-config.ts`)
  *
  * History:
  *  - umbraco/Umbraco-MCP-Base#201 / #212: `checkUmbracoVersion` computed a
@@ -19,22 +25,22 @@
  *    unrelated to the Umbraco major it targets. Every new server therefore had
  *    its first tool call falsely blocked. The comparison is now against an
  *    explicit target major.
- *  - umbraco/Umbraco-MCP-Base#221 review: making the SDK check opt-in-and-off
- *    by default shipped the feature dark for every scaffold. The template now
- *    defaults `expectedUmbracoMajor` to `UMBRACO_TARGET_MAJOR` (kept in sync
- *    with `tests/umbraco-instance/TestUmbraco.csproj` — see
- *    `template/src/config/__tests__/umbraco-target.test.ts`), so the check
- *    runs out of the box against the Umbraco major this repo actually targets.
+ *  - umbraco/Umbraco-MCP-Base#221 review: an optional field defaulting to "off"
+ *    shipped the feature dark, and a hand-written template constant only helped
+ *    projects scaffolded from the template (a downstream consumer wiring its own
+ *    `index.ts` would just never set it). The target major is now derived from
+ *    the spec at generation time and the SDK field is required, so a consumer
+ *    can neither forget it nor let it drift from the actual tool surface.
  *
  * These tests boot the *built* template binary (dist/index.js) against a tiny
  * local HTTP server standing in for Umbraco's OAuth token + server
  * information endpoints, and assert:
- *   1. no override, connected Umbraco matches `UMBRACO_TARGET_MAJOR` →
- *      complete silence, tools work (the #220 fix, still true with a real
- *      default target instead of no check)
- *   2. no override, connected Umbraco differs from `UMBRACO_TARGET_MAJOR` →
- *      the template default alone is enough to warn and block (the #221
- *      review fix — this is the case that was silently broken before it)
+ *   1. no override, connected Umbraco matches the spec-derived default →
+ *      complete silence, tools work (the #220 fix, still true now that a real
+ *      target major always applies)
+ *   2. no override, connected Umbraco differs from the spec-derived default →
+ *      the generated constant alone is enough to warn and block (the case that
+ *      was silently dark before the #221 review)
  *   3. explicit override + mismatch → warning reaches stderr, the MCP
  *      `initialize` response's `instructions`, and the first tool call
  *      (configureVersionCheckHook → withPreExecutionCheck), with a deliberate
@@ -78,10 +84,9 @@ function startMockUmbracoServer(version: string): Promise<{ server: Server; base
 describe("Version Check (CLI)", () => {
   // Regression proof for #220: a scaffolded server (package version "1.0.0")
   // pointed at a real Umbraco must not be treated as a version mismatch.
-  // No explicit override here — the template's UMBRACO_TARGET_MAJOR ("17")
-  // applies, and the mock happens to match it, so this stays silent same as
-  // before #221 (where it was silent because no check ran at all).
-  describe("no override, connected Umbraco matches the template default", () => {
+  // No explicit override here — the spec-derived UMBRACO_TARGET_MAJOR ("17")
+  // applies, and the mock matches it, so this stays silent.
+  describe("no override, connected Umbraco matches the spec-derived default", () => {
     let mockServer: Server;
     let client: CliTestClient;
 
@@ -90,7 +95,8 @@ describe("Version Check (CLI)", () => {
       mockServer = mock.server;
       client = await createCliTestClient({
         captureStderr: true,
-        // Deliberately no UMBRACO_EXPECTED_MAJOR — the default for a scaffold.
+        // Deliberately no UMBRACO_EXPECTED_MAJOR — the generated,
+        // spec-derived default is what a fresh scaffold uses.
         env: { UMBRACO_BASE_URL: mock.baseUrl },
       });
     });
@@ -109,10 +115,10 @@ describe("Version Check (CLI)", () => {
     });
   });
 
-  // #221 review: the SDK check is agnostic, but the template must default it
-  // to a real target major (UMBRACO_TARGET_MAJOR = "17") so mismatches are
-  // caught without the user ever discovering UMBRACO_EXPECTED_MAJOR exists.
-  describe("no override, connected Umbraco differs from the template default", () => {
+  // #221 review: the spec-derived UMBRACO_TARGET_MAJOR ("17") must be enough on
+  // its own to catch a mismatch, without the user ever discovering that
+  // UMBRACO_EXPECTED_MAJOR exists.
+  describe("no override, connected Umbraco differs from the spec-derived default", () => {
     let mockServer: Server;
     let client: CliTestClient;
 
@@ -121,8 +127,8 @@ describe("Version Check (CLI)", () => {
       mockServer = mock.server;
       client = await createCliTestClient({
         captureStderr: true,
-        // Deliberately no UMBRACO_EXPECTED_MAJOR: the template default ("17")
-        // must be enough on its own to catch this mismatch.
+        // Deliberately no UMBRACO_EXPECTED_MAJOR: the generated,
+        // spec-derived default ("17") must catch this mismatch on its own.
         env: { UMBRACO_BASE_URL: mock.baseUrl },
       });
     });
@@ -132,7 +138,7 @@ describe("Version Check (CLI)", () => {
       await new Promise<void>((r) => mockServer.close(() => r()));
     });
 
-    it("warns and blocks the first tool call using the template default target", async () => {
+    it("warns and blocks the first tool call using the spec-derived default target", async () => {
       expect(client.getStderr()).toContain("⚠️ Version Mismatch");
       expect(client.getInstructions()).toContain("⚠️ Version Mismatch");
 

@@ -88,17 +88,24 @@ export interface CheckVersionOptions {
    */
   mcpVersion: string;
   /**
-   * The Umbraco major version this server explicitly targets (e.g., "17").
+   * The Umbraco major version this server targets (e.g., "17"). **Required.**
    *
-   * If omitted (or blank), no version-compatibility check is performed at all:
-   * no request is made, no message is stored, and nothing is blocked. Opting in
-   * is deliberate so servers that don't declare a target major (including
-   * every freshly scaffolded project) never get a spurious mismatch warning.
+   * Every Umbraco MCP server knows this value by construction: it is derived
+   * from the `info.version` of the OpenAPI spec the tools are generated from
+   * and stamped into a generated constant at generation time (see the SDK's
+   * `createUmbracoTargetMajorTransformer`). Making the field required means a
+   * hand-wired server that forgets to supply it is a *compile error* rather
+   * than a silently disabled check — which is how the check ended up shipping
+   * dark in downstream consumers.
    *
    * Surrounding whitespace and a full version string ("17.0.0") are tolerated —
    * only the leading major component is compared.
+   *
+   * This is not the knob for disabling the check. To point a server at a
+   * different Umbraco major, override the value (the template exposes
+   * `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major` for exactly that).
    */
-  expectedUmbracoMajor?: string;
+  expectedUmbracoMajor: string;
   /** Client to fetch server information */
   client: VersionCheckClient;
   /** Optional custom service instance (defaults to singleton) */
@@ -107,21 +114,27 @@ export interface CheckVersionOptions {
 
 /**
  * Checks whether the connected Umbraco major version matches the major version
- * this MCP server explicitly declares it targets (`expectedUmbracoMajor`).
+ * this MCP server targets (`expectedUmbracoMajor`, which is **required**).
  *
- * **Opt-in.** When `expectedUmbracoMajor` is omitted the check is skipped
- * entirely — no server-information request is made, the message is cleared and
- * nothing is blocked. This is the safe default: a server's own package version
- * says nothing about which Umbraco major it targets (scaffolded projects start
- * at "1.0.0"), so an implicit comparison would falsely block the first tool
- * call of every new project.
+ * The target major is not something a caller is expected to invent: it is
+ * derived from the `info.version` of the OpenAPI spec the server's tools are
+ * generated from and stamped into a generated constant at generation time (see
+ * `createUmbracoTargetMajorTransformer`). Because the field is required, a
+ * server that omits it fails to compile instead of silently running with the
+ * check disabled.
  *
- * When it *is* provided, the result message is stored internally for display in
- * the first tool response (see `getVersionCheckMessage` / server
- * `instructions`), and also logged immediately via `console.error` (stderr) so
- * it's visible even if a host never reads the message back out. `console.error`
- * is stdio-transport safe — it never writes to stdout, so it can't corrupt the
- * MCP protocol stream.
+ * It deliberately does *not* compare against the server's own package version:
+ * that is "1.0.0" in every freshly scaffolded project and says nothing about
+ * which Umbraco major it targets, so an implicit comparison falsely blocked the
+ * first tool call of every new project (umbraco/Umbraco-MCP-Base#220).
+ * `mcpVersion` is accepted for logging/diagnostics only.
+ *
+ * The result message is stored internally for display in the first tool
+ * response (see `getVersionCheckMessage` / server `instructions`), and also
+ * logged immediately via `console.error` (stderr) so it's visible even if a
+ * host never reads the message back out. `console.error` is stdio-transport
+ * safe — it never writes to stdout, so it can't corrupt the MCP protocol
+ * stream.
  *
  * Blocks tool execution on version mismatch until the user acknowledges — call
  * `configureVersionCheckHook()` to wire that blocking into
@@ -135,13 +148,16 @@ export interface CheckVersionOptions {
 export async function checkUmbracoVersion(options: CheckVersionOptions): Promise<void> {
   const { expectedUmbracoMajor, client, service = versionCheckService } = options;
 
-  // Normalise the declared target: it arrives from an env var / CLI flag, so
-  // tolerate surrounding whitespace and a full version string ("17.0.0") when
-  // only the major ("17") is meaningful.
+  // Normalise the declared target: it may arrive via an env var / CLI flag
+  // override, so tolerate surrounding whitespace and a full version string
+  // ("17.0.0") when only the major ("17") is meaningful.
   const targetMajor = expectedUmbracoMajor?.trim().split('.')[0];
 
-  // No explicit target major declared → nothing to compare against, so skip
-  // the check entirely (including the network call) and leave tools unblocked.
+  // Runtime guard, not a supported way to disable the check. The field is
+  // required, so by construction this is never empty — but an override read
+  // from a misconfigured `UMBRACO_EXPECTED_MAJOR=""` (or a JS caller ignoring
+  // the types) can still reach here. With nothing to compare against, degrade
+  // gracefully: skip the check, clear state, don't crash the server.
   if (!targetMajor) {
     service.setMessage(null);
     service.setBlocked(false);
@@ -187,16 +203,21 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
  * surfaced the blocking message once, so a deliberate retry after the user
  * has seen the warning succeeds.
  *
- * Harmless when the check was skipped (no `expectedUmbracoMajor` declared) —
- * the service is never blocked in that case, so the hook always falls through.
+ * Safe to call unconditionally: when the versions match (or the check degraded
+ * to a no-op) the service is never blocked, so the hook simply falls through.
  *
  * @param service - Optional service instance (defaults to singleton)
  *
  * @example
  * ```typescript
+ * // UMBRACO_TARGET_MAJOR comes from the generated constant that the orval
+ * // target-major transformer stamps out of the spec's `info.version`.
+ * import { UMBRACO_TARGET_MAJOR } from "./config/umbraco-target.generated.js";
+ *
  * await checkUmbracoVersion({
  *   mcpVersion: packageJson.version,
- *   expectedUmbracoMajor: "17", // omit to disable the check entirely
+ *   // Required. Override via UMBRACO_EXPECTED_MAJOR to target a different major.
+ *   expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
  *   client,
  * });
  * configureVersionCheckHook();

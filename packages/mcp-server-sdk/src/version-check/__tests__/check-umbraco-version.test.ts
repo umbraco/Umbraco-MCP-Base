@@ -56,11 +56,16 @@ describe("checkUmbracoVersion", () => {
     versionCheckService.reset();
   });
 
-  // Regression: umbraco/Umbraco-MCP-Base#220 — with no explicit target major
-  // there is nothing meaningful to compare against (a scaffolded project's own
-  // version is "1.0.0"), so the check must be a complete no-op rather than
-  // falsely flagging every real Umbraco as a mismatch.
-  it("should skip the check entirely when no expectedUmbracoMajor is given", async () => {
+  // `expectedUmbracoMajor` is a *required* field, so "caller forgot it" is a
+  // compile error, not a runtime case worth testing. What can still reach the
+  // runtime is a blank value from a misconfigured override (e.g.
+  // `UMBRACO_EXPECTED_MAJOR=""`). That must degrade gracefully — skip the
+  // comparison, clear state, make no network call — rather than crash or
+  // falsely flag a mismatch (umbraco/Umbraco-MCP-Base#220).
+  it.each([
+    ["an empty string", ""],
+    ["whitespace only", "   "],
+  ])("should degrade to a no-op when expectedUmbracoMajor is %s", async (_label, expected) => {
     // Arrange
     const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
       .mockResolvedValue({ version: "17.0.0" });
@@ -69,29 +74,11 @@ describe("checkUmbracoVersion", () => {
     // Act
     await checkUmbracoVersion({
       mcpVersion: "1.0.0",
+      expectedUmbracoMajor: expected,
       client: mockClient
     });
 
     // Assert - no message, not blocked, and no network call was made
-    expect(getVersionCheckMessage()).toBeNull();
-    expect(isToolExecutionBlocked()).toBe(false);
-    expect(getServerInformation).not.toHaveBeenCalled();
-  });
-
-  it("should skip the check when expectedUmbracoMajor is an empty string", async () => {
-    // Arrange
-    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
-      .mockResolvedValue({ version: "17.0.0" });
-    const mockClient: VersionCheckClient = { getServerInformation };
-
-    // Act
-    await checkUmbracoVersion({
-      mcpVersion: "1.0.0",
-      expectedUmbracoMajor: "",
-      client: mockClient
-    });
-
-    // Assert
     expect(getVersionCheckMessage()).toBeNull();
     expect(isToolExecutionBlocked()).toBe(false);
     expect(getServerInformation).not.toHaveBeenCalled();
@@ -117,25 +104,6 @@ describe("checkUmbracoVersion", () => {
     // Assert - normalised to "17", so this is a match
     expect(getVersionCheckMessage()).toBeNull();
     expect(isToolExecutionBlocked()).toBe(false);
-  });
-
-  it("should skip the check when expectedUmbracoMajor is whitespace only", async () => {
-    // Arrange
-    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
-      .mockResolvedValue({ version: "17.0.0" });
-    const mockClient: VersionCheckClient = { getServerInformation };
-
-    // Act
-    await checkUmbracoVersion({
-      mcpVersion: "1.0.0",
-      expectedUmbracoMajor: "   ",
-      client: mockClient
-    });
-
-    // Assert
-    expect(getVersionCheckMessage()).toBeNull();
-    expect(isToolExecutionBlocked()).toBe(false);
-    expect(getServerInformation).not.toHaveBeenCalled();
   });
 
   it("should not compare against mcpVersion's major", async () => {

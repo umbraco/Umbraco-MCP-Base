@@ -44,7 +44,6 @@ import {
   allSliceNames,
   loadServerConfig,
   clearConfigCache,
-  UMBRACO_TARGET_MAJOR,
 } from "./config/index.js";
 
 // Configure the API client for use with toolkit helpers

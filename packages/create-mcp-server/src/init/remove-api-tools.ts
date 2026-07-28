@@ -113,6 +113,10 @@ export function removeApiTools(projectDir: string): number {
     content = content.replace(/\s*UmbracoManagementClient,/g, "");
     content = content.replace(/\s*CAPTURE_RAW_HTTP_RESPONSE,/g, "");
     content = content.replace(/\s*type HttpResponse,/g, "");
+    // The spec-derived target major is only consumed by the version-check block
+    // removed below, so drop the import too rather than leaving it unused.
+    // (Container mode also deletes orval.config.ts, so nothing regenerates it.)
+    content = content.replace(/\s*UMBRACO_TARGET_MAJOR,/g, "");
     content = content.replace(
       /\/\/ ={20,}\n\/\/ Version Check\n\/\/ ={20,}\n[\s\S]*?\n\}\n\n(?=const versionCheckMessage)/m,
       "",
