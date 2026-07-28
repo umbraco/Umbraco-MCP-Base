@@ -56,6 +56,108 @@ describe("checkUmbracoVersion", () => {
     versionCheckService.reset();
   });
 
+  // Regression: umbraco/Umbraco-MCP-Base#220 — with no explicit target major
+  // there is nothing meaningful to compare against (a scaffolded project's own
+  // version is "1.0.0"), so the check must be a complete no-op rather than
+  // falsely flagging every real Umbraco as a mismatch.
+  it("should skip the check entirely when no expectedUmbracoMajor is given", async () => {
+    // Arrange
+    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
+      .mockResolvedValue({ version: "17.0.0" });
+    const mockClient: VersionCheckClient = { getServerInformation };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      client: mockClient
+    });
+
+    // Assert - no message, not blocked, and no network call was made
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(isToolExecutionBlocked()).toBe(false);
+    expect(getServerInformation).not.toHaveBeenCalled();
+  });
+
+  it("should skip the check when expectedUmbracoMajor is an empty string", async () => {
+    // Arrange
+    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
+      .mockResolvedValue({ version: "17.0.0" });
+    const mockClient: VersionCheckClient = { getServerInformation };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "",
+      client: mockClient
+    });
+
+    // Assert
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(isToolExecutionBlocked()).toBe(false);
+    expect(getServerInformation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a full version string", "17.0.0"],
+    ["surrounding whitespace", " 17 "],
+  ])("should tolerate %s in expectedUmbracoMajor", async (_label, expected) => {
+    // Arrange
+    const mockClient: VersionCheckClient = {
+      getServerInformation: jest.fn<() => Promise<{ version: string }>>()
+        .mockResolvedValue({ version: "17.2.0" })
+    };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: expected,
+      client: mockClient
+    });
+
+    // Assert - normalised to "17", so this is a match
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(isToolExecutionBlocked()).toBe(false);
+  });
+
+  it("should skip the check when expectedUmbracoMajor is whitespace only", async () => {
+    // Arrange
+    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
+      .mockResolvedValue({ version: "17.0.0" });
+    const mockClient: VersionCheckClient = { getServerInformation };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "   ",
+      client: mockClient
+    });
+
+    // Assert
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(isToolExecutionBlocked()).toBe(false);
+    expect(getServerInformation).not.toHaveBeenCalled();
+  });
+
+  it("should not compare against mcpVersion's major", async () => {
+    // Arrange - mcpVersion major ("1") differs from Umbraco's ("17") but the
+    // declared target major matches, so this must NOT be reported as a mismatch.
+    const mockClient: VersionCheckClient = {
+      getServerInformation: jest.fn<() => Promise<{ version: string }>>()
+        .mockResolvedValue({ version: "17.2.0" })
+    };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0-beta.33",
+      expectedUmbracoMajor: "17",
+      client: mockClient
+    });
+
+    // Assert
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(isToolExecutionBlocked()).toBe(false);
+  });
+
   it("should not store message when major versions match", async () => {
     // Arrange
     const mockClient: VersionCheckClient = {
@@ -65,7 +167,8 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0",
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
 
@@ -84,13 +187,16 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0",
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
 
     // Assert
     const message = getVersionCheckMessage();
     expect(message).toContain("⚠️ Version Mismatch");
+    expect(message).toContain("Connected to Umbraco 15.x");
+    expect(message).toContain("this server targets Umbraco 17.x");
     expect(message).toContain("compatibility issues");
     expect(isToolExecutionBlocked()).toBe(true);
   });
@@ -104,7 +210,8 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0",
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
 
@@ -124,7 +231,8 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0-beta.2",
+      mcpVersion: "1.0.0-beta.2",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
 
@@ -143,7 +251,8 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0",
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
     expect(getVersionCheckMessage()).not.toBeNull();
@@ -163,7 +272,8 @@ describe("checkUmbracoVersion", () => {
 
     // Act
     await checkUmbracoVersion({
-      mcpVersion: "17.0.0",
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
       client: mockClient
     });
     expect(isToolExecutionBlocked()).toBe(true);

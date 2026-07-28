@@ -1,18 +1,31 @@
 /**
  * CLI Version Check Integration Tests
  *
- * Regression test for umbraco/Umbraco-MCP-Base#201: `checkUmbracoVersion`
- * computed a mismatch result but nothing ever surfaced it — the message sat
- * in a singleton nobody read, and `withPreExecutionCheck` was never wired up.
+ * The version check is **opt-in**: it only runs when the server declares which
+ * Umbraco major it targets, via `UMBRACO_EXPECTED_MAJOR` /
+ * `--umbraco-expected-major` (wired through `template/src/config/server-config.ts`
+ * into `checkUmbracoVersion`). With nothing declared, no comparison happens at
+ * all — no stderr warning, no `instructions`, no blocked tool call.
+ *
+ * History:
+ *  - umbraco/Umbraco-MCP-Base#201 / #212: `checkUmbracoVersion` computed a
+ *    mismatch result but nothing ever surfaced it — the message sat in a
+ *    singleton nobody read, and `withPreExecutionCheck` was never wired up.
+ *  - umbraco/Umbraco-MCP-Base#220: the comparison used the MCP server's *own*
+ *    package version, which is `1.0.0` in every freshly scaffolded project and
+ *    unrelated to the Umbraco major it targets. Every new server therefore had
+ *    its first tool call falsely blocked. The comparison is now against an
+ *    explicit target major, defaulting to no check at all.
  *
  * These tests boot the *built* template binary (dist/index.js) against a tiny
  * local HTTP server standing in for Umbraco's OAuth token + server
- * information endpoints, and assert the mismatch warning actually reaches:
- *   1. stderr (checkUmbracoVersion's own console.error — stdio-safe, always on)
- *   2. the MCP `initialize` response's `instructions` field (template wiring)
- *   3. the first tool call's result (configureVersionCheckHook → withPreExecutionCheck)
- *
- * and that a deliberate retry after the warning succeeds normally.
+ * information endpoints, and assert:
+ *   1. no target major declared → complete silence, tools work (the #220 fix)
+ *   2. target major declared + mismatch → warning reaches stderr, the MCP
+ *      `initialize` response's `instructions`, and the first tool call
+ *      (configureVersionCheckHook → withPreExecutionCheck), with a deliberate
+ *      retry then succeeding
+ *   3. target major declared + match → silence, tools work
  */
 
 import { createServer, type Server } from "node:http";
@@ -49,7 +62,9 @@ function startMockUmbracoServer(version: string): Promise<{ server: Server; base
 }
 
 describe("Version Check (CLI)", () => {
-  describe("major version mismatch", () => {
+  // Regression proof for #220: a scaffolded server (package version "1.0.0")
+  // pointed at a real Umbraco must not be treated as a version mismatch.
+  describe("no expected major declared", () => {
     let mockServer: Server;
     let client: CliTestClient;
 
@@ -58,7 +73,35 @@ describe("Version Check (CLI)", () => {
       mockServer = mock.server;
       client = await createCliTestClient({
         captureStderr: true,
+        // Deliberately no UMBRACO_EXPECTED_MAJOR — the default for a scaffold.
         env: { UMBRACO_BASE_URL: mock.baseUrl },
+      });
+    });
+
+    afterAll(async () => {
+      await client?.close();
+      await new Promise<void>((r) => mockServer.close(() => r()));
+    });
+
+    it("stays silent: no warning on stderr, no instructions, first tool call succeeds", async () => {
+      expect(client.getStderr()).not.toContain("Version Mismatch");
+      expect(client.getInstructions() ?? "").not.toContain("Version Mismatch");
+
+      const result = await client.callTool("list-examples", {});
+      expect(result.isError).toBeFalsy();
+    });
+  });
+
+  describe("expected major declared, mismatched", () => {
+    let mockServer: Server;
+    let client: CliTestClient;
+
+    beforeAll(async () => {
+      const mock = await startMockUmbracoServer("16.0.0");
+      mockServer = mock.server;
+      client = await createCliTestClient({
+        captureStderr: true,
+        env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_EXPECTED_MAJOR: "17" },
       });
     });
 
@@ -94,17 +137,16 @@ describe("Version Check (CLI)", () => {
     });
   });
 
-  describe("matching versions", () => {
+  describe("expected major declared, matching", () => {
     let mockServer: Server;
     let client: CliTestClient;
 
     beforeAll(async () => {
-      // Template package.json major version is "1" — match it so no warning fires.
-      const mock = await startMockUmbracoServer("1.0.0");
+      const mock = await startMockUmbracoServer("17.0.0");
       mockServer = mock.server;
       client = await createCliTestClient({
         captureStderr: true,
-        env: { UMBRACO_BASE_URL: mock.baseUrl },
+        env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_EXPECTED_MAJOR: "17" },
       });
     });
 

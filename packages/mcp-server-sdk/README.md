@@ -450,14 +450,23 @@ const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
 
 ## Version Check
 
-Verify Umbraco server version compatibility at startup. `checkUmbracoVersion` computes the
-result and stores it in a singleton — on its own it does nothing else observable besides
-logging to `stderr`. Two more calls are required to make the warning actually reach the user:
-`configureVersionCheckHook()` bridges the singleton to `withPreExecutionCheck` (applied to
-every tool via `withStandardDecorators`) so a mismatch pauses tool execution until the user
-retries, and `getVersionCheckMessage()` lets you fold the message into the server's
-`instructions` (or any other client-visible surface) so the model/user sees it, not just the
-server log.
+Verify Umbraco server version compatibility at startup.
+
+**The check is opt-in.** You declare the Umbraco major your server targets via
+`expectedUmbracoMajor`; that value is compared against the connected instance's major
+version. If you omit it, `checkUmbracoVersion` does nothing at all — no server-information
+request, no message, no blocking. That default exists deliberately: an MCP server's own
+package version has no relationship to the Umbraco major it targets (a scaffolded project
+starts at `1.0.0`), so comparing against `mcpVersion` falsely flagged every new project as
+incompatible. `mcpVersion` is still accepted for logging/diagnostics but is never compared.
+
+`checkUmbracoVersion` computes the result and stores it in a singleton — on its own it does
+nothing else observable besides logging to `stderr`. Two more calls are required to make the
+warning actually reach the user: `configureVersionCheckHook()` bridges the singleton to
+`withPreExecutionCheck` (applied to every tool via `withStandardDecorators`) so a mismatch
+pauses tool execution until the user retries, and `getVersionCheckMessage()` lets you fold the
+message into the server's `instructions` (or any other client-visible surface) so the
+model/user sees it, not just the server log.
 
 ```typescript
 import {
@@ -468,9 +477,11 @@ import {
   isToolExecutionBlocked,
 } from '@umbraco-cms/mcp-server-sdk';
 
-// Check version at startup (this alone already logs a mismatch to stderr)
+// Check version at startup (this alone already logs a mismatch to stderr).
+// Omit `expectedUmbracoMajor` and the check is skipped entirely.
 await checkUmbracoVersion({
-  mcpVersion: '16.0.0',
+  mcpVersion: '1.0.0',        // diagnostics only — not compared
+  expectedUmbracoMajor: '17', // the Umbraco major this server targets
   client: {
     getServerInformation: async () => {
       const response = await api.getServerInformation();
@@ -481,7 +492,8 @@ await checkUmbracoVersion({
 
 // Bridge the result to withPreExecutionCheck so every tool call actually
 // pauses on a mismatch (without this, isToolExecutionBlocked() is set but
-// nothing consults it, and the "blocking" is dead code).
+// nothing consults it, and the "blocking" is dead code). Safe to call
+// unconditionally — with no expectedUmbracoMajor nothing is ever blocked.
 configureVersionCheckHook();
 
 // Surface the message to the client, e.g. via server instructions:
@@ -501,7 +513,17 @@ if (isToolExecutionBlocked()) {
 clearVersionCheckMessage();
 ```
 
-See `template/src/index.ts` for the full wiring used by scaffolded projects.
+### Wiring in scaffolded projects
+
+`template/src/index.ts` shows the full wiring, and `template/src/config/server-config.ts`
+exposes the target major as a custom config field so users can opt in without editing code:
+
+| Env var | CLI flag | Effect |
+|---------|----------|--------|
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Umbraco major this server targets, e.g. `17`. Set it to enable the mismatch warning + first-call block. Unset (default) = no check. |
+
+The template reads it as `serverConfig.custom.expectedUmbracoMajor` and passes it straight
+into `checkUmbracoVersion`, then calls `configureVersionCheckHook()` unconditionally.
 
 ## Eval Testing
 

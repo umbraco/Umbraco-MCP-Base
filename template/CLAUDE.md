@@ -74,6 +74,7 @@ tests/
 | `UMBRACO_EXCLUDE_SLICES` | `--umbraco-exclude-slices` | Exclude these slices |
 | `UMBRACO_READONLY` | `--umbraco-readonly` | Block write operations |
 | `DISABLE_MCP_CHAINING` | `--disable-mcp-chaining` | Disable MCP server chaining |
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Explicit Umbraco major version this server targets — opts in to the version-mismatch check/block (unset = no check) |
 
 Custom fields defined in `config/server-config.ts`.
 
