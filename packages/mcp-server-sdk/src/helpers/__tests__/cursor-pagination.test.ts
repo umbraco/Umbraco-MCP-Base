@@ -297,8 +297,8 @@ describe("withCursorPagination", () => {
       const result = withCursorPagination(tool);
       const response = await result.handler({}, {} as any);
 
-      expect(response.structuredContent.nextCursor).toBeDefined();
-      const nextState = decodeCursor(response.structuredContent.nextCursor);
+      expect(response.structuredContent?.nextCursor).toBeDefined();
+      const nextState = decodeCursor(response.structuredContent?.nextCursor as string);
       expect(nextState.s).toBe(100); // 0 + 100 items
     });
 
@@ -313,7 +313,7 @@ describe("withCursorPagination", () => {
       const result = withCursorPagination(tool);
       const response = await result.handler({}, {} as any);
 
-      expect(response.structuredContent.nextCursor).toBeUndefined();
+      expect(response.structuredContent?.nextCursor).toBeUndefined();
     });
 
     it("should update text content fallback too", async () => {
@@ -321,7 +321,9 @@ describe("withCursorPagination", () => {
       const result = withCursorPagination(tool);
       const response = await result.handler({}, {} as any);
 
-      const parsed = JSON.parse(response.content[0].text);
+      const first = response.content?.[0];
+      if (first?.type !== "text") throw new Error("expected text content");
+      const parsed = JSON.parse(first.text);
       expect(parsed.nextCursor).toBeDefined();
     });
   });

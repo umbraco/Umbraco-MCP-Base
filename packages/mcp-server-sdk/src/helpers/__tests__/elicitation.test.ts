@@ -3,7 +3,7 @@ import { confirmAction, ElicitationUnsupportedError } from "../elicitation.js";
 import { setServerRef, clearServerRef } from "../server-ref.js";
 
 describe("confirmAction", () => {
-  const mockElicitInput = jest.fn();
+  const mockElicitInput = jest.fn<(...args: any[]) => Promise<any>>();
 
   beforeEach(() => {
     setServerRef({ elicitInput: mockElicitInput } as any);
@@ -179,7 +179,7 @@ describe("confirmAction", () => {
     });
 
     it("does not include a mode field in the bare elicitation/create params", async () => {
-      const request = jest.fn<any>().mockResolvedValue({
+      const request = jest.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
         action: "accept",
         content: { confirm: true },
       });
