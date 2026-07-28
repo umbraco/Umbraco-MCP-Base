@@ -33,6 +33,7 @@ This skill orchestrates the following agents:
 
 | Agent | When to use |
 |-------|-------------|
+| `endpoint-group-planner` | Gap analysis on the collection — which endpoints still lack tools (Step 1) |
 | `mcp-tool-creator` | Creating the tool file (Step 3) |
 | `mcp-tool-description-writer` | Writing the tool description (Step 3) |
 | `mcp-tool-reviewer` | Reviewing the new tool for LLM-readiness (Step 5) |
@@ -66,6 +67,12 @@ Read the existing collection to understand current patterns:
 - `src/umbraco-api/api/generated/` — to find the client method and Zod schemas for the new endpoint
 
 If the collection doesn't exist, tell the user to run `/build-tools {collection}` first.
+
+If no operation hint was given, or you need to know what's already covered, run the
+`endpoint-group-planner` agent on the collection. Its gap analysis lists which spec operations have
+no tool yet and which are intentionally ignored (`docs/analysis/IGNORED_ENDPOINTS.md`) — use that to
+present real options to the user rather than proposing a tool for an endpoint that was deliberately
+skipped.
 
 ### Step 2: Read Swagger Spec
 

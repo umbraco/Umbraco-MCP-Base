@@ -20,6 +20,7 @@ Install the plugin:
 
 | Agent | Command | Purpose |
 |-------|---------|---------|
+| **endpoint-group-planner** | - | Plans a collection: finds the closest existing collection to copy, gap-analyses partial ones |
 | **mcp-tool-creator** | - | Creates MCP tools following toolkit patterns |
 | **mcp-tool-description-writer** | - | Writes effective tool descriptions |
 | **test-builder-helper-creator** | - | Creates test builders and helpers |

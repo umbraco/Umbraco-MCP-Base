@@ -36,6 +36,7 @@ plugins/umbraco-mcp-skills/
 │       └── scripts/
 │           └── analyze-traces.ts
 ├── agents/
+│   ├── endpoint-group-planner.md
 │   ├── mcp-tool-creator.md
 │   ├── mcp-tool-description-writer.md
 │   ├── test-builder-helper-creator.md
@@ -68,6 +69,7 @@ Automatically invoked agents for specific tasks:
 
 | Agent | Purpose |
 |-------|---------|
+| endpoint-group-planner | Plans a collection — picks the closest existing collection as a copy template, gap-analyses partial ones |
 | mcp-tool-creator | Creates tools following toolkit patterns |
 | mcp-tool-description-writer | Writes effective tool descriptions |
 | test-builder-helper-creator | Creates test builders and helpers |

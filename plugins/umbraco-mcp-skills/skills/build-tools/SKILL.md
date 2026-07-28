@@ -27,6 +27,7 @@ This skill orchestrates the following agents — use them for the relevant steps
 
 | Agent | When to use |
 |-------|-------------|
+| `endpoint-group-planner` | Planning the collection before any tool is written (Step 2b) |
 | `mcp-tool-creator` | Creating each tool file (Step 3b) |
 | `mcp-tool-description-writer` | Writing tool descriptions (Step 3b) |
 | `mcp-tool-reviewer` | Reviewing tools for LLM-readiness (Step 4) |
@@ -78,6 +79,29 @@ For each collection, find operations where `tags[0]` matches the collection's or
 - Summary
 - Parameters and request body schema
 - Response schema
+
+### Step 2b: Per Collection — Plan with `endpoint-group-planner`
+
+Before writing any tool file, run the `endpoint-group-planner` agent for the collection. It is
+read-only and returns:
+
+- The **closest existing collection to use as a copy template** (and where the target differs, so
+  you don't copy the wrong bits) — this is what keeps collections stylistically consistent instead
+  of each one being reinvented from the spec
+- A per-operation plan: tool name, file path, slice, annotations
+- For a partially-implemented collection, a **gap analysis** of which spec operations still have no
+  tool, and which are intentionally ignored
+
+Use the plan as the input to Step 3. If the planner reports "no close sibling", fall back to the
+patterns in `/mcp-patterns`. If it flags a request body with a nested reference wrapper
+(`parent: { id }`, `parent: { path }`), the tool must expose the flattened `parentId` / `path`
+parameter — see the schema flattening section of `/mcp-patterns`.
+
+Skip this step for a collection that is already complete, and keep it to a single pass — the
+planner is read-only, so don't loop on it. If the agent isn't available (skills installed without
+the plugin's agents), do a lightweight version inline: list the existing collections under
+`src/umbraco-api/tools/`, pick the closest match, and note where the target differs. If there are
+no existing collections yet, there is nothing to plan against — go straight to Step 3.
 
 ### Step 3: Per Collection — Create Tools
 
@@ -152,6 +176,8 @@ export default withStandardDecorators(tool);
 - For GET: use `executeGetApiCall`
 - Never require UUIDs from the LLM — generate them server-side
 - Keep input schemas to 3-5 fields max — hide complexity
+- Flatten nested reference wrappers — expose `parentId` / `path`, rebuild `parent: { id }` /
+  `parent: { path }` inside the handler (see `/mcp-patterns`)
 - Write descriptions as mini-prompts: what it does, key constraints, when to use
 
 **After creating EACH tool file, run `npm run compile`. Fix any TypeScript errors in that file before creating the next one.** Common issues:
@@ -224,7 +250,7 @@ Flag any issues but continue to the next collection. The user can address review
 
 ### Step 5: Next Collection
 
-Repeat steps 3-4 for the next collection in `.discover.json`.
+Repeat steps 2b-4 for the next collection in `.discover.json`.
 
 ### Step 6: Final Verification
 

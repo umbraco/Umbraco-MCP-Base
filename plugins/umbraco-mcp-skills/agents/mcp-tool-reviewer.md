@@ -30,6 +30,28 @@ The model should only provide the minimum, most natural information to invoke th
 - Deeply nested JSON structures as input
 - Every optional parameter included
 
+### 1a. Nested Reference Objects Are Flattened
+
+Umbraco request bodies wrap references in a single-key object (`parent: { id }`,
+`parent: { path }`, `target: { id }`). LLMs frequently emit these as JSON *strings*
+(`"parent": "{\"id\":\"…\"}"`), which fails Zod validation with no actionable signal to the
+model. The tool must accept a flat scalar and rebuild the wrapper in the handler.
+
+- [ ] Single-key reference wrappers are flattened to scalars — `parentId`, `targetId`, `path`
+- [ ] The handler rebuilds the nested shape (`parent: parentId ? { id: parentId } : null`)
+- [ ] Flat field is named after both keys (`parentId`, not a bare `id`)
+- [ ] Description states what omitting the field means ("Omit to create at the root")
+- [ ] Genuinely rich nested payloads (content `values`/`variants`) are NOT flattened — flag those
+      for a narrower composite tool instead
+- [ ] If the collection has a `__tests__/` directory, at least one test supplies the flattened
+      reference (root-only coverage hides a broken transform — the API accepts `parent: null`
+      regardless). Report `N/A` when there are no tests yet.
+
+**Anti-patterns:**
+- `parent: z.object({ id: z.string() })` in `inputSchema`
+- Passing the generated request schema through verbatim when it contains a `parent` wrapper
+- Requiring `parent: null` to mean "root" instead of allowing the field to be omitted
+
 ## 2. Tool Descriptions
 
 Descriptions serve as mini-prompts telling the AI assistant exactly what the tool does and when to use it.
@@ -116,6 +138,7 @@ Sequential API calls that are error-prone for the model to coordinate should be 
 | Check | Status | Notes |
 |-------|--------|-------|
 | Schema simplification | PASS/FAIL/WARN | details |
+| Nested refs flattened | PASS/FAIL/WARN/N/A | details |
 | Description quality | PASS/FAIL/WARN | details |
 | Response shaping | PASS/FAIL/WARN | details |
 | Naming | PASS/FAIL/WARN | details |
