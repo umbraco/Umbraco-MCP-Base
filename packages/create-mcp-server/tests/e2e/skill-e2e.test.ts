@@ -136,14 +136,14 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
           }
         }
       } catch (err) {
-        // Some SDK versions throw instead of yielding a "result" message with
-        // subtype error_max_turns when the turn ceiling is hit mid-run. Log
-        // and fall through with whatever partial transcript was captured —
-        // the downstream file/compile assertions are the real pass/fail
-        // signal for this step.
+        // Some SDK versions throw "Claude Code returned an error result: <reason>"
+        // instead of yielding a graceful "result" message when a turn/budget/length
+        // ceiling is hit mid-run. Log and fall through with whatever partial
+        // transcript was captured — the downstream file/compile assertions are the
+        // real pass/fail signal for this step.
         const message = err instanceof Error ? err.message : String(err);
         console.log(`[Skill E2E] Result: query error — ${message}`);
-        if (!/reached maximum number of turns|prompt is too long/i.test(message)) {
+        if (!/^claude code returned an error result:/i.test(message)) {
           throw err;
         }
       }
