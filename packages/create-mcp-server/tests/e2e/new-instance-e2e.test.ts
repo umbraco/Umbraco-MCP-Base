@@ -655,7 +655,7 @@ describeOrSkip("new-instance E2E", () => {
     try {
       execFileSync(
         "node",
-        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPattern=src/config/__tests__", "--runInBand"],
+        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPatterns=src/config/__tests__", "--runInBand"],
         {
         cwd: projectDir,
         encoding: "utf-8",
@@ -730,7 +730,7 @@ describe("real API integration", () => {
     try {
       execFileSync(
         "node",
-        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPattern=src/__tests__/real-api", "--runInBand"],
+        ["--experimental-vm-modules", "node_modules/jest/bin/jest.js", "--testPathPatterns=src/__tests__/real-api", "--runInBand"],
         {
           cwd: projectDir,
           encoding: "utf-8",

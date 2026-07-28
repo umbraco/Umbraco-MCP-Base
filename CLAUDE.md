@@ -206,8 +206,8 @@ gh pr create --base dev --title "Merge main into dev after <version> release"
 
 ### Version scheme
 
-- Prerelease: `17.0.0-beta.N` (published with `--tag beta` dist-tag)
-- Stable: `17.0.0` (published with `--tag latest` dist-tag)
+- Prerelease: `1.0.0-beta.N` (published with `--tag beta` dist-tag)
+- Stable: `1.0.0` (published with `--tag latest` dist-tag)
 
 ### Internal cross-package dependencies
 

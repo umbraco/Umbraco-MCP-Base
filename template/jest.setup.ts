@@ -1,7 +1,7 @@
 // Must be set before any TLS connections
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-import "dotenv/config";
+import "./src/load-env.js";
 import https from "node:https";
 import { initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
 

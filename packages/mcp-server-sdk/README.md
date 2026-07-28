@@ -452,17 +452,48 @@ const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
 
 Verify Umbraco server version compatibility at startup.
 
+**`expectedUmbracoMajor` is required, and you should not hand-write it.** It is the Umbraco
+major your server's tools were generated against, compared at startup against the connected
+instance's major version. Because it is required, a server that omits it is a *compile error*
+rather than a silently disabled check.
+
+The value is derived from the OpenAPI spec the tools come from:
+`createUmbracoTargetMajorTransformer` (an orval input transformer) reads the spec's
+`info.version` during `npm run generate` and stamps the major into a generated constant.
+Regenerating against a newer Umbraco updates it automatically, and it can never drift from the
+actual tool surface because both come from the same spec. See
+[Deriving the target major from the spec](#deriving-the-target-major-from-the-spec).
+
+`mcpVersion` is accepted for logging/diagnostics but is **never** compared: an MCP server's own
+package version has no relationship to the Umbraco major it targets (a scaffolded project
+starts at `1.0.0`), so comparing against it falsely flagged every new project as incompatible
+([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220)).
+
+`checkUmbracoVersion` computes the result and stores it in a singleton — on its own it does
+nothing else observable besides logging to `stderr`. Two more calls are required to make the
+warning actually reach the user: `configureVersionCheckHook()` bridges the singleton to
+`withPreExecutionCheck` (applied to every tool via `withStandardDecorators`) so a mismatch
+pauses tool execution until the user retries, and `getVersionCheckMessage()` lets you fold the
+message into the server's `instructions` (or any other client-visible surface) so the
+model/user sees it, not just the server log.
+
 ```typescript
 import {
   checkUmbracoVersion,
+  configureVersionCheckHook,
   getVersionCheckMessage,
   clearVersionCheckMessage,
   isToolExecutionBlocked,
 } from '@umbraco-cms/mcp-server-sdk';
 
-// Check version at startup
+// The generated constant that `npm run generate` stamps out of the spec.
+import { UMBRACO_TARGET_MAJOR } from './config/umbraco-target.generated.js';
+
+// Check version at startup (this alone already logs a mismatch to stderr).
 await checkUmbracoVersion({
-  mcpVersion: '16.0.0',
+  mcpVersion: '1.0.0', // diagnostics only — not compared
+  // Required. The spec-derived target, with an optional runtime override.
+  expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
   client: {
     getServerInformation: async () => {
       const response = await api.getServerInformation();
@@ -471,7 +502,14 @@ await checkUmbracoVersion({
   }
 });
 
-// Get warning message (if any)
+// Bridge the result to withPreExecutionCheck so every tool call actually
+// pauses on a mismatch (without this, isToolExecutionBlocked() is set but
+// nothing consults it, and the "blocking" is dead code). Safe to call
+// unconditionally — nothing is ever blocked when the versions match.
+configureVersionCheckHook();
+
+// Surface the message to the client, e.g. via server instructions:
+// new McpServer({ name, version }, { instructions: getVersionCheckMessage() ?? undefined })
 const message = getVersionCheckMessage();
 if (message) {
   console.warn(message);
@@ -482,9 +520,92 @@ if (isToolExecutionBlocked()) {
   // Handle version mismatch
 }
 
-// Clear after user acknowledges
+// Clear after user acknowledges (configureVersionCheckHook's hook also does
+// this automatically the first time it blocks a tool call)
 clearVersionCheckMessage();
 ```
+
+### Deriving the target major from the spec
+
+Every Umbraco MCP generates its tools from an OpenAPI spec, and that spec's `info.version` is
+the Management API / Umbraco version the tools were built against. `createUmbracoTargetMajorTransformer`
+turns that into a committed TypeScript constant, so no human ever types the target major.
+
+Why an orval **input transformer** rather than a hook: orval's only lifecycle hook,
+`afterAllFilesWrite`, receives written file paths and never sees the spec. An input transformer
+receives the fully parsed OpenAPI document, so it works identically for a local YAML/JSON file
+and a live Umbraco spec URL — no second read of the spec, no URL-vs-path handling, no YAML
+dependency. It runs on every `orval` invocation, i.e. every `npm run generate`.
+
+```typescript
+// orval.config.ts
+import { defineConfig } from 'orval';
+import {
+  createUmbracoTargetMajorTransformer,
+  relaxUntypedArrays,
+} from '@umbraco-cms/mcp-server-sdk';
+
+const stampTargetMajor = createUmbracoTargetMajorTransformer({
+  outputPath: './src/config/umbraco-target.generated.ts', // resolved against cwd
+});
+
+export default defineConfig({
+  myApi: {
+    input: {
+      target: './src/umbraco-api/api/openapi.yaml',
+      override: {
+        // Transformers compose. stampTargetMajor returns the spec untouched —
+        // it only writes the constant as a side effect of seeing info.version.
+        transformer: (spec) => stampTargetMajor(relaxUntypedArrays(spec)),
+      },
+    },
+    // ... output config
+  },
+});
+```
+
+Produces:
+
+```typescript
+// AUTO-GENERATED by @umbraco-cms/mcp-server-sdk's orval target-major transformer.
+// Do not edit by hand — regenerate via `npm run generate`.
+export const UMBRACO_TARGET_MAJOR = "17";
+```
+
+Notes:
+
+- **Commit the generated file.** A freshly scaffolded project must have a working value before
+  anyone runs `generate` themselves.
+- **`info.version` must be the Umbraco version the API surface targets**, not the add-on's own
+  release number. A placeholder like `1.0.0` derives major `"1"` and makes every real Umbraco
+  look like a mismatch ([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220)).
+- **If a spec's `info.version` is missing or non-numeric, generation warns and leaves the
+  previously-generated value untouched** rather than failing the whole build — some real add-ons
+  don't use semver here (Umbraco Forms' Management API reports `"Latest"`), and that shouldn't
+  break `npm run generate` for a project chaining such a spec. It only throws the first time,
+  before any value has ever been generated, since there is nothing to fall back to.
+- The file is only rewritten when the derived value changes, so a no-op `npm run generate`
+  leaves the working tree clean.
+- Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`.
+
+### Wiring in scaffolded projects
+
+`template/src/index.ts` shows the full wiring: it passes
+`serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` into `checkUmbracoVersion`,
+where `UMBRACO_TARGET_MAJOR` is the generated constant above (re-exported from
+`template/src/config/index.ts`). `template/src/config/server-config.ts` exposes the override as
+a custom config field so users can retarget without editing code:
+
+| Env var | CLI flag | Effect |
+|---------|----------|--------|
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the spec-derived `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset (default) = use `UMBRACO_TARGET_MAJOR`. |
+
+The template then calls `configureVersionCheckHook()` unconditionally — harmless when the
+versions match, since nothing is blocked in that case.
+
+`checkUmbracoVersion` degrades to a no-op (no request, no message, nothing blocked) if the
+resolved major is blank — a runtime guard against a misconfigured `UMBRACO_EXPECTED_MAJOR=""`,
+not a supported way to disable the check.
 
 ## Eval Testing
 
