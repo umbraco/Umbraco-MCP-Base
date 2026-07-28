@@ -182,8 +182,11 @@ Rules:
   scaffold works before anyone runs `generate`.
 - **`info.version` in your spec must be the Umbraco version the API targets**, not your add-on's
   own release number. A placeholder like `1.0.0` derives major `"1"` and makes every real
-  Umbraco look like a mismatch (Umbraco-MCP-Base#220). `npm run generate` fails outright if
-  `info.version` is missing or non-numeric.
+  Umbraco look like a mismatch (Umbraco-MCP-Base#220).
+- If a spec's `info.version` is missing or non-numeric — some real add-ons do this, e.g. Umbraco
+  Forms' Management API reports `"Latest"` — `npm run generate` **warns and leaves the existing
+  generated value untouched** rather than failing the whole build. It only fails outright the
+  first time, before any value has ever been generated (nothing to fall back to).
 - Set `UMBRACO_EXPECTED_MAJOR` only to deliberately point at a different Umbraco major.
 
 ## Hosted Worker (`src/worker.ts`)

@@ -166,9 +166,9 @@ describe("createUmbracoTargetMajorTransformer", () => {
     );
   });
 
-  it("throws a descriptive error when info.version is unusable", () => {
-    // Arrange - failing loudly beats silently stamping a wrong major, which is
-    // exactly the #220 failure mode.
+  it("throws a descriptive error when info.version is unusable and nothing exists to fall back to", () => {
+    // Arrange - a true first run with no prior value: failing loudly beats
+    // silently stamping a wrong major, which is exactly the #220 failure mode.
     const transformer = createUmbracoTargetMajorTransformer({
       outputPath: "target.generated.ts",
     });
@@ -177,6 +177,28 @@ describe("createUmbracoTargetMajorTransformer", () => {
     expect(() => transformer({ info: {} })).toThrow(/info\.version/);
     expect(() => transformer({ info: {} })).toThrow(/UMBRACO_TARGET_MAJOR/);
     expect(fs.existsSync(path.join(tmpDir, "target.generated.ts"))).toBe(false);
+  });
+
+  it("warns and preserves the existing file when a later spec's info.version is unusable", () => {
+    // Arrange - e.g. a project regenerates from Umbraco Forms' Management API,
+    // whose spec reports info.version "Latest" (found via this repo's own E2E
+    // suite against a real instance). That must not break `npm run generate`
+    // for every project that chains a spec like this.
+    const outputPath = "target.generated.ts";
+    const transformer = createUmbracoTargetMajorTransformer({ outputPath });
+    transformer({ info: { version: "17.4.0" } });
+    const before = fs.readFileSync(path.join(tmpDir, outputPath), "utf8");
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Act
+    const spec = { info: { version: "Latest" } };
+    const result = transformer(spec);
+
+    // Assert - no throw, spec still returned unchanged, prior value untouched.
+    expect(result).toBe(spec);
+    expect(fs.readFileSync(path.join(tmpDir, outputPath), "utf8")).toBe(before);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping"));
+    warnSpy.mockRestore();
   });
 
   it("composes with another input transformer", () => {

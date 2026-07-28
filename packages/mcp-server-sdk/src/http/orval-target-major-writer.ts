@@ -171,12 +171,27 @@ export const ${constantName} = "${major}";
  * The file is only rewritten when its contents change, so repeated
  * `npm run generate` runs leave the working tree clean.
  *
+ * **Not every spec's `info.version` is Umbraco's own version.** A project can
+ * point `orval.config.ts` at a third-party add-on's spec (Forms, Commerce,
+ * Deploy, ...) whose `info.version` documents that add-on's own release, not
+ * the Umbraco major — and some don't use semver at all (Umbraco Forms'
+ * Management API spec reports `"Latest"`, discovered via this repo's own E2E
+ * suite against a real instance). Throwing in that case would break
+ * `npm run generate` entirely for any project chaining such a spec, which is a
+ * worse failure mode than the one this mechanism exists to prevent. So:
+ * unusable `info.version` **only** throws when there is no previously-derived
+ * value to fall back to (a true first run, with nothing to compare against —
+ * failing loudly there is still correct, since #220 was exactly "silently wrong"
+ * rather than "loudly absent"). When a prior value already exists on disk, it
+ * warns and leaves that file untouched rather than erroring the whole build.
+ *
  * @param options - Output path and optional constant name
  * @returns An orval-compatible input transformer
- * @throws If the spec has no usable `info.version`. Failing generation loudly
- *   is deliberate: silently writing a wrong major is exactly the failure mode
- *   (#220) this mechanism exists to prevent, and `info.version` is a *required*
- *   field in every OpenAPI version.
+ * @throws If the spec has no usable `info.version` AND no previously-generated
+ *   file exists to preserve. `info.version` is a *required* field in every
+ *   OpenAPI version, so a spec omitting it (or using a non-numeric value) with
+ *   nothing to fall back to means there is no way to derive a target major at
+ *   all — failing loudly beats silently stamping a wrong one (#220).
  */
 export function createUmbracoTargetMajorTransformer(
   options: UmbracoTargetMajorOptions
@@ -184,28 +199,41 @@ export function createUmbracoTargetMajorTransformer(
   const { outputPath, constantName = DEFAULT_TARGET_MAJOR_CONSTANT } = options;
 
   return <T extends OpenApiDocumentWithInfo>(spec: T): T => {
+    const resolved = path.resolve(process.cwd(), outputPath);
+    const existing = fs.existsSync(resolved)
+      ? fs.readFileSync(resolved, "utf8")
+      : null;
+
     const major = extractSpecMajor(spec);
 
     if (!major) {
+      if (existing !== null) {
+        console.warn(
+          `[umbraco-mcp] Skipping ${constantName} regeneration: this spec has no usable "info.version" ` +
+            `(got ${JSON.stringify(spec?.info?.version)}). This is expected when generating from a ` +
+            `third-party add-on's spec (its "info.version" documents the add-on's own release, not ` +
+            `Umbraco's) — keeping the previously-generated value in ${outputPath} unchanged. If that ` +
+            `value is wrong for this project, regenerate from a spec whose "info.version" is the Umbraco ` +
+            `version, or override at runtime with UMBRACO_EXPECTED_MAJOR / --umbraco-expected-major.`
+        );
+        return spec;
+      }
+
       throw new Error(
         `[umbraco-mcp] Cannot derive the target Umbraco major: the OpenAPI spec has no usable "info.version" ` +
-          `(got ${JSON.stringify(spec?.info?.version)}). "info.version" is required by the OpenAPI ` +
-          `specification and is used to stamp ${constantName} into ${outputPath}. ` +
-          `Set it to the Umbraco version these tools target (e.g. "17.4.0").`
+          `(got ${JSON.stringify(spec?.info?.version)}), and no previously-generated ${outputPath} exists to ` +
+          `fall back to. "info.version" is required by the OpenAPI specification and is used to stamp ` +
+          `${constantName} into ${outputPath}. Set it to the Umbraco version these tools target (e.g. "17.4.0"), ` +
+          `or generate at least once from a spec that does before switching to one that doesn't.`
       );
     }
 
     const specVersion =
       typeof spec.info?.version === "string" ? spec.info.version.trim() : undefined;
     const contents = renderTargetMajorModule(major, constantName, specVersion);
-    const resolved = path.resolve(process.cwd(), outputPath);
 
     // Only write when something actually changed, so a no-op regeneration
     // doesn't dirty the working tree (or churn file watchers).
-    const existing = fs.existsSync(resolved)
-      ? fs.readFileSync(resolved, "utf8")
-      : null;
-
     if (existing !== contents) {
       fs.mkdirSync(path.dirname(resolved), { recursive: true });
       fs.writeFileSync(resolved, contents, "utf8");

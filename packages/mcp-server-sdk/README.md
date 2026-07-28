@@ -576,12 +576,14 @@ Notes:
 
 - **Commit the generated file.** A freshly scaffolded project must have a working value before
   anyone runs `generate` themselves.
-- **Generation fails loudly** if the spec has no usable `info.version`. Silently stamping a
-  wrong major is the exact failure mode ([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220))
-  this mechanism exists to prevent, and `info.version` is required by the OpenAPI specification.
 - **`info.version` must be the Umbraco version the API surface targets**, not the add-on's own
   release number. A placeholder like `1.0.0` derives major `"1"` and makes every real Umbraco
-  look like a mismatch.
+  look like a mismatch ([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220)).
+- **If a spec's `info.version` is missing or non-numeric, generation warns and leaves the
+  previously-generated value untouched** rather than failing the whole build — some real add-ons
+  don't use semver here (Umbraco Forms' Management API reports `"Latest"`), and that shouldn't
+  break `npm run generate` for a project chaining such a spec. It only throws the first time,
+  before any value has ever been generated, since there is nothing to fall back to.
 - The file is only rewritten when the derived value changes, so a no-op `npm run generate`
   leaves the working tree clean.
 - Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`.
