@@ -450,17 +450,25 @@ const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
 
 ## Version Check
 
-Verify Umbraco server version compatibility at startup.
+Verify Umbraco server version compatibility at startup. `checkUmbracoVersion` computes the
+result and stores it in a singleton — on its own it does nothing else observable besides
+logging to `stderr`. Two more calls are required to make the warning actually reach the user:
+`configureVersionCheckHook()` bridges the singleton to `withPreExecutionCheck` (applied to
+every tool via `withStandardDecorators`) so a mismatch pauses tool execution until the user
+retries, and `getVersionCheckMessage()` lets you fold the message into the server's
+`instructions` (or any other client-visible surface) so the model/user sees it, not just the
+server log.
 
 ```typescript
 import {
   checkUmbracoVersion,
+  configureVersionCheckHook,
   getVersionCheckMessage,
   clearVersionCheckMessage,
   isToolExecutionBlocked,
 } from '@umbraco-cms/mcp-server-sdk';
 
-// Check version at startup
+// Check version at startup (this alone already logs a mismatch to stderr)
 await checkUmbracoVersion({
   mcpVersion: '16.0.0',
   client: {
@@ -471,7 +479,13 @@ await checkUmbracoVersion({
   }
 });
 
-// Get warning message (if any)
+// Bridge the result to withPreExecutionCheck so every tool call actually
+// pauses on a mismatch (without this, isToolExecutionBlocked() is set but
+// nothing consults it, and the "blocking" is dead code).
+configureVersionCheckHook();
+
+// Surface the message to the client, e.g. via server instructions:
+// new McpServer({ name, version }, { instructions: getVersionCheckMessage() ?? undefined })
 const message = getVersionCheckMessage();
 if (message) {
   console.warn(message);
@@ -482,9 +496,12 @@ if (isToolExecutionBlocked()) {
   // Handle version mismatch
 }
 
-// Clear after user acknowledges
+// Clear after user acknowledges (configureVersionCheckHook's hook also does
+// this automatically the first time it blocks a tool call)
 clearVersionCheckMessage();
 ```
+
+See `template/src/index.ts` for the full wiring used by scaffolded projects.
 
 ## Eval Testing
 

@@ -1,4 +1,7 @@
-#!/usr/bin/env node
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`removeApiTools should snapshot index.ts after removal 1`] = `
+"#!/usr/bin/env node
 /**
  * MCP Server Entry Point
  *
@@ -6,32 +9,23 @@
  * Customize this to add your tool collections.
  */
 
-import "./load-env.js";
+import "dotenv/config";
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import packageJson from "../package.json" with { type: "json" };
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
-  configureApiClient,
-  initializeUmbracoFetch,
   createToolAnnotations,
   discoverProxiedTools,
   parseProxiedToolName,
   createCollectionConfigLoader,
   shouldIncludeTool,
   handleCliCommands,
-  checkUmbracoVersion,
-  configureVersionCheckHook,
   getVersionCheckMessage,
-  UmbracoManagementClient,
-  CAPTURE_RAW_HTTP_RESPONSE,
   type CollectionConfiguration,
-  type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
 
 // Import the Orval-generated API client
-import { getExampleUmbracoAddOnAPI } from "./umbraco-api/api/generated/exampleApi.js";
-
 // Import tool collections
 import exampleCollection from "./umbraco-api/tools/example/index.js";
 import example2Collection from "./umbraco-api/tools/example-2/index.js";
@@ -46,19 +40,8 @@ import { mcpServers } from "./config/mcp-servers.js";
 // Import registries for tool filtering
 import { allModes, allModeNames, allSliceNames, loadServerConfig, clearConfigCache } from "./config/index.js";
 
-// Initialize the SDK's fetch client for real Umbraco API calls.
-// This enables the Orval-generated client to authenticate via client_credentials.
-const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:44391";
-const clientId = process.env.UMBRACO_CLIENT_ID || "";
-const clientSecret = process.env.UMBRACO_CLIENT_SECRET || "";
-if (clientId) {
-  initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
-}
-
 // Configure the API client for use with toolkit helpers
 // This connects your generated Orval client to executeGetApiCall, executeVoidApiCall, etc.
-configureApiClient(() => getExampleUmbracoAddOnAPI());
-
 // ============================================================================
 // Tool Filtering Setup
 // ============================================================================
@@ -96,41 +79,6 @@ await handleCliCommands(collections, {
   serverConfig: serverConfig.umbraco,
 });
 
-// ============================================================================
-// Version Check
-// ============================================================================
-//
-// Verify the connected Umbraco major version matches this MCP server's
-// major version. `checkUmbracoVersion` never throws and always logs a
-// mismatch/error to stderr (console.error — stdio-transport safe), but that
-// alone isn't enough to surface the warning to the user or pause tool
-// execution. Two more calls close that gap:
-//   - `configureVersionCheckHook()` bridges the result into
-//     `withPreExecutionCheck` (applied to every tool via
-//     `withStandardDecorators`), so a mismatch blocks the first tool call
-//     with the warning until the user deliberately retries.
-//   - `getVersionCheckMessage()` lets us fold the same warning into the
-//     server's `instructions`, so it reaches the model/user directly rather
-//     than only the server log.
-// Skipped when no client credentials are configured (matches the
-// `initializeUmbracoFetch` gate above) so CLI introspection / offline usage
-// never makes a live network call.
-if (clientId) {
-  await checkUmbracoVersion({
-    mcpVersion: packageJson.version,
-    client: {
-      getServerInformation: async () => {
-        const response = (await UmbracoManagementClient<{ version: string }>(
-          { url: "/umbraco/management/api/v1/server/information", method: "GET" },
-          CAPTURE_RAW_HTTP_RESPONSE,
-        )) as unknown as HttpResponse<{ version: string }>;
-        return { version: response.data.version };
-      },
-    },
-  });
-  configureVersionCheckHook();
-}
-
 const versionCheckMessage = getVersionCheckMessage();
 
 // ============================================================================
@@ -138,15 +86,15 @@ const versionCheckMessage = getVersionCheckMessage();
 // ============================================================================
 
 // Create MCP server.
-// Pass an optional `instructions` string in the second argument to send
-// server-level guidance to clients during `initialize`. Most clients fold
+// Pass an optional \`instructions\` string in the second argument to send
+// server-level guidance to clients during \`initialize\`. Most clients fold
 // this into the model's system prompt, so it applies implicitly without
-// per-tool repetition. Mirror the same value in `worker.ts` so stdio and
+// per-tool repetition. Mirror the same value in \`worker.ts\` so stdio and
 // hosted deployments behave consistently.
 //
 // Here it's used to surface a version-mismatch warning when one was detected
 // (null otherwise). Extend the string if you also want custom guidance, e.g.:
-// [versionCheckMessage, "Refer to items by name, not by ID."].filter(Boolean).join("\n\n")
+// [versionCheckMessage, "Refer to items by name, not by ID."].filter(Boolean).join("\\n\\n")
 const server = new McpServer(
   { name: "my-umbraco-mcp", version: packageJson.version },
   versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
@@ -202,7 +150,7 @@ async function main() {
         server.registerTool(
           pt.prefixedName,
           {
-            description: `[Proxied from ${pt.serverName}] ${pt.originalTool.description || "No description"}`,
+            description: \`[Proxied from \${pt.serverName}] \${pt.originalTool.description || "No description"}\`,
           },
           async (args: Record<string, unknown>): Promise<CallToolResult> => {
             const { serverName, toolName } = parseProxiedToolName(pt.prefixedName);
@@ -213,7 +161,7 @@ async function main() {
       }
 
       if (proxiedTools.length > 0) {
-        console.error(`Registered ${proxiedTools.length} proxied tool(s) from chained MCP servers`);
+        console.error(\`Registered \${proxiedTools.length} proxied tool(s) from chained MCP servers\`);
       }
     } catch (error) {
       console.error("Warning: Failed to discover proxied tools:", error);
@@ -223,7 +171,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`MCP Server started with ${registeredToolCount} tool(s) from ${collections.length} collection(s)`);
+  console.error(\`MCP Server started with \${registeredToolCount} tool(s) from \${collections.length} collection(s)\`);
 }
 
 // Cleanup on shutdown
@@ -241,3 +189,5 @@ main().catch((error) => {
   console.error("Failed to start MCP server:", error);
   process.exit(1);
 });
+"
+`;

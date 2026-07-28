@@ -222,6 +222,7 @@ export {
   VersionCheckService,
   versionCheckService,
   checkUmbracoVersion,
+  configureVersionCheckHook,
   getVersionCheckMessage,
   clearVersionCheckMessage,
   isToolExecutionBlocked,
