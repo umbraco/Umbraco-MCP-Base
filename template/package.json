@@ -23,9 +23,9 @@
     "generate": "orval --config orval.config.ts",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand",
     "test:evals": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
-    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
+    "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
     "test:e2e": "npx playwright test --config tests/hosted-e2e/playwright.config.ts",
     "dev:worker": "npx wrangler dev",
     "deploy:worker": "npx wrangler deploy"

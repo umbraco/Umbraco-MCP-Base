@@ -349,7 +349,7 @@ export async function getServerConfig(
   }
 
   // Override anything auto-loaded from .env if a custom file is provided.
-  loadEnv({ path: envFilePath, override: true });
+  loadEnv({ path: envFilePath, override: true, quiet: true });
 
   // Initialize config structures
   const auth: UmbracoAuthConfig = {

@@ -316,7 +316,7 @@ npm run build
 Then run the eval tests for this collection:
 
 ```bash
-npm run test:evals -- --testPathPattern="{collection}"
+npm run test:evals -- --testPathPatterns="{collection}"
 ```
 
 #### If tests fail

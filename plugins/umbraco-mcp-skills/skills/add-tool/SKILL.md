@@ -146,7 +146,7 @@ If eval tests exist:
 2. Determine if the new tool fits into an existing scenario or needs a new one:
    - If it extends an existing workflow (e.g. adding an update tool to a collection that has a CRUD test), update the existing test to include the new tool
    - If it's a new capability (e.g. adding a search tool), use the `eval-test-creator` agent to create a new scenario
-3. Build and run: `npm run build` then `npm run test:evals -- --testPathPattern="{collection}"`
+3. Build and run: `npm run build` then `npm run test:evals -- --testPathPatterns="{collection}"`
 
 If eval tests don't exist, skip — tell the user they can run `/build-evals {collection}` to generate eval tests.
 

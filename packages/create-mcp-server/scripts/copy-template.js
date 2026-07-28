@@ -21,8 +21,16 @@ const templateDest = path.resolve(packageRoot, "dist/template");
 // Directories to always exclude when copying
 const EXCLUDED_DIRS = new Set(["node_modules", "dist", "test-results", ".git", ".wrangler"]);
 
-// Files to always exclude
-const EXCLUDED_FILES = new Set([".env", ".env.local", ".dev.vars"]);
+// Files to always exclude.
+// kanban-state.json is local Claude Code state written into template/.claude/ on
+// the developer's machine — it must not ship in scaffolded projects, and leaving
+// it in makes the dist/template/ file listing differ between local and CI builds.
+const EXCLUDED_FILES = new Set([
+  ".env",
+  ".env.local",
+  ".dev.vars",
+  "kanban-state.json",
+]);
 
 /**
  * Copy a directory recursively, excluding certain paths.
