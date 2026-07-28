@@ -47,6 +47,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Type-check SDK
+        run: npm run compile
+
       - name: Build SDK
         run: npm run build
 
