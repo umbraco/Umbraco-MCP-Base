@@ -69,6 +69,10 @@ describe("removeApiTools", () => {
     expect(content).not.toContain("UmbracoManagementClient");
     expect(content).not.toContain("CAPTURE_RAW_HTTP_RESPONSE");
     expect(content).not.toContain("HttpResponse");
+    // The spec-derived target major was only consumed by the removed block, and
+    // container mode deletes orval.config.ts so nothing regenerates it — an
+    // unused import here is a `tsc` failure waiting to happen.
+    expect(content).not.toContain("UMBRACO_TARGET_MAJOR");
   });
 
   it("leaves no reference to a variable it deleted", () => {

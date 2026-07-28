@@ -4,7 +4,14 @@ info:
   description: |
     Example OpenAPI specification demonstrating how to define an API for an Umbraco add-on.
     This spec is used to generate a typed client with Orval.
-  version: 1.0.0
+  # `info.version` is the Umbraco version this API surface targets, NOT the
+  # add-on's own release number. `npm run generate` derives UMBRACO_TARGET_MAJOR
+  # (src/config/umbraco-target.generated.ts) from the leading component here and
+  # feeds it to the startup version check, so a placeholder like "1.0.0" would
+  # make every real Umbraco look like a mismatch. Set it to the Umbraco version
+  # your add-on targets; replacing this spec with a real one via `init` /
+  # `discover` picks the value up from that spec automatically.
+  version: 17.4.0
   contact:
     name: Umbraco HQ
 

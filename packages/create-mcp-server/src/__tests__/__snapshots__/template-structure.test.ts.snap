@@ -30,6 +30,7 @@ exports[`template structure should match the expected file listing 1`] = `
   "src/config/mode-registry.ts",
   "src/config/server-config.ts",
   "src/config/slice-registry.ts",
+  "src/config/umbraco-target.generated.ts",
   "src/constants/constants.ts",
   "src/constants/index.ts",
   "src/index.ts",

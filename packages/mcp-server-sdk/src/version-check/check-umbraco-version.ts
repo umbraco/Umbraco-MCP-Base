@@ -77,8 +77,35 @@ export const versionCheckService = new VersionCheckService();
  * Options for version check.
  */
 export interface CheckVersionOptions {
-  /** The MCP server version (e.g., "16.0.0-beta.2") */
+  /**
+   * The MCP server's own package version (e.g., "1.0.0-beta.33").
+   *
+   * Kept for logging/diagnostics only — it is deliberately *not* used in the
+   * compatibility comparison. An MCP server's own semver has no relationship
+   * to the Umbraco major it targets (freshly scaffolded projects start at
+   * "1.0.0"), so comparing it against the connected instance produced false
+   * mismatches. See `expectedUmbracoMajor`.
+   */
   mcpVersion: string;
+  /**
+   * The Umbraco major version this server targets (e.g., "17"). **Required.**
+   *
+   * Every Umbraco MCP server knows this value by construction: it is derived
+   * from the `info.version` of the OpenAPI spec the tools are generated from
+   * and stamped into a generated constant at generation time (see the SDK's
+   * `createUmbracoTargetMajorTransformer`). Making the field required means a
+   * hand-wired server that forgets to supply it is a *compile error* rather
+   * than a silently disabled check — which is how the check ended up shipping
+   * dark in downstream consumers.
+   *
+   * Surrounding whitespace and a full version string ("17.0.0") are tolerated —
+   * only the leading major component is compared.
+   *
+   * This is not the knob for disabling the check. To point a server at a
+   * different Umbraco major, override the value (the template exposes
+   * `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major` for exactly that).
+   */
+  expectedUmbracoMajor: string;
   /** Client to fetch server information */
   client: VersionCheckClient;
   /** Optional custom service instance (defaults to singleton) */
@@ -86,37 +113,71 @@ export interface CheckVersionOptions {
 }
 
 /**
- * Checks if the connected server version matches the MCP server major version.
- * Stores the result message internally for display in the first tool response
- * (see `getVersionCheckMessage` / server `instructions`), and also logs it
- * immediately via `console.error` (stderr) so it's visible even if a host
- * never reads the message back out. `console.error` is stdio-transport safe —
- * it never writes to stdout, so it can't corrupt the MCP protocol stream.
- * Blocks tool execution on version mismatch until user acknowledges — call
+ * Checks whether the connected Umbraco major version matches the major version
+ * this MCP server targets (`expectedUmbracoMajor`, which is **required**).
+ *
+ * The target major is not something a caller is expected to invent: it is
+ * derived from the `info.version` of the OpenAPI spec the server's tools are
+ * generated from and stamped into a generated constant at generation time (see
+ * `createUmbracoTargetMajorTransformer`). Because the field is required, a
+ * server that omits it fails to compile instead of silently running with the
+ * check disabled.
+ *
+ * It deliberately does *not* compare against the server's own package version:
+ * that is "1.0.0" in every freshly scaffolded project and says nothing about
+ * which Umbraco major it targets, so an implicit comparison falsely blocked the
+ * first tool call of every new project (umbraco/Umbraco-MCP-Base#220).
+ * `mcpVersion` is accepted for logging/diagnostics only.
+ *
+ * The result message is stored internally for display in the first tool
+ * response (see `getVersionCheckMessage` / server `instructions`), and also
+ * logged immediately via `console.error` (stderr) so it's visible even if a
+ * host never reads the message back out. `console.error` is stdio-transport
+ * safe — it never writes to stdout, so it can't corrupt the MCP protocol
+ * stream.
+ *
+ * Blocks tool execution on version mismatch until the user acknowledges — call
  * `configureVersionCheckHook()` to wire that blocking into
  * `withStandardDecorators`/`withPreExecutionCheck`; without it, `isBlocked()`
  * is set but nothing consults it.
+ *
  * Non-blocking - never throws errors, always continues execution.
  *
  * @param options - Version check options
  */
 export async function checkUmbracoVersion(options: CheckVersionOptions): Promise<void> {
-  const { mcpVersion, client, service = versionCheckService } = options;
+  const { expectedUmbracoMajor, client, service = versionCheckService } = options;
+
+  // Normalise the declared target: it may arrive via an env var / CLI flag
+  // override, so tolerate surrounding whitespace and a full version string
+  // ("17.0.0") when only the major ("17") is meaningful.
+  const targetMajor = expectedUmbracoMajor?.trim().split('.')[0];
+
+  // Runtime guard, not a supported way to disable the check. The field is
+  // required, so by construction this is never empty — but an override read
+  // from a misconfigured `UMBRACO_EXPECTED_MAJOR=""` (or a JS caller ignoring
+  // the types) can still reach here. With nothing to compare against, degrade
+  // gracefully: skip the check, clear state, don't crash the server.
+  if (!targetMajor) {
+    service.setMessage(null);
+    service.setBlocked(false);
+    return;
+  }
 
   try {
     const serverInfo = await client.getServerInformation();
     const umbracoVersion = serverInfo.version; // e.g., "15.3.1" or "16.0.0"
 
-    // Extract major version from both MCP version and Umbraco version
-    const mcpMajor = mcpVersion.split('.')[0]; // "16.0.0-beta.2" → "16"
+    // Compare the connected instance's major against the explicitly declared
+    // target major (never against the MCP server's own package version).
     const umbracoMajor = umbracoVersion.split('.')[0]; // "16.3.1" → "16"
 
-    if (umbracoMajor === mcpMajor) {
+    if (umbracoMajor === targetMajor) {
       // Versions match - no message needed
       service.setMessage(null);
       service.setBlocked(false);
     } else {
-      const message = `⚠️ Version Mismatch: Connected to Umbraco ${umbracoMajor}.x, but MCP server (${mcpVersion}) expects Umbraco ${mcpMajor}.x\n   This may cause compatibility issues with the Management API.`;
+      const message = `⚠️ Version Mismatch: Connected to Umbraco ${umbracoMajor}.x, but this server targets Umbraco ${targetMajor}.x\n   This may cause compatibility issues with the Management API.`;
       service.setMessage(message);
       service.setBlocked(true); // Block tool execution until user acknowledges
       console.error(message);
@@ -142,11 +203,23 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
  * surfaced the blocking message once, so a deliberate retry after the user
  * has seen the warning succeeds.
  *
+ * Safe to call unconditionally: when the versions match (or the check degraded
+ * to a no-op) the service is never blocked, so the hook simply falls through.
+ *
  * @param service - Optional service instance (defaults to singleton)
  *
  * @example
  * ```typescript
- * await checkUmbracoVersion({ mcpVersion: packageJson.version, client });
+ * // UMBRACO_TARGET_MAJOR comes from the generated constant that the orval
+ * // target-major transformer stamps out of the spec's `info.version`.
+ * import { UMBRACO_TARGET_MAJOR } from "./config/umbraco-target.generated.js";
+ *
+ * await checkUmbracoVersion({
+ *   mcpVersion: packageJson.version,
+ *   // Required. Override via UMBRACO_EXPECTED_MAJOR to target a different major.
+ *   expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
+ *   client,
+ * });
  * configureVersionCheckHook();
  * ```
  */

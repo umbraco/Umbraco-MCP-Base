@@ -41,7 +41,7 @@ describe("configureVersionCheckHook", () => {
         .mockResolvedValue({ version: "17.3.1" }),
     };
 
-    await checkUmbracoVersion({ mcpVersion: "18.0.1", client, service });
+    await checkUmbracoVersion({ mcpVersion: "1.0.0", expectedUmbracoMajor: "18", client, service });
     configureVersionCheckHook(service);
 
     const handler = jest
@@ -73,7 +73,7 @@ describe("configureVersionCheckHook", () => {
         .mockResolvedValue({ version: "18.1.0" }),
     };
 
-    await checkUmbracoVersion({ mcpVersion: "18.0.1", client, service });
+    await checkUmbracoVersion({ mcpVersion: "1.0.0", expectedUmbracoMajor: "18", client, service });
     configureVersionCheckHook(service);
 
     const handler = jest
@@ -94,7 +94,7 @@ describe("configureVersionCheckHook", () => {
         .mockRejectedValue(new Error("network down")),
     };
 
-    await checkUmbracoVersion({ mcpVersion: "18.0.1", client, service });
+    await checkUmbracoVersion({ mcpVersion: "1.0.0", expectedUmbracoMajor: "18", client, service });
     configureVersionCheckHook(service);
 
     expect(service.isBlocked()).toBe(false);
