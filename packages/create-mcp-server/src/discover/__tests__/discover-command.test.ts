@@ -25,6 +25,8 @@ jest.unstable_mockModule("node:child_process", () => ({
 }));
 
 // Mock prompts
+const mockPromptApiSourceMethod = jest.fn<() => Promise<string>>();
+const mockPromptOpenApiUrl = jest.fn<() => Promise<string>>();
 const mockPromptBaseUrl = jest.fn<() => Promise<string>>();
 const mockPromptApiSelection = jest.fn<() => Promise<{ url: string; name: string }>>();
 const mockPromptConfirmOrval = jest.fn<() => Promise<boolean>>();
@@ -34,6 +36,8 @@ const mockPromptUpdateModeRegistry = jest.fn<() => Promise<boolean>>();
 const mockPromptUpdateSliceRegistry = jest.fn<() => Promise<boolean>>();
 
 jest.unstable_mockModule("../prompts.js", () => ({
+  promptApiSourceMethod: mockPromptApiSourceMethod,
+  promptOpenApiUrl: mockPromptOpenApiUrl,
   promptBaseUrl: mockPromptBaseUrl,
   promptApiSelection: mockPromptApiSelection,
   promptConfirmOrval: mockPromptConfirmOrval,
@@ -116,6 +120,8 @@ function setupV18Fetch() {
 beforeEach(() => {
   mockFs.reset();
   jest.clearAllMocks();
+  // Default to the existing instance-discovery path; direct-URL tests override this.
+  mockPromptApiSourceMethod.mockResolvedValue("instance");
   originalFetch = globalThis.fetch;
   consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
@@ -315,6 +321,65 @@ describe("runDiscover", () => {
         path.resolve(PROJECT_DIR, "orval.config.ts")
       );
       expect(orvalAfter).toBe(orvalBefore);
+    });
+  });
+
+  describe("direct OpenAPI spec URL", () => {
+    it("skips health check, API user, and discovery, then proceeds to analyze the spec", async () => {
+      const specUrl = "https://internal.example.com/umbraco/openapi/commerce.json";
+
+      mockPromptApiSourceMethod.mockResolvedValue("url");
+      mockPromptOpenApiUrl.mockResolvedValue(specUrl);
+      mockPromptConfirmOrval.mockResolvedValue(false);
+      mockPromptConfirmGenerate.mockResolvedValue(false);
+      mockPromptGroupSelection.mockImplementation(async (groups: unknown[]) => groups);
+      mockPromptUpdateModeRegistry.mockResolvedValue(false);
+      mockExecSync.mockImplementation(() => {
+        throw new Error("claude not found");
+      });
+
+      globalThis.fetch = createMockFetch([
+        { pattern: specUrl, body: sampleSpec },
+      ]);
+
+      await runDiscover(PROJECT_DIR);
+
+      const manifestPath = path.resolve(PROJECT_DIR, ".discover.json");
+      expect(mockFs.files.has(manifestPath)).toBe(true);
+
+      const manifest = JSON.parse(mockFs.files.get(manifestPath)!);
+      expect(manifest.swaggerUrl).toBe(specUrl);
+      expect(manifest.baseUrl).toBe("https://internal.example.com");
+      expect(manifest.collections).toContain("product");
+      expect(manifest.collections).toContain("order");
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Skipping health check and API-user setup");
+    });
+
+    it("warns but continues when the spec URL can't be verified", async () => {
+      const specUrl = "https://internal.example.com/umbraco/openapi/commerce.json";
+
+      mockPromptApiSourceMethod.mockResolvedValue("url");
+      mockPromptOpenApiUrl.mockResolvedValue(specUrl);
+      mockPromptConfirmOrval.mockResolvedValue(false);
+      mockPromptConfirmGenerate.mockResolvedValue(false);
+      mockPromptGroupSelection.mockImplementation(async (groups: unknown[]) => groups);
+      mockPromptUpdateModeRegistry.mockResolvedValue(false);
+      mockExecSync.mockImplementation(() => {
+        throw new Error("claude not found");
+      });
+
+      // Spec endpoint returns 401 (behind auth) but analyzeApi/extractPermissions
+      // still succeed against the same URL later in the flow.
+      globalThis.fetch = createMockFetch([
+        { pattern: specUrl, body: sampleSpec },
+      ]);
+
+      await runDiscover(PROJECT_DIR);
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Validating");
     });
   });
 

@@ -4,7 +4,7 @@ import type { ProjectFeatures } from "./detect-features.js";
 import type { Package } from "./list-packages.js";
 import { listPackages } from "./list-packages.js";
 
-export type UmbracoSetupChoice = "create" | "existing" | "skip";
+export type UmbracoSetupChoice = "create" | "existing" | "url" | "skip";
 export type ToolModeChoice = "api-tools" | "container";
 
 export interface FeatureChoices {
@@ -41,6 +41,12 @@ export async function promptUmbracoSetup(): Promise<UmbracoSetupChoice> {
           description:
             "Point to an existing Umbraco instance with Swagger",
           value: "existing",
+        },
+        {
+          title: "Provide OpenAPI spec URL directly",
+          description:
+            "Skip discovery — point straight at a spec URL (e.g. an internal package not on the marketplace)",
+          value: "url",
         },
         {
           title: "Skip for now",
