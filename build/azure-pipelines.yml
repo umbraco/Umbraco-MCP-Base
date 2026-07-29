@@ -27,6 +27,18 @@ variables:
   # builds (MyGet)".
   - name: myGetNpmRegistry
     value: 'https://www.myget.org/F/umbraco-mcp/npm/'
+  # Kill switch: Deploy_MyGet is otherwise gated only on branch (dev / release/*),
+  # so without this it fails on every such push until the feed + service
+  # connection above actually exist. Flip to 'true' once both are confirmed.
+  - name: publishNightly
+    value: 'false'
+  # Computed once per pipeline run (not per job) so every Deploy_MyGet job packs
+  # an identical nightly version suffix for a given package version — computing
+  # this per-job (e.g. `date -u` inside publish-nightly.sh) would race across
+  # parallel jobs and could produce a hosted-mcp nightly pinned to an SDK
+  # nightly version that was never published.
+  - name: nightlyDate
+    value: $[ format('{0:yyyyMMdd}', pipeline.startTime) ]
 
 stages:
 - stage: BuildAndTest
@@ -341,11 +353,14 @@ stages:
 # produced to the MyGet npm feed so changes can be tested before a release is
 # cut: nightlies on every push to dev, prereleases on release/* branches. main
 # is deliberately excluded — Deploy_Npm owns real releases on the public npm
-# registry. Versions get a unique -nightly.<UTC date>.<build id> suffix and the
+# registry. Versions get a unique -nightly.<date>.<build id> suffix and the
 # "nightly" dist-tag, so this never collides with npm latest/alpha/beta/rc.
+# NOTE: gated on `publishNightly` (see variables above) — stays a no-op until a
+# human creates the MyGet feed + "MyGet - Umbraco MCP" service connection and
+# flips it to 'true'. See CLAUDE.md "Nightly / pre-release builds (MyGet)".
 - stage: Deploy_MyGet
   displayName: 'MyGet nightly / prerelease'
-  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')))
+  condition: and(succeeded(), eq(variables['publishNightly'], 'true'), or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')))
   dependsOn:
     - BuildAndTest
   jobs:
@@ -367,11 +382,15 @@ stages:
           inputs:
             workingFile: $(Pipeline.Workspace)/sdk-package/.npmrc
             customEndpoint: "MyGet - Umbraco MCP"
-        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/sdk-package" "$(Build.BuildId)"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/sdk-package" "$(Build.BuildId)" "$(nightlyDate)"
           displayName: Publish SDK nightly to MyGet
 
     - job: PublishHostedNightly
       displayName: Publish Hosted MCP nightly to MyGet
+      # hosted-mcp depends on mcp-server-sdk (see publish-nightly.sh's sibling
+      # repoint step) — must run after the SDK's nightly is actually published,
+      # not just assume it will be by the time this job's publish step runs.
+      dependsOn: PublishSDKNightly
       steps:
         - checkout: self
         - task: NodeTool@0
@@ -388,7 +407,7 @@ stages:
           inputs:
             workingFile: $(Pipeline.Workspace)/hosted-package/.npmrc
             customEndpoint: "MyGet - Umbraco MCP"
-        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/hosted-package" "$(Build.BuildId)"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/hosted-package" "$(Build.BuildId)" "$(nightlyDate)"
           displayName: Publish Hosted MCP nightly to MyGet
 
     - job: PublishCLINightly
@@ -409,5 +428,5 @@ stages:
           inputs:
             workingFile: $(Pipeline.Workspace)/cli-package/.npmrc
             customEndpoint: "MyGet - Umbraco MCP"
-        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/cli-package" "$(Build.BuildId)"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/cli-package" "$(Build.BuildId)" "$(nightlyDate)"
           displayName: Publish CLI nightly to MyGet
