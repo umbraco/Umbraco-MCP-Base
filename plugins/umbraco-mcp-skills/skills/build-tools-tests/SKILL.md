@@ -56,6 +56,39 @@ This skill orchestrates the following agents — use them for the relevant steps
 
 **REAL API — NO MOCKING.** These are integration tests that run against a real Umbraco instance. Do NOT set `USE_MOCK_API`. Do NOT create, modify, or reference anything in `src/mocks/`. Do NOT import `server` from mocks. Do NOT add MSW handlers. Do NOT use any mocking framework. The tests call tool handlers directly and those handlers call the real API. If a test fails, the fix is in the test or the tool — never add mock infrastructure.
 
+## Test Data Gotchas
+
+These fail in ways that look like tool bugs but are really test-data bugs. Check here first when
+a builder can't create its entity.
+
+**Password fields.** Umbraco's default password policy rejects weak values, and the API returns a
+validation `ProblemDetails` that reads like a broken tool. Any builder creating users, members, or
+anything else with a password must use a value that is:
+
+- at least 10 characters
+- contains at least one digit
+- contains at least one non-alphanumeric symbol
+
+```typescript
+const TEST_PASSWORD = "_TestPassword1!";
+```
+
+Put it in a `TEST_` constant at the head of the builder — never inline a short password, and never
+weaken the test to work around the rejection.
+
+**Email and login uniqueness.** Users and members are unique by email/username. Derive them from
+the `TEST_` name constant (`_test-user-1@example.invalid`) so cleanup by prefix reliably removes
+them, otherwise a failed run leaves data that breaks the next one.
+
+**Flattened parent/target params.** Tools that flatten a nested reference (`parentId` → `parent: { id }`,
+`path` → `parent: { path }`) need at least one test that actually supplies it. The API accepts
+`parent: null` happily, so root-only coverage passes even when the transform is broken. See the
+schema flattening section of `/mcp-patterns`.
+
+**Trees and folders need real ancestry.** `ancestors`/`children`/`root` and folder tools can't be
+tested against a single flat entity — the builder must be able to create a child under a known
+parent. If the builder has no `withParentId()`, add it before writing those tests.
+
 ## Umbraco Instance Management
 
 If testing hits roadblocks — builders can't create data, APIs reject requests due to missing configuration, or features aren't available — you are able to manipulate the Umbraco instance to your needs. You can add connection strings, change settings, install packages, or even write C# code in `demo-site/`. **Read `instance-management.md` in this skill directory for the full process and concrete examples.**
@@ -308,6 +341,22 @@ Use the `integration-test-creator` agent.
 
 Create **one test file per tool**. Each tool gets its own `.test.ts` file. Create and run each sequentially.
 
+#### Build order within a collection
+
+Each stage depends on the previous one working, so build them in this order and don't move on
+until the current stage passes:
+
+| # | Stage | Why it comes here |
+|---|-------|-------------------|
+| 1 | Builder (+ its own builder test) | Nothing else can create test data until this works |
+| 2 | The single `create-{entity}` test | Proves the POST payload and the ID extraction from the Location header |
+| 3 | The rest of CRUD — `get`, `list`, `update`, `delete` | These consume the builder's ID; a failure here is the tool, not the data |
+| 4 | Items/tree tools — `ancestors`, `children`, `root` | Need a parent/child pair, so the builder must already support `withParentId()` |
+| 5 | Folder tools | Need both a folder and an entity inside it — the most test data of any stage |
+
+Skipping ahead (e.g. writing tree tests before `create` passes) means debugging two unknowns at
+once. If a stage is genuinely blocked, note it and continue — don't fabricate data to get past it.
+
 #### Snapshot test pattern (preferred for success cases)
 
 ```typescript
@@ -460,6 +509,8 @@ After all test files pass for a collection, run the `integration-test-validator`
 - Constants at file head with `TEST_` prefix
 - No mock mode (`USE_MOCK_API` is NOT set — tests hit the real API)
 - Test count reasonable (2-3 per tool)
+- Password constants meet the policy (10+ chars, a digit, a symbol)
+- Tools with a flattened parent/target param have a test that supplies it
 
 Flag any issues but continue to the next collection.
 

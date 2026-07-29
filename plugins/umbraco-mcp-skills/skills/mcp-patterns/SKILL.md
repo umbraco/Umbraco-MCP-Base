@@ -109,6 +109,13 @@ Tools are categorized by operation type:
 
 **Important**: DELETE is NOT idempotent (2nd call returns 404).
 
+## Schema Flattening for Nested Reference Objects
+
+Umbraco APIs wrap references to other entities in a nested object — most commonly
+`parent: { id }` or `parent: { path }`. Never expose that shape to the LLM: accept a flat
+scalar (`parentId`, `path`) and rebuild the nested object inside the handler. See
+`references/schema-flattening.md` for the full pattern, the when-to-apply matrix, and the rules.
+
 ## Project Structure
 
 ```
@@ -146,3 +153,5 @@ Configuration in `orval.config.ts`:
 3. **Clear descriptions** - tools should be self-documenting
 4. **Consistent naming** - follow `{action}-{entity}` pattern
 5. **Error handling** - `withStandardDecorators` handles errors automatically
+6. **Flatten nested reference objects** - accept `parentId` / `path`, rebuild `parent: { id }` /
+   `parent: { path }` in the handler (see [Schema Flattening](#schema-flattening-for-nested-reference-objects) above, or `references/schema-flattening.md` for the full pattern)
