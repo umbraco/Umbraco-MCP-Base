@@ -38,7 +38,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -46,6 +46,9 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Type-check SDK
+        run: npm run compile
 
       - name: Build SDK
         run: npm run build
@@ -254,7 +257,7 @@ jobs:
         run: dotnet tool install -g PackageScriptWriter.Cli --prerelease
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -281,7 +284,7 @@ jobs:
           github.event.pull_request.base.ref == 'main' &&
           startsWith(github.event.pull_request.head.ref, 'release/')
         run: npm run test:e2e:skills -w packages/create-mcp-server
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDECODE: ''

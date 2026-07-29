@@ -81,7 +81,7 @@ E2E_VERBOSITY=verbose npm run test:evals 2>&1 | tee eval-output.log
 Or run a single collection's evals:
 
 ```bash
-E2E_VERBOSITY=verbose npm run test:evals -- --testPathPattern="{collection}" 2>&1 | tee eval-output.log
+E2E_VERBOSITY=verbose npm run test:evals -- --testPathPatterns="{collection}" 2>&1 | tee eval-output.log
 ```
 
 ### Step 2: Analyze Traces

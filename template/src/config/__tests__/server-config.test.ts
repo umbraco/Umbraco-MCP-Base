@@ -211,9 +211,10 @@ describe("Server Config", () => {
     it("should return all custom field definitions", () => {
       const fields = getCustomFieldDefinitions();
 
-      expect(fields).toHaveLength(5);
+      expect(fields).toHaveLength(6);
       expect(fields.map(f => f.name)).toEqual([
         "disableMcpChaining",
+        "expectedUmbracoMajor",
         "experimentalFeatures",
         "customEndpoints",
         "externalApiKey",
@@ -234,6 +235,11 @@ describe("Server Config", () => {
 
       const apiKey = fields.find(f => f.name === "externalApiKey");
       expect(apiKey?.type).toBe("string");
+
+      const expectedMajor = fields.find(f => f.name === "expectedUmbracoMajor");
+      expect(expectedMajor?.type).toBe("string");
+      expect(expectedMajor?.envVar).toBe("UMBRACO_EXPECTED_MAJOR");
+      expect(expectedMajor?.cliFlag).toBe("umbraco-expected-major");
     });
 
     it("should return a copy to prevent mutation", () => {

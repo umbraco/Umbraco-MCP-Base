@@ -30,7 +30,7 @@ Both modes use the **same tool collections** - no code changes required.
 - [Cloudflare account](https://dash.cloudflare.com/sign-up)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`npm install -g wrangler`)
 - An Umbraco instance with Management API enabled
-- The Umbraco instance must have the hosted MCP server registered as an OAuth client (see [Umbraco Setup](./docs/umbraco-setup.md))
+- The Umbraco instance must have the hosted MCP server registered as an OAuth client (see [Umbraco Setup](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/umbraco-setup))
 
 ## Quick Start
 
@@ -143,7 +143,7 @@ wrangler deploy
 
 Your MCP server is now accessible at `https://my-umbraco-mcp.<your-subdomain>.workers.dev/`.
 
-Having issues? See [Troubleshooting](./docs/troubleshooting.md).
+Having issues? See [Troubleshooting](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/troubleshooting).
 
 ## Routes
 
@@ -156,7 +156,7 @@ The Worker serves several routes:
 | `/callback` | Token exchange after Umbraco login |
 | `/info` | Diagnostic JSON endpoint (dev-only, requires `ENABLE_INFO_ENDPOINT=true`) |
 
-When a browser visits `/` (plain GET with no auth header), the landing page is served with basic server info so operators can verify the deployment is live. MCP clients connecting to `/` (POST, GET+SSE, or requests with auth) are routed to the MCP protocol handler. For multi-site deployments the landing page lists all configured sites. Custom landing page rendering is a [planned feature](./docs/future/custom-landing-page.md).
+When a browser visits `/` (plain GET with no auth header), the landing page is served with basic server info so operators can verify the deployment is live. MCP clients connecting to `/` (POST, GET+SSE, or requests with auth) are routed to the MCP protocol handler. For multi-site deployments the landing page lists all configured sites. Custom landing page rendering is a [planned feature](../../docs/plans/hosted-mcp/custom-landing-page.md).
 
 The `/info` endpoint returns JSON with available collections, modes, slices, and active config. It is gated behind the `ENABLE_INFO_ENDPOINT` environment variable and returns 404 when not enabled. Add `ENABLE_INFO_ENDPOINT=true` to `.dev.vars` for local development.
 
@@ -178,32 +178,32 @@ const options = {
 };
 ```
 
-See [Architecture - Three-Tier Configuration](./docs/architecture.md#three-tier-configuration) for how admin, operator, and user configurations interact.
+See [Architecture - Three-Tier Configuration](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/architecture#three-tier-configuration) for how admin, operator, and user configurations interact.
 
 ### Multi-Site Support
 
 A single Worker can serve multiple Umbraco instances. All sites share a single MCP endpoint (`/`) — site selection happens during authorization via the consent screen's site picker.
 
-See [Multi-Site Deployments](./docs/multi-site.md) for setup instructions, route structure, and security details.
+See [Multi-Site Deployments](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/multi-site) for setup instructions, route structure, and security details.
 
 ## Documentation
 
+Full documentation lives on [docs.umbraco.com](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp).
+
 **Getting Started** (read in order):
-1. [Umbraco Setup](./docs/umbraco-setup.md) — Register the Worker as an OAuth client (one-time)
-2. [Deployment](./docs/deployment.md) — Deploy, set secrets, verify the connection
+1. [Umbraco Setup](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/umbraco-setup) — Register the Worker as an OAuth client (one-time)
+2. [Deployment](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/deployment) — Deploy, set secrets, verify the connection
 
 **Guides**:
-3. [Customization](./docs/customization.md) — Consent screen tool selection, branding, and custom rendering
-4. [Multi-Site Deployments](./docs/multi-site.md) — Serve multiple Umbraco instances from one Worker
+3. [Customization](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/customization) — Consent screen tool selection, branding, and custom rendering
+4. [Multi-Site Deployments](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/multi-site) — Serve multiple Umbraco instances from one Worker
 
 **Understanding the System**:
-5. [Token Isolation](./docs/token-isolation.md) — How Umbraco tokens stay hidden from MCP clients (start here)
-6. [Architecture](./docs/architecture.md) — Auth flow, three-tier config, component diagram
-7. [Auth Internals](./docs/auth-internals.md) — KV state schema, token lifecycle, consent extraction
-8. [Security](./docs/security.md) — Token isolation, PKCE, MCP spec compliance
+5. [Architecture](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/architecture) — Auth flow, three-tier config, component diagram (start here)
+6. [Security](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/security) — Token isolation, token lifecycle, PKCE, MCP spec compliance
 
 **Reference**:
-9. [API Reference](./docs/api-reference.md) — All exports, types, and interfaces
-10. [Troubleshooting](./docs/troubleshooting.md) — Common errors and fixes
+7. [API Reference](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/api-reference) — All exports, types, and interfaces
+8. [Troubleshooting](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/troubleshooting) — Common errors and fixes
 
-**Roadmap**: See [docs/future/](./docs/future/) for planned features.
+**Roadmap**: See [docs/plans/hosted-mcp/](../../docs/plans/hosted-mcp/) for planned features.

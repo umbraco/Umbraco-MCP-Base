@@ -113,43 +113,64 @@ async function executeQuery(
     const maxTurns = options.maxTurns ?? 5;
     const maxBudget = options.maxBudget ?? 0.10;
 
-    for await (const message of query({
-      prompt,
-      options: {
-        model: "haiku",
-        cwd: testDir,
-        settingSources: ["project"],
-        allowedTools,
-        permissionMode: "bypassPermissions",
-        maxTurns,
-        maxBudgetUsd: maxBudget,
-        abortController,
-        env: { ...process.env, CLAUDECODE: "" },
-      }
-    })) {
-      if (message.type === "system" && message.subtype === "init") {
-        if (options.verbose) {
-          console.log("Available tools:", (message as any).tools?.length || 0);
+    try {
+      for await (const message of query({
+        prompt,
+        options: {
+          model: "haiku",
+          cwd: testDir,
+          settingSources: ["project"],
+          allowedTools,
+          permissionMode: "bypassPermissions",
+          maxTurns,
+          maxBudgetUsd: maxBudget,
+          abortController,
+          env: { ...process.env, CLAUDECODE: "" },
         }
-      }
-      if (message.type === "assistant" && message.message.content) {
-        for (const block of message.message.content) {
-          if (block.type === "tool_use") {
-            toolCalls.push({ name: block.name, input: block.input });
-            if (options.verbose) {
-              console.log(`Tool call: ${block.name}`);
-            }
-          } else if (block.type === "text") {
-            assistantText += block.text + "\n";
-            if (options.verbose) {
-              console.log(`Assistant: ${block.text.substring(0, 200)}...`);
+      })) {
+        if (message.type === "system" && message.subtype === "init") {
+          if (options.verbose) {
+            console.log("Available tools:", (message as any).tools?.length || 0);
+          }
+        }
+        if (message.type === "assistant" && message.message.content) {
+          for (const block of message.message.content) {
+            if (block.type === "tool_use") {
+              toolCalls.push({ name: block.name, input: block.input });
+              if (options.verbose) {
+                console.log(`Tool call: ${block.name}`);
+              }
+            } else if (block.type === "text") {
+              assistantText += block.text + "\n";
+              if (options.verbose) {
+                console.log(`Assistant: ${block.text.substring(0, 200)}...`);
+              }
             }
           }
         }
+        if (message.type === "result") {
+          result = message;
+        }
       }
-      if (message.type === "result") {
-        result = message;
+    } catch (err) {
+      // Some SDK versions throw "Claude Code returned an error result: <reason>"
+      // instead of yielding a graceful "result" message (subtype error_max_turns /
+      // error_max_budget_usd / etc.) when a turn, budget, or prompt-length ceiling
+      // is hit. Tests deliberately probe these ceilings (tight maxTurns/maxBudget
+      // baselines) and only need the partial transcript, not a hard failure — so
+      // treat any SDK-reported ceiling as an unsuccessful (not fatal) result and
+      // let anything else (a genuine bug, not a resource ceiling) propagate.
+      const message = err instanceof Error ? err.message : String(err);
+      if (/^claude code returned an error result:/i.test(message)) {
+        return {
+          finalResult: assistantText.trim(),
+          success: false,
+          toolCalls,
+          cost: 0,
+          turns: 0,
+        };
       }
+      throw err;
     }
 
     const isSuccess = result?.subtype === "success";
