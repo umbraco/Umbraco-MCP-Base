@@ -1,8 +1,29 @@
 name: Test
 
+# Runs on every PR into main/dev, AND on every push to dev (i.e. after a PR
+# merges). Without the push trigger, a merge that breaks dev only surfaces
+# on the *next* unrelated PR — see #219 (incident referenced PRs #214/#212/#215).
+#
+# main is intentionally NOT a push trigger: per CLAUDE.md's release process,
+# main only ever moves via a release PR's merge commit, and that release PR
+# already ran this exact workflow (full suite + evals + cli-e2e) on the exact
+# tree that lands on main. Re-running on push to main would just repeat that
+# same coverage for no new signal — the same reasoning the cli-e2e job below
+# already uses to skip itself on push.
 on:
   pull_request:
     branches: [main, dev]
+  push:
+    branches: [dev]
+
+# Key the group on the ref so a merge train doesn't stack redundant runs: a
+# rapid string of pushes to dev (or of pushes to the same PR branch) collapses
+# to just the latest. `github.ref` differs naturally between the two event
+# types (refs/heads/<branch> vs refs/pull/<n>/merge), so push and pull_request
+# runs never contend for the same slot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -14,7 +35,14 @@ jobs:
     # release process in CLAUDE.md). A job-level skip reports "skipped" (counts
     # as success for branch protection), unlike a paths/branch filter which
     # would leave a required check stuck pending.
-    if: ${{ github.head_ref != 'chore/merge-main-to-dev' }}
+    #
+    # This only applies to the pull_request event: `github.head_ref` is empty
+    # on `push`, so gate explicitly on event_name rather than relying on that
+    # emptiness never colliding with the literal branch name. The push that
+    # lands the merged chore/merge-main-to-dev PR onto dev is a different,
+    # meaningful event (verifying dev is green post-release) and must still
+    # run — it is deliberately NOT skipped.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'chore/merge-main-to-dev' }}
 
     env:
       UMBRACO_CLIENT_ID: umbraco-back-office-mcp
@@ -214,8 +242,13 @@ jobs:
   cli-e2e:
     name: New-instance & Existing-instance E2E
     runs-on: ubuntu-latest
-    # See note on the `test` job: skip the main→dev release-sync PR.
-    if: ${{ github.head_ref != 'chore/merge-main-to-dev' }}
+    # PR-only: this job spins up a SQL Server service and runs the full
+    # scaffold → init → compile → test E2E flow, the most expensive part of
+    # the suite. Every merge to dev/main already passed it on the PR that
+    # merged, so re-running on push would double this cost per merge for no
+    # new signal. See CLAUDE.md's release process for why chore/merge-main-to-dev
+    # is exempt on the pull_request path too (see note on the `test` job).
+    if: ${{ github.event_name == 'pull_request' && github.head_ref != 'chore/merge-main-to-dev' }}
 
     services:
       sqlserver:
@@ -295,6 +328,9 @@ jobs:
 
   evals:
     name: LLM Eval Tests
+    # Naturally push-safe: `github.event.pull_request` is undefined on a push
+    # event, so both sides of this condition evaluate false and the job is
+    # skipped — no change needed for the push trigger.
     if: >-
       github.event.pull_request.base.ref == 'main' &&
       startsWith(github.event.pull_request.head.ref, 'release/')
