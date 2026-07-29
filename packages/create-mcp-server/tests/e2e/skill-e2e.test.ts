@@ -61,6 +61,20 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     console.log(`[Skill E2E] Project: ${projectDir}`);
     console.log(`[Skill E2E] Umbraco: ${baseUrl}`);
 
+    // The spawned Claude Code process reads project .claude/settings.json (settingSources:
+    // ["project"]) which requires the workspace to be marked trusted, even under
+    // permissionMode: "bypassPermissions". Pre-accept the trust dialog for this project dir.
+    const claudeConfigPath = path.join(os.homedir(), ".claude.json");
+    const claudeConfig = fs.existsSync(claudeConfigPath)
+      ? JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"))
+      : {};
+    claudeConfig.projects = claudeConfig.projects ?? {};
+    claudeConfig.projects[projectDir] = {
+      ...claudeConfig.projects[projectDir],
+      hasTrustDialogAccepted: true,
+    };
+    fs.writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig, null, 2));
+
     // Copy skills into the project
     const skillsDir = path.join(projectDir, ".claude", "skills");
     fs.mkdirSync(skillsDir, { recursive: true });
@@ -95,29 +109,42 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     const abortController = new AbortController();
 
     try {
-      for await (const message of query({
-        prompt,
-        options: {
-          model: "sonnet",
-          cwd: projectDir,
-          settingSources: ["project"],
-          allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
-          permissionMode: "bypassPermissions",
-          maxTurns: opts?.maxTurns ?? 40,
-          maxBudgetUsd: opts?.maxBudget ?? 3.0,
-          abortController,
-          env: { ...process.env, CLAUDECODE: "" },
-        },
-      })) {
-        if (message.type === "assistant" && message.message.content) {
-          for (const block of message.message.content) {
-            if (block.type === "text") text += block.text + "\n";
-            if (block.type === "tool_use") tools.push(block.name);
+      try {
+        for await (const message of query({
+          prompt,
+          options: {
+            model: "sonnet",
+            cwd: projectDir,
+            settingSources: ["project"],
+            allowedTools: ["Skill", "Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+            permissionMode: "bypassPermissions",
+            maxTurns: opts?.maxTurns ?? 40,
+            maxBudgetUsd: opts?.maxBudget ?? 3.0,
+            abortController,
+            env: { ...process.env, CLAUDECODE: "" },
+          },
+        })) {
+          if (message.type === "assistant" && message.message.content) {
+            for (const block of message.message.content) {
+              if (block.type === "text") text += block.text + "\n";
+              if (block.type === "tool_use") tools.push(block.name);
+            }
+          }
+          if (message.type === "result") {
+            const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
+            console.log(`[Skill E2E] Result: ${r.subtype}, turns: ${r.num_turns}, cost: $${r.total_cost_usd?.toFixed(3)}`);
           }
         }
-        if (message.type === "result") {
-          const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
-          console.log(`[Skill E2E] Result: ${r.subtype}, turns: ${r.num_turns}, cost: $${r.total_cost_usd?.toFixed(3)}`);
+      } catch (err) {
+        // Some SDK versions throw "Claude Code returned an error result: <reason>"
+        // instead of yielding a graceful "result" message when a turn/budget/length
+        // ceiling is hit mid-run. Log and fall through with whatever partial
+        // transcript was captured — the downstream file/compile assertions are the
+        // real pass/fail signal for this step.
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(`[Skill E2E] Result: query error — ${message}`);
+        if (!/^claude code returned an error result:/i.test(message)) {
+          throw err;
         }
       }
     } finally {
