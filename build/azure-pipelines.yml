@@ -2,6 +2,7 @@ trigger:
   branches:
     include:
     - main
+    - dev
     - feature/*
     - release/*
 
@@ -17,6 +18,15 @@ variables:
     value: 'packages/hosted-mcp'
   - name: cliPackagePath
     value: 'packages/create-mcp-server'
+  # MyGet npm feed used for nightly / prerelease builds (Deploy_MyGet stage).
+  # NEEDS HUMAN CONFIRMATION: this follows MyGet's standard npm endpoint shape
+  # (https://www.myget.org/F/<feed>/npm/) but the feed name is a placeholder. A
+  # human must confirm/create the feed and create the matching npm service
+  # connection named "MyGet - Umbraco MCP" (feed URL + API key) in Azure DevOps
+  # before Deploy_MyGet can publish — see CLAUDE.md "Nightly / pre-release
+  # builds (MyGet)".
+  - name: myGetNpmRegistry
+    value: 'https://www.myget.org/F/umbraco-mcp/npm/'
 
 stages:
 - stage: BuildAndTest
@@ -326,3 +336,85 @@ stages:
 # .github/workflows/release-tag.yml GitHub Actions workflow, which triggers on
 # push to main (i.e. when this release merge lands). It is independent of this
 # npm publish — see CLAUDE.md "Post-release: tag the release (automated)".
+
+# Nightly / prerelease builds. Publishes the same artifacts BuildAndTest already
+# produced to the MyGet npm feed so changes can be tested before a release is
+# cut: nightlies on every push to dev, prereleases on release/* branches. main
+# is deliberately excluded — Deploy_Npm owns real releases on the public npm
+# registry. Versions get a unique -nightly.<UTC date>.<build id> suffix and the
+# "nightly" dist-tag, so this never collides with npm latest/alpha/beta/rc.
+- stage: Deploy_MyGet
+  displayName: 'MyGet nightly / prerelease'
+  condition: |
+    and(
+      succeeded(),
+      or(
+        eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
+        startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
+      )
+    )
+  dependsOn:
+    - BuildAndTest
+  jobs:
+    - job: PublishSDKNightly
+      displayName: Publish SDK nightly to MyGet
+      steps:
+        - checkout: self
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: 'sdk-package'
+        - bash: echo "@umbraco-cms:registry=$(myGetNpmRegistry)" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/sdk-package
+          displayName: Add scoped MyGet registry to .npmrc
+        - task: npmAuthenticate@0
+          displayName: Authenticate with MyGet
+          inputs:
+            workingFile: $(Pipeline.Workspace)/sdk-package/.npmrc
+            customEndpoint: "MyGet - Umbraco MCP"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/sdk-package" "$(Build.BuildId)"
+          displayName: Publish SDK nightly to MyGet
+
+    - job: PublishHostedNightly
+      displayName: Publish Hosted MCP nightly to MyGet
+      steps:
+        - checkout: self
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: 'hosted-package'
+        - bash: echo "@umbraco-cms:registry=$(myGetNpmRegistry)" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/hosted-package
+          displayName: Add scoped MyGet registry to .npmrc
+        - task: npmAuthenticate@0
+          displayName: Authenticate with MyGet
+          inputs:
+            workingFile: $(Pipeline.Workspace)/hosted-package/.npmrc
+            customEndpoint: "MyGet - Umbraco MCP"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/hosted-package" "$(Build.BuildId)"
+          displayName: Publish Hosted MCP nightly to MyGet
+
+    - job: PublishCLINightly
+      displayName: Publish CLI nightly to MyGet
+      steps:
+        - checkout: self
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: 'cli-package'
+        - bash: echo "@umbraco-cms:registry=$(myGetNpmRegistry)" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/cli-package
+          displayName: Add scoped MyGet registry to .npmrc
+        - task: npmAuthenticate@0
+          displayName: Authenticate with MyGet
+          inputs:
+            workingFile: $(Pipeline.Workspace)/cli-package/.npmrc
+            customEndpoint: "MyGet - Umbraco MCP"
+        - bash: bash "$(Build.SourcesDirectory)/scripts/publish-nightly.sh" "$(Pipeline.Workspace)/cli-package" "$(Build.BuildId)"
+          displayName: Publish CLI nightly to MyGet

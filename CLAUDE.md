@@ -174,6 +174,16 @@ The full workflow lives in the **`release-and-branching` skill** (`.claude/skill
 8. GitHub Release tagged `v<version>` is created **automatically** (see below)
 9. Merge `main` back into `dev` — **automated** (see below)
 
+### Nightly / pre-release builds (MyGet)
+
+Releases go to npm, but you don't have to wait for one to test a change. The `Deploy_MyGet` stage in `build/azure-pipelines.yml` publishes all three packages to an Umbraco MyGet npm feed:
+
+- **Trigger:** every push to `dev` (nightlies) and to a `release/*` branch (prereleases). Never `main` — that's `Deploy_Npm`'s job on the public npm registry. It reuses the artifacts `BuildAndTest` already produced, so nothing is rebuilt.
+- **Version scheme:** `<version-in-package.json>-nightly.<UTC YYYYMMDD>.<Build.BuildId>` (e.g. `1.0.0-beta.32-nightly.20260729.4711`). Committed `package.json` files are never touched — `scripts/publish-nightly.sh` repacks the extracted tarball. Intra-monorepo deps (`mcp-hosted` → `mcp-server-sdk`) are repointed at the nightly from the same run, so a nightly resolves its matching sibling.
+- **Dist-tag:** `nightly`, so these builds never move the `latest` / `alpha` / `beta` / `rc` tags. Install with `npm i @umbraco-cms/mcp-server-sdk@nightly --registry <feed>` (or scope `@umbraco-cms` to the feed in your `.npmrc`).
+
+**Manual prerequisite — this stage cannot succeed until a human does this.** Someone with Azure DevOps admin rights must create an **npm service connection named exactly `MyGet - Umbraco MCP`** (MyGet feed URL + API key) and confirm the feed URL in the `myGetNpmRegistry` pipeline variable — the committed value (`https://www.myget.org/F/umbraco-mcp/npm/`) follows MyGet's standard npm endpoint shape but the feed name is a **placeholder**. Until both are done, `Deploy_MyGet` fails at the authenticate step; `BuildAndTest` and `Deploy_Npm` are unaffected.
+
 ### Post-release: tag the release (automated)
 
 When the release merge reaches `main`, **`.github/workflows/release-tag.yml`** creates the `v<version>` git tag and a GitHub Release:
