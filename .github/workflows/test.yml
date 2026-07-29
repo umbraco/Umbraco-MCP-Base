@@ -1,19 +1,26 @@
 name: Test
 
-# Runs on every PR into main/dev, AND on every push to main/dev (i.e. after a
-# PR merges). Without the push trigger, a merge that breaks dev only surfaces
+# Runs on every PR into main/dev, AND on every push to dev (i.e. after a PR
+# merges). Without the push trigger, a merge that breaks dev only surfaces
 # on the *next* unrelated PR — see #219 (incident referenced PRs #214/#212/#215).
+#
+# main is intentionally NOT a push trigger: per CLAUDE.md's release process,
+# main only ever moves via a release PR's merge commit, and that release PR
+# already ran this exact workflow (full suite + evals + cli-e2e) on the exact
+# tree that lands on main. Re-running on push to main would just repeat that
+# same coverage for no new signal — the same reasoning the cli-e2e job below
+# already uses to skip itself on push.
 on:
   pull_request:
     branches: [main, dev]
   push:
-    branches: [dev, main]
+    branches: [dev]
 
 # Key the group on the ref so a merge train doesn't stack redundant runs: a
-# rapid string of pushes to dev/main (or of pushes to the same PR branch)
-# collapses to just the latest. `github.ref` differs naturally between the
-# two event types (refs/heads/<branch> vs refs/pull/<n>/merge), so push and
-# pull_request runs never contend for the same slot.
+# rapid string of pushes to dev (or of pushes to the same PR branch) collapses
+# to just the latest. `github.ref` differs naturally between the two event
+# types (refs/heads/<branch> vs refs/pull/<n>/merge), so push and pull_request
+# runs never contend for the same slot.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
