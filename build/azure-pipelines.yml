@@ -345,14 +345,7 @@ stages:
 # "nightly" dist-tag, so this never collides with npm latest/alpha/beta/rc.
 - stage: Deploy_MyGet
   displayName: 'MyGet nightly / prerelease'
-  condition: |
-    and(
-      succeeded(),
-      or(
-        eq(variables['Build.SourceBranch'], 'refs/heads/dev'),
-        startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
-      )
-    )
+  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')))
   dependsOn:
     - BuildAndTest
   jobs:
