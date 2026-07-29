@@ -284,7 +284,7 @@ jobs:
           github.event.pull_request.base.ref == 'main' &&
           startsWith(github.event.pull_request.head.ref, 'release/')
         run: npm run test:e2e:skills -w packages/create-mcp-server
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDECODE: ''
