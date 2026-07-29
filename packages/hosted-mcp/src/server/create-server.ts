@@ -17,6 +17,8 @@ import {
   setCustomTransport,
   createCollectionConfigLoader,
   expandModesToCollections,
+  checkUmbracoVersion,
+  VersionCheckService,
   type ToolCollectionExport,
   type ToolModeDefinition,
   type CollectionConfiguration,
@@ -115,6 +117,18 @@ export interface CreateServerOptions {
   clientFactory?: () => unknown;
   /** Multi-site deployment configuration (for resolving site-specific URLs and filters) */
   multiSite?: MultiSiteConfig;
+  /**
+   * The Umbraco major version this server's tools target (e.g. "17") — the
+   * hosted-worker counterpart of the stdio entry point's `expectedUmbracoMajor`
+   * (see the SDK's `checkUmbracoVersion`). Pass the generated
+   * `UMBRACO_TARGET_MAJOR` constant here; `env.UMBRACO_EXPECTED_MAJOR` overrides
+   * it per-deployment at request time, matching the stdio override precedence.
+   *
+   * When set, `createPerRequestServer` checks the connected Umbraco's version
+   * on every request and folds a mismatch warning into that request's
+   * `instructions`. Omit to skip the check entirely.
+   */
+  expectedUmbracoMajor?: string;
   /**
    * Dynamic site resolver. Alternative to `multiSite` for URL-based site routing
    * where sites are resolved dynamically (e.g., from a database or URL pattern)
@@ -271,20 +285,10 @@ export async function createPerRequestServer(
     `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
   );
 
-  const instructions =
+  const baseInstructions =
     typeof options.instructions === "function"
       ? await options.instructions(props, env)
       : options.instructions;
-
-  const server = new McpServer(
-    { name: options.name, version: options.version },
-    {
-      // Use Workers-compatible JSON Schema validator instead of Ajv.
-      // Ajv uses new Function() which is blocked in Cloudflare Workers.
-      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
-      instructions,
-    },
-  );
 
   // Resolve site-specific env overlay for multi-site deployments.
   // Uses the site's base URL for API calls instead of the global env URL.
@@ -307,6 +311,14 @@ export async function createPerRequestServer(
     // Token is gone from KV (e.g. wrangler restart, KV expiry, or Umbraco restart
     // invalidated it). Return a degraded server with a single tool that tells the
     // client to disconnect and reconnect to trigger a fresh OAuth flow.
+    // No credentials means no version check either — there's nothing to call.
+    const server = new McpServer(
+      { name: options.name, version: options.version },
+      {
+        jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+        instructions: baseInstructions,
+      },
+    );
     server.registerTool(
       "authentication-expired",
       {
@@ -333,6 +345,69 @@ export async function createPerRequestServer(
     return server;
   }
 
+  // Re-bind to a non-nullable const: TS narrowing from the guard above isn't
+  // preserved for the outer `fetchClient` once it's referenced inside the
+  // nested `checkVersion` closure below.
+  const client = fetchClient;
+
+  // Version check — connected Umbraco major vs. what this server's tools target.
+  //
+  // Deliberately uses a request-scoped `VersionCheckService` instance, never
+  // the SDK's `versionCheckService` singleton (and never
+  // `configureVersionCheckHook()`, which wires that singleton into a
+  // *module-level* pre-execution hook shared by every decorated tool handler
+  // in this Worker isolate). The stdio entry point can rely on the singleton
+  // because one process only ever talks to one Umbraco instance. A Worker
+  // isolate is not so simple: concurrent requests here can belong to
+  // different users, and under `siteRouting`/`multiSite` to entirely
+  // different Umbraco instances. Wiring the global hook would let one
+  // request's mismatch state block (or silently pass) another request's
+  // tool calls. Folding the message into this request's own `instructions`
+  // gives the same "the model/user sees the warning" outcome without that
+  // cross-request leakage — see umbraco/Umbraco-MCP-Base#224.
+  const expectedUmbracoMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+
+  async function checkVersion(): Promise<string | null> {
+    const versionCheckService = new VersionCheckService();
+    await checkUmbracoVersion({
+      mcpVersion: options.version,
+      expectedUmbracoMajor: expectedUmbracoMajor!,
+      client: {
+        getServerInformation: async () => {
+          const info = (await client({
+            url: "/umbraco/management/api/v1/server/information",
+            method: "GET",
+          })) as { version: string };
+          return { version: info.version };
+        },
+      },
+      service: versionCheckService,
+    });
+    return versionCheckService.getMessage();
+  }
+
+  // Run the version check alongside the current-user fetch below — both are
+  // independent reads through the same fetch client, so there's no reason to
+  // serialize the two extra round-trips this function makes per request.
+  const [versionCheckMessage, currentUser] = await Promise.all([
+    expectedUmbracoMajor ? checkVersion() : Promise.resolve(null),
+    fetchCurrentUser(fetchClient),
+  ]);
+
+  const instructions = [baseInstructions, versionCheckMessage]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n") || undefined;
+
+  const server = new McpServer(
+    { name: options.name, version: options.version },
+    {
+      // Use Workers-compatible JSON Schema validator instead of Ajv.
+      // Ajv uses new Function() which is blocked in Cloudflare Workers.
+      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+      instructions,
+    },
+  );
+
   // Set the fetch client as the transport for UmbracoManagementClient.
   // This routes the Orval-generated API client (with named methods like
   // client.getTreeDataTypeRoot()) through the Workers-compatible fetch
@@ -345,9 +420,6 @@ export async function createPerRequestServer(
   if (options.clientFactory) {
     configureApiClient(options.clientFactory);
   }
-
-  // Fetch current user from Umbraco for per-user tool filtering
-  const currentUser = await fetchCurrentUser(fetchClient);
 
   // Load tool filtering config from Worker env
   let workerConfig = loadWorkerConfig(env);

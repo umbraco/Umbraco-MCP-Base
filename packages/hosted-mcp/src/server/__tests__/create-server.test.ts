@@ -1,5 +1,5 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-import { DEFAULT_COLLECTION_CONFIG } from "@umbraco-cms/mcp-server-sdk";
+import { DEFAULT_COLLECTION_CONFIG, versionCheckService } from "@umbraco-cms/mcp-server-sdk";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections, CollectionConfiguration } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { SiteConfig } from "../../types/multi-site.js";
@@ -930,6 +930,176 @@ describe("createPerRequestServer with instructions", () => {
     const server = await createPerRequestServer(baseOptions, mockEnv, mockProps);
 
     expect(getInstructions(server)).toBeUndefined();
+  });
+});
+
+describe("createPerRequestServer — version check", () => {
+  const mockFetch = jest.fn<typeof fetch>();
+  (globalThis as any).fetch = mockFetch;
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function makeMockEnv(overrides: Partial<HostedMcpEnv> = {}): HostedMcpEnv {
+    return {
+      UMBRACO_BASE_URL: "https://example.com",
+      UMBRACO_OAUTH_CLIENT_ID: "test-client",
+      COOKIE_ENCRYPTION_KEY: "0".repeat(64),
+      OAUTH_KV: {
+        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        put: async () => undefined,
+        delete: async () => undefined,
+      },
+      ...overrides,
+    } as unknown as HostedMcpEnv;
+  }
+
+  const mockProps: AuthProps = {
+    userId: "user-1",
+    userName: "Test User",
+    umbracoTokenKey: "token-key",
+  };
+
+  const baseOptions = {
+    name: "test-server",
+    version: "1.0.0",
+    collections: [],
+    modeRegistry: [],
+    allModeNames: [],
+    allSliceNames: [],
+  };
+
+  const getInstructions = (server: { server: unknown }): string | undefined =>
+    (server.server as { _instructions?: string })._instructions;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    versionCheckService.reset();
+    mockFetch.mockImplementation((async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/server/information")) {
+        return jsonResponse({ version: "15.2.0" });
+      }
+      if (url.includes("/user/current")) {
+        return jsonResponse({});
+      }
+      return jsonResponse({}, 404);
+    }) as typeof fetch);
+  });
+
+  it("folds a version-mismatch warning into instructions", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "17" },
+      makeMockEnv(),
+      mockProps,
+    );
+
+    const instructions = getInstructions(server);
+    expect(instructions).toMatch(/Version Mismatch/);
+    expect(instructions).toContain("17");
+    expect(instructions).toContain("15");
+  });
+
+  it("does not add a warning when the major versions match", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "15" },
+      makeMockEnv(),
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toBeUndefined();
+  });
+
+  it("combines the version warning with a configured instructions string", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "17", instructions: "Refer to items by name." },
+      makeMockEnv(),
+      mockProps,
+    );
+
+    const instructions = getInstructions(server);
+    expect(instructions).toContain("Refer to items by name.");
+    expect(instructions).toMatch(/Version Mismatch/);
+  });
+
+  it("skips the check entirely when expectedUmbracoMajor is not set anywhere", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, makeMockEnv(), mockProps);
+
+    expect(getInstructions(server)).toBeUndefined();
+    const calledUrls = mockFetch.mock.calls.map((call) => String(call[0]));
+    expect(calledUrls.some((url) => url.includes("/server/information"))).toBe(false);
+  });
+
+  it("lets env.UMBRACO_EXPECTED_MAJOR override the operator-configured expectedUmbracoMajor", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "15" },
+      makeMockEnv({ UMBRACO_EXPECTED_MAJOR: "17" } as Partial<HostedMcpEnv>),
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toMatch(/Version Mismatch/);
+  });
+
+  it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "17" },
+      makeMockEnv(),
+      mockProps,
+    );
+
+    // A mismatch was detected for this request (target 17, connected 15.2.0),
+    // but it must never reach the SDK's process-wide singleton — that's the
+    // reason createPerRequestServer uses its own `VersionCheckService`
+    // instance instead of `configureVersionCheckHook()` (see the comment in
+    // create-server.ts). A hosted Worker isolate can serve concurrent
+    // requests for different users/sites, and the global hook + singleton
+    // are shared across all of them.
+    expect(versionCheckService.getMessage()).toBeNull();
+    expect(versionCheckService.isBlocked()).toBe(false);
+  });
+
+  it("does not leak version state between concurrent requests for different Umbraco instances", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+
+    mockFetch.mockImplementation((async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/server/information")) {
+        if (url.startsWith("https://site-a.example.com")) return jsonResponse({ version: "15.2.0" });
+        if (url.startsWith("https://site-b.example.com")) return jsonResponse({ version: "17.0.0" });
+      }
+      if (url.includes("/user/current")) return jsonResponse({});
+      return jsonResponse({}, 404);
+    }) as typeof fetch);
+
+    const [serverA, serverB] = await Promise.all([
+      createPerRequestServer(
+        { ...baseOptions, expectedUmbracoMajor: "17" },
+        makeMockEnv({ UMBRACO_BASE_URL: "https://site-a.example.com" }),
+        { ...mockProps, umbracoTokenKey: "token-a" },
+      ),
+      createPerRequestServer(
+        { ...baseOptions, expectedUmbracoMajor: "17" },
+        makeMockEnv({ UMBRACO_BASE_URL: "https://site-b.example.com" }),
+        { ...mockProps, umbracoTokenKey: "token-b" },
+      ),
+    ]);
+
+    // Site A (Umbraco 15) mismatches the target major; site B (Umbraco 17)
+    // matches. Each request's own `instructions` must reflect only its own
+    // site — never the other's — which is exactly what a shared global hook
+    // would get wrong under concurrent, cross-tenant requests.
+    expect(getInstructions(serverA)).toMatch(/Version Mismatch/);
+    expect(getInstructions(serverB)).toBeUndefined();
   });
 });
 

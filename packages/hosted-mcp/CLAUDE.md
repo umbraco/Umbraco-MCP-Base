@@ -34,7 +34,7 @@ E2E tests (`npm run test:e2e`) are run manually — they require a running Umbra
 This package provides **library code** that consumers use in their `worker.ts`. The actual Worker entry point is defined by the consumer because it uses Wrangler virtual modules (`agents/mcp`, `@cloudflare/workers-oauth-provider`) that are only available at wrangler build time.
 
 ### What this package provides:
-- `createPerRequestServer()` - Per-request McpServer factory (with consent choice merging)
+- `createPerRequestServer()` - Per-request McpServer factory (with consent choice merging, and a per-request Umbraco version-mismatch check folded into `instructions` when `expectedUmbracoMajor` is set — see the function's own doc comment for why it avoids the SDK's global `configureVersionCheckHook()`)
 - `createWorkerExport()` - URL rewrite wrapper — serves landing page for browser GET `/`, rewrites MCP requests from `/` to `/mcp` for OAuthProvider
 - `createDefaultHandler()` - Route handler for /authorize, /callback, and multi-site routes
 - `getServerOptions()` - Config extraction helper

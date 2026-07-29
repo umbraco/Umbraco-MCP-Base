@@ -198,6 +198,7 @@ The template includes a Cloudflare Worker entry point for hosted deployment. Key
 - `.dev.vars` — local secrets including `UMBRACO_SERVER_URL` for self-signed cert workaround
 - Umbraco needs the Worker registered as an authorization_code OpenIdDict client via a C# Composer (backoffice UI only supports client_credentials)
 - Registered OAuth client ID: `umbraco-back-office-hosted-mcp` (via `McpOAuthComposer.cs`) — must match `UMBRACO_OAUTH_CLIENT_ID` in `.dev.vars`
+- `expectedUmbracoMajor: UMBRACO_TARGET_MAJOR` in the `options` object wires the version-mismatch check into every request (`env.UMBRACO_EXPECTED_MAJOR` overrides it, mirroring stdio's `UMBRACO_EXPECTED_MAJOR`). Checked fresh per request via a request-scoped `VersionCheckService` and folded into that request's `instructions` — deliberately **not** wired through `configureVersionCheckHook()`, since that hook is a module-level singleton shared by every request in the Worker isolate and would leak one user's/site's mismatch state into another's tool calls (see `createPerRequestServer` in `@umbraco-cms/mcp-hosted`)
 
 Run locally: `npx wrangler dev --port 8787`
 Test with MCP Inspector in Direct mode: `http://localhost:8787/`

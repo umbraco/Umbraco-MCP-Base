@@ -102,6 +102,13 @@ export interface HostedMcpEnv {
   UMBRACO_EXCLUDE_SLICES?: string;
   /** Set to "true" to block write operations */
   UMBRACO_READONLY?: string;
+  /**
+   * Overrides the operator-configured `expectedUmbracoMajor` (normally the
+   * generated `UMBRACO_TARGET_MAJOR`) for the version-mismatch check — set
+   * only when deliberately targeting a different Umbraco major. Mirrors the
+   * stdio entry point's `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major`.
+   */
+  UMBRACO_EXPECTED_MAJOR?: string;
 
   // Multi-site (optional, alternative to per-env vars)
   /** JSON-encoded array of SiteConfig objects for multi-site deployments */
