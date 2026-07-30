@@ -297,7 +297,19 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
-  // Orval helpers
+  // Types
+  type UmbracoFetchAuthConfig,
+  type UmbracoManagementClientOptions,
+  type CustomTransport,
+  type CreateUmbracoFetchClientOptions,
+  type UmbracoFetchClientResult,
+} from "./http/index.js";
+
+/**
+ * @deprecated Import from `@umbraco-cms/mcp-server-sdk/orval` instead. These
+ * root re-exports will be removed in a future release.
+ */
+export {
   orvalImportFixer,
   relaxUntypedArrays,
   collectZodFiles,
@@ -312,10 +324,4 @@ export {
   type OpenApiDocumentPassthrough,
   type UmbracoTargetMajorOptions,
   type TargetMajorSource,
-  // Types
-  type UmbracoFetchAuthConfig,
-  type UmbracoManagementClientOptions,
-  type CustomTransport,
-  type CreateUmbracoFetchClientOptions,
-  type UmbracoFetchClientResult,
-} from "./http/index.js";
+} from "./orval/index.js";

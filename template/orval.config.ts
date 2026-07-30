@@ -9,7 +9,7 @@ import {
   relaxUntypedArrays,
   postProcessZodFiles,
   createUmbracoTargetMajorTransformer,
-} from "@umbraco-cms/mcp-server-sdk";
+} from "@umbraco-cms/mcp-server-sdk/orval";
 
 /**
  * Stamps the Umbraco major version this server targets into a generated

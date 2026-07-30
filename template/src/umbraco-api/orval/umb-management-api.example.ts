@@ -26,7 +26,7 @@ import {
   orvalImportFixer,
   relaxUntypedArrays,
   postProcessZodFiles,
-} from "@umbraco-cms/mcp-server-sdk";
+} from "@umbraco-cms/mcp-server-sdk/orval";
 
 /**
  * OpenAPI spec URL for your Umbraco instance. The path differs by Umbraco version:
