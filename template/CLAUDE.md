@@ -75,7 +75,7 @@ tests/
 | `UMBRACO_EXCLUDE_SLICES` | `--umbraco-exclude-slices` | Exclude these slices |
 | `UMBRACO_READONLY` | `--umbraco-readonly` | Block write operations |
 | `DISABLE_MCP_CHAINING` | `--disable-mcp-chaining` | Disable MCP server chaining |
-| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the spec-derived target major (`UMBRACO_TARGET_MAJOR` in `config/umbraco-target.generated.ts`) for the version-mismatch check/block — set only when deliberately targeting a different Umbraco major |
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated target major (`UMBRACO_TARGET_MAJOR` in `config/umbraco-target.generated.ts`) for the version-mismatch check/block — set only when deliberately targeting a different Umbraco major |
 
 Custom fields defined in `config/server-config.ts`.
 
@@ -165,13 +165,27 @@ Always pass `CAPTURE_RAW_HTTP_RESPONSE` to API methods when using toolkit helper
 export const UMBRACO_TARGET_MAJOR = "17";
 ```
 
-The value is the leading component of the OpenAPI spec's `info.version` — i.e. the Umbraco
-version the generated tools actually target — stamped out by
-`createUmbracoTargetMajorTransformer`, wired as an orval **input transformer** in
-`orval.config.ts` (orval's `afterAllFilesWrite` hook only receives file paths and never sees
-the spec, so a transformer is the only extension point that can read `info.version`). It works
-the same whether `input.target` is the bundled `openapi.yaml` or a live Umbraco spec URL after
-`init`/`discover`.
+It is stamped out by `createUmbracoTargetMajorTransformer`, wired as an orval **input
+transformer** in `orval.config.ts` (orval's `afterAllFilesWrite` hook only receives file paths
+and never sees the spec, so a transformer is the only extension point that can read it — and
+orval awaits transformers, so it can also make an HTTP call).
+
+**The value does not come from the spec.** Every Umbraco Management API spec hard-codes
+`info.version` to the literal string `"Latest"` — `ConfigureUmbracoManagementApiSwaggerGenOptions`
+in Umbraco CMS, on 15.x through 18.x — as does the shared `ConfigureUmbracoSwaggerGenOptions`
+that add-ons (Forms, Commerce, Deploy, …) inherit. There is no version anywhere else in the
+document, and none in the response headers.
+
+Resolution order:
+
+1. `major` passed to the transformer in `orval.config.ts`. Always wins.
+2. **The connected instance** — an authenticated `GET
+   /umbraco/management/api/v1/server/information`, which reports a real semver. Uses
+   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`; `orval.config.ts` imports
+   `src/load-env.ts` so they are read from `.env`.
+3. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
+   `openapi.yaml` reports `17.4.0`).
+4. Otherwise `npm run generate` **fails**.
 
 `src/index.ts` passes `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` to the
 SDK's `checkUmbracoVersion`, where `expectedUmbracoMajor` is a **required** field — so the check
@@ -180,14 +194,17 @@ can't be silently left off.
 Rules:
 - **Never edit the generated file by hand** — regenerate instead. It *is* committed, so a fresh
   scaffold works before anyone runs `generate`.
-- **`info.version` in your spec must be the Umbraco version the API targets**, not your add-on's
-  own release number. A placeholder like `1.0.0` derives major `"1"` and makes every real
-  Umbraco look like a mismatch (Umbraco-MCP-Base#220).
-- If a spec's `info.version` is missing or non-numeric — some real add-ons do this, e.g. Umbraco
-  Forms' Management API reports `"Latest"` — `npm run generate` **warns and leaves the existing
-  generated value untouched** rather than failing the whole build. It only fails outright the
-  first time, before any value has ever been generated (nothing to fall back to).
-- Set `UMBRACO_EXPECTED_MAJOR` only to deliberately point at a different Umbraco major.
+- **There is no "keep the last value" fallback.** A target major that can't be resolved fails the
+  build. The version check *blocks* tool execution on a mismatch, so a stale constant is
+  indistinguishable from the placeholder that shipped Umbraco-MCP-Base#220 — failing loudly is
+  the cheaper outcome.
+- **Generating somewhere the instance is unreachable** (offline CI, air-gapped build) needs an
+  explicit `major` in `orval.config.ts`, or an `info.version` that carries a real Umbraco semver.
+- If the instance lookup fails but the spec *does* carry a version, generation continues with a
+  warning — worth reading, because an add-on's spec reports the add-on's own release, not
+  Umbraco's.
+- Set `UMBRACO_EXPECTED_MAJOR` only to deliberately point at a different Umbraco major at
+  runtime.
 
 ## Hosted Worker (`src/worker.ts`)
 
