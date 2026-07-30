@@ -159,10 +159,12 @@ async function mainFromCli(argv: string[]): Promise<void> {
     { info: { version: specVersion } },
     {
       outputPath,
-      ...(values.major ? { major: values.major as string } : {}),
-      ...(values["constant-name"]
+      // Presence, not truthiness: an empty `--major` must reach the validation
+      // error rather than being silently treated as "not passed".
+      ...(values.major !== undefined ? { major: values.major as string } : {}),
+      ...(values["constant-name"] !== undefined
         ? { constantName: values["constant-name"] as string }
-        : {})
+        : {}),
     }
   );
 
