@@ -25,15 +25,24 @@
  *
  * **Where the major actually comes from**, in order:
  *
- * 1. `options.major` — set explicitly in `orval.config.ts`. Always wins.
- * 2. The connected instance's `GET /umbraco/management/api/v1/server/information`,
+ * 1. The `UMBRACO_GENERATE_TARGET_MAJOR` environment variable. The only knob
+ *    here that needs no code edit — set it inline for a single invocation
+ *    (`UMBRACO_GENERATE_TARGET_MAJOR=18 npm run generate`) to override every
+ *    other source, including `options.major`. Named deliberately unlike the
+ *    runtime `UMBRACO_EXPECTED_MAJOR` override (see `version-check/`): the two
+ *    look similar but apply at different phases (generation vs. runtime), and
+ *    umbraco/Umbraco-MCP-Base#239 is exactly the confusion that similarity
+ *    invites.
+ * 2. `options.major` — set explicitly in `orval.config.ts`. Wins over
+ *    everything below.
+ * 3. The connected instance's `GET /umbraco/management/api/v1/server/information`,
  *    which reports a real semver. That endpoint requires authentication, so it
  *    is used when `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
  *    `UMBRACO_CLIENT_SECRET` are all set — the same values the server itself
  *    runs on. Leave them unset to skip the lookup.
- * 3. The spec's `info.version`, for a committed spec file carrying a real
+ * 4. The spec's `info.version`, for a committed spec file carrying a real
  *    semver (the scaffolding template's sample spec does).
- * 4. Otherwise: **throw**. A missing target major must never degrade into a
+ * 5. Otherwise: **throw**. A missing target major must never degrade into a
  *    stale one — that is #220's failure mode, and the version check now blocks
  *    tool execution on a mismatch.
  *
@@ -94,6 +103,24 @@ export type OpenApiDocumentWithInfo = { info?: { version?: unknown } };
 export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
 
 /**
+ * Environment variable that overrides the target major at generation time,
+ * with the highest precedence of any source — above even the transformer's
+ * `major` option. Unlike `major`, this needs no code edit, so it is the knob
+ * for an offline/air-gapped CI job that must pin a major without patching a
+ * committed `orval.config.ts`.
+ *
+ * Named `..._GENERATE_..._MAJOR` (rather than the shorter
+ * `UMBRACO_TARGET_MAJOR`, which is already the generated constant's name, or
+ * `UMBRACO_TARGET_MAJOR_OVERRIDE`) specifically to avoid confusion with
+ * `UMBRACO_EXPECTED_MAJOR` (see `version-check/`), a similarly-shaped name
+ * that overrides a *different* check at a *different* phase: this one affects
+ * what `npm run generate` stamps into the file; `UMBRACO_EXPECTED_MAJOR`
+ * affects what the running server checks the live instance against. See
+ * umbraco/Umbraco-MCP-Base#239.
+ */
+export const TARGET_MAJOR_ENV_VAR = "UMBRACO_GENERATE_TARGET_MAJOR";
+
+/**
  * The Management API endpoint reporting the running Umbraco's version. This is
  * the only server endpoint that carries it — `server/status` and
  * `server/configuration` are anonymous but version-free, and this one requires
@@ -149,11 +176,13 @@ export interface UmbracoTargetMajorOptions {
    * Declare the target major explicitly instead of discovering it. Use this
    * when generation happens somewhere the instance is unreachable and the spec
    * carries no real version — an offline CI job generating from a committed
-   * `"Latest"` spec, say. Takes precedence over every other source.
+   * `"Latest"` spec, say. Takes precedence over the instance lookup and the
+   * spec, but is itself overridden by the `UMBRACO_GENERATE_TARGET_MAJOR`
+   * environment variable, which needs no code edit and so wins outright.
    *
-   * This is the only override. To point the lookup somewhere else, set
-   * `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` for the
-   * `generate` invocation; to skip it, leave them unset.
+   * To point the instance lookup somewhere else, set `UMBRACO_BASE_URL` /
+   * `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` for the `generate`
+   * invocation; to skip it, leave them unset.
    */
   major?: string;
 }
@@ -197,7 +226,7 @@ const SAFE_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,64}$/;
  */
 const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
   explicit:
-    "Declared explicitly via the transformer's `major` option in `orval.config.ts`.",
+    "Declared explicitly via UMBRACO_GENERATE_TARGET_MAJOR or the transformer's `major` option in `orval.config.ts`.",
   instance:
     "Read from the Umbraco instance this server's tools were generated against, via `GET /umbraco/management/api/v1/server/information`.",
   spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts` points at.",
@@ -373,6 +402,19 @@ async function resolveTargetMajor(
   spec: OpenApiDocumentWithInfo,
   { major: explicitMajor, outputPath, constantName }: ResolveContext
 ): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
+  const envMajor = process.env[TARGET_MAJOR_ENV_VAR]?.trim();
+  if (envMajor) {
+    const major = majorFromVersion(envMajor);
+    if (!major) {
+      throw new Error(
+        `[umbraco-mcp] Invalid ${TARGET_MAJOR_ENV_VAR} value ${JSON.stringify(envMajor)}: ` +
+          `expected a version starting with a number, e.g. "18".`
+      );
+    }
+    // No "reported version" line: nothing reported it, a human declared it.
+    return { major, source: "explicit" };
+  }
+
   if (explicitMajor !== undefined) {
     const major = majorFromVersion(explicitMajor);
     if (!major) {

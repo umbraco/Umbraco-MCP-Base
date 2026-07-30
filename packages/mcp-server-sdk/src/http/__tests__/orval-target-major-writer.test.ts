@@ -21,6 +21,7 @@ import {
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
+  TARGET_MAJOR_ENV_VAR,
   type UmbracoTargetMajorOptions,
 } from "../orval-target-major-writer.js";
 
@@ -193,6 +194,7 @@ describe("createUmbracoTargetMajorTransformer", () => {
     delete process.env.UMBRACO_BASE_URL;
     delete process.env.UMBRACO_CLIENT_ID;
     delete process.env.UMBRACO_CLIENT_SECRET;
+    delete process.env.UMBRACO_GENERATE_TARGET_MAJOR;
   });
 
   afterEach(() => {
@@ -376,6 +378,37 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // Act / Assert
       await expect(transformer({ info: {} })).rejects.toThrow(
         /Invalid `major` option/
+      );
+    });
+  });
+
+  describe("env override", () => {
+    it("wins over the instance, the spec, and the `major` option", async () => {
+      // Arrange - every other source is present and disagrees, so this proves
+      // precedence rather than absence of the alternatives.
+      setCredentials();
+      const fetchMock = mockInstance({ version: "18.0.2" });
+      process.env[TARGET_MAJOR_ENV_VAR] = "15";
+      const transformer = makeTransformer({ major: "16" });
+
+      // Act
+      await transformer({ info: { version: "17.4.0" } });
+
+      // Assert
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        readGenerated()
+      ).toContain('export const UMBRACO_TARGET_MAJOR = "15";');
+    });
+
+    it("rejects a value that is not a version", async () => {
+      // Arrange - catches an env value copied verbatim from the spec.
+      process.env[TARGET_MAJOR_ENV_VAR] = "Latest";
+      const transformer = makeTransformer();
+
+      // Act / Assert
+      await expect(transformer({ info: {} })).rejects.toThrow(
+        /Invalid UMBRACO_GENERATE_TARGET_MAJOR value/
       );
     });
   });

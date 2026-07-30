@@ -178,14 +178,18 @@ document, and none in the response headers.
 
 Resolution order:
 
-1. `major` passed to the transformer in `orval.config.ts`. Always wins.
-2. **The connected instance** — an authenticated `GET
+1. `UMBRACO_GENERATE_TARGET_MAJOR` environment variable. Always wins, even over `major` — the
+   only knob here that needs no code edit, so it is the way to override the target major for an
+   offline/air-gapped CI job without patching a committed `orval.config.ts`
+   (`UMBRACO_GENERATE_TARGET_MAJOR=18 npm run generate`).
+2. `major` passed to the transformer in `orval.config.ts`. Wins over the instance and the spec.
+3. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, which reports a real semver. Uses
    `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`; `orval.config.ts` imports
    `src/load-env.ts` so they are read from `.env`.
-3. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
+4. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
    `openapi.yaml` reports `17.4.0`).
-4. Otherwise `npm run generate` **fails**.
+5. Otherwise `npm run generate` **fails**.
 
 `src/index.ts` passes `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` to the
 SDK's `checkUmbracoVersion`, where `expectedUmbracoMajor` is a **required** field — so the check
@@ -204,6 +208,14 @@ Rules:
   warning — worth reading, because an add-on's spec reports the add-on's own release, not
   Umbraco's.
 - Set `UMBRACO_EXPECTED_MAJOR` only to deliberately point at a different Umbraco major at
+  runtime.
+- Set `UMBRACO_GENERATE_TARGET_MAJOR` to override the target major at **generation** time instead
+  — a different phase from `UMBRACO_EXPECTED_MAJOR` above, and the distinction matters: this one
+  changes what `npm run generate` stamps into the committed constant (read at build/generate
+  time, no running server involved), while `UMBRACO_EXPECTED_MAJOR` changes what the running
+  server checks the live instance against (read at runtime, after tools already exist). Use this
+  one for an offline/air-gapped `generate` job that must pin a major with no `orval.config.ts`
+  edit; use `UMBRACO_EXPECTED_MAJOR` to point an already-generated server at a different major at
   runtime.
 
 ## Hosted Worker (`src/worker.ts`)

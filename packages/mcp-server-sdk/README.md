@@ -537,8 +537,15 @@ that happens to carry a real semver.
 
 Resolution order:
 
-1. **`major`** passed to the transformer. Always wins.
-2. **The connected instance** — an authenticated `GET
+1. **`UMBRACO_GENERATE_TARGET_MAJOR`** environment variable. Always wins, even over `major`. The
+   only knob here that needs no code edit — set it inline for a single invocation
+   (`UMBRACO_GENERATE_TARGET_MAJOR=18 npm run generate`) to override every other source, e.g. for
+   an offline/air-gapped CI job that must not patch a committed `orval.config.ts`. Named
+   deliberately unlike the runtime `UMBRACO_EXPECTED_MAJOR` override: the two look similar but
+   apply at different phases — this one affects what `npm run generate` stamps into the file,
+   `UMBRACO_EXPECTED_MAJOR` affects what the running server checks the live instance against.
+2. **`major`** passed to the transformer. Wins over the instance and the spec.
+3. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
    semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
    `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` — the same values the
@@ -546,8 +553,8 @@ Resolution order:
    `generate` invocation to point elsewhere; leave them unset to skip the lookup. The path is
    the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
    URL, not the `/umbraco/management/api/v1/...` contract.
-3. **The spec's `info.version`**, for a committed spec carrying a real semver.
-4. Otherwise it **throws**, failing `npm run generate`.
+4. **The spec's `info.version`**, for a committed spec carrying a real semver.
+5. Otherwise it **throws**, failing `npm run generate`.
 
 Why an orval **input transformer** rather than a hook: orval's only lifecycle hook,
 `afterAllFilesWrite`, receives written file paths and never sees the spec. An input transformer
@@ -616,11 +623,12 @@ Notes:
   from the committed file alone.
 - The file is only rewritten when the resolved value changes, so a no-op `npm run generate`
   leaves the working tree clean.
-- `major` is the only option beyond `outputPath`/`constantName`. Credentials are environment-only
-  by design: they are the same three variables the server already needs, and a second way to
-  supply them would just be a second way to get them wrong.
+- `major` is the only option beyond `outputPath`/`constantName` — but `UMBRACO_GENERATE_TARGET_MAJOR`
+  sits above it in precedence, so an env override always wins even when `major` is set. Credentials
+  are environment-only by design: they are the same three variables the server already needs, and a
+  second way to supply them would just be a second way to get them wrong.
 - Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
-  `SERVER_INFORMATION_PATH`, `TargetMajorSource`.
+  `SERVER_INFORMATION_PATH`, `TARGET_MAJOR_ENV_VAR`, `TargetMajorSource`.
 
 ### Wiring in scaffolded projects
 
