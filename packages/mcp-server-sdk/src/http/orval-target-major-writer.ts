@@ -28,9 +28,9 @@
  * 1. `options.major` — set explicitly in `orval.config.ts`. Always wins.
  * 2. The connected instance's `GET /umbraco/management/api/v1/server/information`,
  *    which reports a real semver. That endpoint requires authentication, so it
- *    is used when `baseUrl`/`clientId`/`clientSecret` are available (by default
- *    read from `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` /
- *    `UMBRACO_CLIENT_SECRET`, the same values the server itself runs on).
+ *    is used when `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
+ *    `UMBRACO_CLIENT_SECRET` are all set — the same values the server itself
+ *    runs on. Leave them unset to skip the lookup.
  * 3. The spec's `info.version`, for a committed spec file carrying a real
  *    semver (the scaffolding template's sample spec does).
  * 4. Otherwise: **throw**. A missing target major must never degrade into a
@@ -112,28 +112,20 @@ export const SERVER_INFORMATION_PATH =
 export type TargetMajorSource = "explicit" | "instance" | "spec";
 
 /**
- * Credentials for the authenticated `server/information` lookup.
+ * Credentials for the authenticated `server/information` lookup, read from the
+ * environment.
  *
- * **You normally never construct this.** Omit the `instance` option and the
- * transformer reads `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
- * `UMBRACO_CLIENT_SECRET` from the environment — the same three values the MCP
- * server itself runs on, so a project that can run its tools can already
- * resolve its target major with no extra config. (`orval.config.ts` must load
- * `.env` for that to work; the scaffolding template imports `src/load-env.ts`.)
- *
- * Pass this explicitly only when generation needs different credentials from the
- * ones in the environment — e.g. generating against a staging instance, or a
- * build that keeps the two in separate variables.
+ * Deliberately **not** a public option. The three variables are the same ones
+ * the MCP server itself runs on, so a project that can run its tools can
+ * already resolve its target major with no extra config, and anything that
+ * needs to override the result has `major` — a clearer knob than a second set
+ * of credentials. (`orval.config.ts` must load `.env` for these to be visible;
+ * the scaffolding template imports `src/load-env.ts`.)
  */
-export interface UmbracoInstanceCredentials {
-  /** Base URL of the Umbraco instance, e.g. `http://localhost:56472`. */
+interface InstanceCredentials {
   baseUrl: string;
-  /** API user / client id used for the client-credentials token exchange. */
   clientId: string;
-  /** API user / client secret. */
   clientSecret: string;
-  /** Override the token endpoint path. Defaults to the Management API's. */
-  tokenPath?: string;
 }
 
 /** Options for {@link createUmbracoTargetMajorTransformer}. */
@@ -157,15 +149,12 @@ export interface UmbracoTargetMajorOptions {
    * when generation happens somewhere the instance is unreachable and the spec
    * carries no real version — an offline CI job generating from a committed
    * `"Latest"` spec, say. Takes precedence over every other source.
+   *
+   * This is the only override. To point the lookup somewhere else, set
+   * `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` for the
+   * `generate` invocation; to skip it, leave them unset.
    */
   major?: string;
-  /**
-   * Credentials for the `server/information` lookup. Defaults to reading
-   * `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and `UMBRACO_CLIENT_SECRET` from
-   * the environment; pass `false` to skip the lookup entirely (offline
-   * generation from a spec that carries a real semver).
-   */
-  instance?: UmbracoInstanceCredentials | false;
 }
 
 /** Extracts the leading numeric component of a version string. */
@@ -263,7 +252,7 @@ export const ${constantName} = "${major}";
 }
 
 /** Reads instance credentials from the environment, if all three are present. */
-function credentialsFromEnv(): UmbracoInstanceCredentials | null {
+function credentialsFromEnv(): InstanceCredentials | null {
   const baseUrl = process.env.UMBRACO_BASE_URL?.trim();
   const clientId = process.env.UMBRACO_CLIENT_ID?.trim();
   const clientSecret = process.env.UMBRACO_CLIENT_SECRET?.trim();
@@ -280,14 +269,10 @@ function credentialsFromEnv(): UmbracoInstanceCredentials | null {
  * the caller still has the spec to fall back on, then throws if that fails too.
  */
 async function fetchInstanceVersion(
-  credentials: UmbracoInstanceCredentials
+  credentials: InstanceCredentials
 ): Promise<string | null> {
-  const {
-    baseUrl,
-    clientId,
-    clientSecret,
-    tokenPath = DEFAULT_TOKEN_PATH,
-  } = credentials;
+  const { baseUrl, clientId, clientSecret } = credentials;
+  const tokenPath = DEFAULT_TOKEN_PATH;
   const origin = baseUrl.replace(/\/+$/, "");
 
   try {
@@ -353,7 +338,6 @@ async function fetchInstanceVersion(
 async function resolveTargetMajor(
   spec: OpenApiDocumentWithInfo,
   explicitMajor: string | undefined,
-  instance: UmbracoInstanceCredentials | false | undefined,
   outputPath: string,
   constantName: string
 ): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
@@ -369,8 +353,7 @@ async function resolveTargetMajor(
     return { major, source: "explicit" };
   }
 
-  const credentials =
-    instance === false ? null : (instance ?? credentialsFromEnv());
+  const credentials = credentialsFromEnv();
 
   if (credentials) {
     const version = await fetchInstanceVersion(credentials);
@@ -430,8 +413,7 @@ async function resolveTargetMajor(
  * throws, because the version check blocks tool execution on a mismatch and a
  * stale constant is indistinguishable from #220's placeholder.
  *
- * @param options - Output path, optional constant name, explicit major, and
- *   instance credentials
+ * @param options - Output path, optional constant name and explicit major
  * @returns An orval-compatible async input transformer
  * @throws If no source yields a target major
  */
@@ -442,7 +424,6 @@ export function createUmbracoTargetMajorTransformer(
     outputPath,
     constantName = DEFAULT_TARGET_MAJOR_CONSTANT,
     major: explicitMajor,
-    instance,
   } = options;
 
   return async <T extends OpenApiDocumentWithInfo>(spec: T): Promise<T> => {
@@ -451,7 +432,6 @@ export function createUmbracoTargetMajorTransformer(
     const { major, version, source } = await resolveTargetMajor(
       spec,
       explicitMajor,
-      instance,
       outputPath,
       constantName
     );

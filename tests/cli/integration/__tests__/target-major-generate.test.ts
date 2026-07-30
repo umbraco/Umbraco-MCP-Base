@@ -77,6 +77,26 @@ function startStubInstance(
 }
 
 /**
+ * Environment for the orval child process. Credentials are configurable only
+ * via these three variables — there is no options-object equivalent — so the
+ * test drives exactly the path a real `npm run generate` does. Omitting the
+ * base URL is how a project opts out of the lookup.
+ */
+function childEnv(instanceBaseUrl?: string): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.UMBRACO_BASE_URL;
+  delete env.UMBRACO_CLIENT_ID;
+  delete env.UMBRACO_CLIENT_SECRET;
+
+  if (instanceBaseUrl) {
+    env.UMBRACO_BASE_URL = instanceBaseUrl;
+    env.UMBRACO_CLIENT_ID = "id";
+    env.UMBRACO_CLIENT_SECRET = "secret";
+  }
+  return env;
+}
+
+/**
  * Writes a throwaway project (spec + orval config) and runs orval in it.
  * Returns orval's combined output plus the generated constant, if any.
  */
@@ -92,9 +112,6 @@ async function runOrval(options: {
       JSON.stringify(LATEST_SPEC, null, 2)
     );
 
-    const instance = options.instanceBaseUrl
-      ? `{ baseUrl: ${JSON.stringify(options.instanceBaseUrl)}, clientId: "id", clientSecret: "secret" }`
-      : "false";
     const major = options.major ? `major: ${JSON.stringify(options.major)},` : "";
 
     fs.writeFileSync(
@@ -104,7 +121,6 @@ async function runOrval(options: {
 const stamp = createUmbracoTargetMajorTransformer({
   outputPath: "./${GENERATED_PATH}",
   ${major}
-  instance: ${instance},
 });
 
 export default {
@@ -126,7 +142,7 @@ export default {
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
         [ORVAL_BIN, "--config", "./orval.config.mjs"],
-        { cwd: dir }
+        { cwd: dir, env: childEnv(options.instanceBaseUrl) }
       );
       output = stdout + stderr;
     } catch (error) {

@@ -541,11 +541,11 @@ Resolution order:
 2. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
    semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
-   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` by default — the same
-   values the server itself runs on, so the normal case needs no config at all. Pass an
-   explicit `instance` object only to use different credentials from the environment's. The
-   path is the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec
-   document URL, not the `/umbraco/management/api/v1/...` contract.
+   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` — the same values the
+   server itself runs on, so the normal case needs no config at all. Set them for the
+   `generate` invocation to point elsewhere; leave them unset to skip the lookup. The path is
+   the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
+   URL, not the `/umbraco/management/api/v1/...` contract.
 3. **The spec's `info.version`**, for a committed spec carrying a real semver.
 4. Otherwise it **throws**, failing `npm run generate`.
 
@@ -566,8 +566,7 @@ import {
 
 const stampTargetMajor = createUmbracoTargetMajorTransformer({
   outputPath: './src/config/umbraco-target.generated.ts', // resolved against cwd
-  // major: '18',      // pin explicitly when the instance is unreachable
-  // instance: false,  // or skip the lookup and rely on the spec's info.version
+  // major: '18',  // pin explicitly when the instance is unreachable
 });
 
 export default defineConfig({
@@ -617,8 +616,11 @@ Notes:
   from the committed file alone.
 - The file is only rewritten when the resolved value changes, so a no-op `npm run generate`
   leaves the working tree clean.
+- `major` is the only option beyond `outputPath`/`constantName`. Credentials are environment-only
+  by design: they are the same three variables the server already needs, and a second way to
+  supply them would just be a second way to get them wrong.
 - Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
-  `SERVER_INFORMATION_PATH`, `UmbracoInstanceCredentials`, `TargetMajorSource`.
+  `SERVER_INFORMATION_PATH`, `TargetMajorSource`.
 
 ### Wiring in scaffolded projects
 

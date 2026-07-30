@@ -35,7 +35,6 @@ export {
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentWithInfo,
   type UmbracoTargetMajorOptions,
-  type UmbracoInstanceCredentials,
   type TargetMajorSource,
 } from "./orval-target-major-writer.js";
 export {

@@ -21,14 +21,18 @@ import {
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
-  type UmbracoInstanceCredentials,
 } from "../orval-target-major-writer.js";
 
-const CREDENTIALS: UmbracoInstanceCredentials = {
-  baseUrl: "http://localhost:56472",
-  clientId: "umbraco-back-office-mcp",
-  clientSecret: "shhh",
-};
+/**
+ * Configures the instance lookup the only way a consumer can: the three env
+ * vars. There is deliberately no options-object equivalent, so tests drive the
+ * same path production does.
+ */
+function setCredentials(baseUrl = "http://localhost:56472"): void {
+  process.env.UMBRACO_BASE_URL = baseUrl;
+  process.env.UMBRACO_CLIENT_ID = "umbraco-back-office-mcp";
+  process.env.UMBRACO_CLIENT_SECRET = "shhh";
+}
 
 /**
  * Stubs the two-request instance lookup: client-credentials token, then
@@ -197,10 +201,10 @@ describe("createUmbracoTargetMajorTransformer", () => {
     it("reads the major from the connected instance and returns the spec unchanged", async () => {
       // Arrange - the case the spec cannot serve: Umbraco reports "Latest".
       const outputPath = "./src/config/umbraco-target.generated.ts";
+      setCredentials();
       const fetchMock = mockInstance({ version: "18.0.2" });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath,
-        instance: CREDENTIALS,
       });
       const spec = { info: { version: "Latest" }, paths: {} };
 
@@ -221,10 +225,10 @@ describe("createUmbracoTargetMajorTransformer", () => {
     it("prefers the instance over a spec that carries its own version", async () => {
       // Arrange - an add-on's spec reports the add-on's release (e.g. Forms
       // 16.1.0) while the Umbraco it runs on is 18. The instance is the truth.
+      setCredentials();
       mockInstance({ version: "18.0.2" });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: CREDENTIALS,
       });
 
       // Act
@@ -236,33 +240,34 @@ describe("createUmbracoTargetMajorTransformer", () => {
       ).toContain('export const UMBRACO_TARGET_MAJOR = "18";');
     });
 
-    it("reads credentials from the environment by default", async () => {
-      // Arrange - the same three vars the server itself runs on.
+    it("does not attempt the lookup on partial credentials", async () => {
+      // Arrange - a base URL with no client id/secret can't authenticate, and a
+      // half-configured .env must not produce a confusing 401 warning.
       process.env.UMBRACO_BASE_URL = "http://localhost:56472";
-      process.env.UMBRACO_CLIENT_ID = "id";
-      process.env.UMBRACO_CLIENT_SECRET = "secret";
-      mockInstance({ version: "17.4.0" });
+      const fetchMock = mockInstance({ version: "18.0.2" });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
       });
 
       // Act
-      await transformer({ info: { version: "Latest" } });
+      await transformer({ info: { version: "17.4.0" } });
 
-      // Assert
+      // Assert - no request, spec used, no warning.
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(
         fs.readFileSync(path.join(tmpDir, "target.generated.ts"), "utf8")
       ).toContain('export const UMBRACO_TARGET_MAJOR = "17";');
+      expect(warnSpy).not.toHaveBeenCalled();
     });
 
     it("falls back to the spec when the instance is unreachable", async () => {
       // Arrange - offline generation from a committed spec with a real semver.
+      setCredentials();
       globalThis.fetch = jest.fn(async () => {
         throw new Error("ECONNREFUSED");
       }) as unknown as typeof fetch;
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: CREDENTIALS,
       });
 
       // Act
@@ -287,10 +292,10 @@ describe("createUmbracoTargetMajorTransformer", () => {
       ["the instance reports no version", { version: null }],
     ])("warns and falls through when %s", async (_label, options) => {
       // Arrange
+      setCredentials();
       mockInstance(options as { version?: string | null });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: CREDENTIALS,
       });
 
       // Act / Assert - nothing else can supply a major, so it throws rather
@@ -301,12 +306,12 @@ describe("createUmbracoTargetMajorTransformer", () => {
       expect(warnSpy).toHaveBeenCalled();
     });
 
-    it("skips the lookup entirely when instance is false", async () => {
-      // Arrange
+    it("skips the lookup entirely when no credentials are configured", async () => {
+      // Arrange - env deliberately unset (see beforeEach). This is how a
+      // project generating offline from a committed spec opts out.
       const fetchMock = mockInstance({ version: "18.0.2" });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: false,
       });
 
       // Act
@@ -324,11 +329,12 @@ describe("createUmbracoTargetMajorTransformer", () => {
 
   describe("explicit major", () => {
     it("wins over both the instance and the spec", async () => {
-      // Arrange
+      // Arrange - credentials present and the spec versioned, so this proves
+      // precedence rather than absence of the alternatives.
+      setCredentials();
       const fetchMock = mockInstance({ version: "18.0.2" });
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: CREDENTIALS,
         major: "15",
       });
 
@@ -372,7 +378,6 @@ describe("createUmbracoTargetMajorTransformer", () => {
 
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath,
-        instance: false,
       });
 
       // Act / Assert
@@ -388,7 +393,6 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // Arrange
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: false,
       });
 
       // Act
@@ -411,7 +415,6 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // Arrange
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "./deeply/nested/dir/target.generated.ts",
-        instance: false,
       });
 
       // Act
@@ -428,7 +431,6 @@ describe("createUmbracoTargetMajorTransformer", () => {
       const outputPath = "target.generated.ts";
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath,
-        instance: false,
       });
       await transformer({ info: { version: "17.4.0" } });
       const firstMtime = fs.statSync(path.join(tmpDir, outputPath)).mtimeMs;
@@ -444,17 +446,16 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // Arrange - this is the whole point: regenerating against a newer Umbraco
       // updates the constant with no per-repo bump.
       const outputPath = "target.generated.ts";
+      setCredentials();
       mockInstance({ version: "17.4.0" });
       await createUmbracoTargetMajorTransformer({
         outputPath,
-        instance: CREDENTIALS,
       })({ info: { version: "Latest" } });
 
-      // Act
+      // Act - the same project, now pointed at an upgraded instance.
       mockInstance({ version: "18.0.2" });
       await createUmbracoTargetMajorTransformer({
         outputPath,
-        instance: CREDENTIALS,
       })({ info: { version: "Latest" } });
 
       // Assert
@@ -467,7 +468,6 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // Arrange - the template does `stampTargetMajor(relaxUntypedArrays(spec))`.
       const transformer = createUmbracoTargetMajorTransformer({
         outputPath: "target.generated.ts",
-        instance: false,
       });
       const other = <T extends object>(spec: T): T =>
         Object.assign(spec, { touched: true });

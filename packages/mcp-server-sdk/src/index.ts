@@ -312,7 +312,6 @@ export {
   type OpenApiDocumentLike,
   type OpenApiDocumentWithInfo,
   type UmbracoTargetMajorOptions,
-  type UmbracoInstanceCredentials,
   type TargetMajorSource,
   // Types
   type UmbracoFetchAuthConfig,
