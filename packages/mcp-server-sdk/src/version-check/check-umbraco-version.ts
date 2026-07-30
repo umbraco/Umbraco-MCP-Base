@@ -211,8 +211,9 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
  *
  * @example
  * ```typescript
- * // UMBRACO_TARGET_MAJOR comes from the generated constant that the orval
- * // target-major transformer stamps out at generation time.
+ * // UMBRACO_TARGET_MAJOR comes from the generated constant that
+ * // `umbraco-mcp-stamp-target-major` writes at generation time (chained after
+ * // orval in `npm run generate`).
  * import { UMBRACO_TARGET_MAJOR } from "./config/umbraco-target.generated.js";
  *
  * await checkUmbracoVersion({

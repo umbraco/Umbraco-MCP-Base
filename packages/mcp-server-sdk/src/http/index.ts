@@ -34,6 +34,8 @@ export {
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentWithInfo,
+  type SpecLookupResult,
+  type SpecProvider,
   type UmbracoTargetMajorOptions,
   type StampTargetMajorResult,
   type TargetMajorSource,

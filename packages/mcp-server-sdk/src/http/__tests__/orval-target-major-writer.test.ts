@@ -22,6 +22,7 @@ import {
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentWithInfo,
+  type SpecLookupResult,
   type UmbracoTargetMajorOptions,
 } from "../orval-target-major-writer.js";
 
@@ -416,6 +417,127 @@ describe("stampTargetMajor", () => {
       expect(message).toContain(SERVER_INFORMATION_PATH);
       expect(message).toContain("--major 18");
       expect(message).toContain('major: "18"');
+    });
+  });
+
+  describe("lazy spec provider", () => {
+    /**
+     * Stands in for the CLI's `() => readSpecDocument(--spec)`: the thunk that
+     * actually reads a file or fetches a URL. Counting its calls is the point —
+     * it must not run on a resolution that never needed the spec.
+     */
+    const specThunk = (result: SpecLookupResult) =>
+      jest.fn(async () => result) as unknown as (() => Promise<SpecLookupResult>) &
+        jest.Mock;
+
+    it("is not invoked when an explicit major is given", async () => {
+      // Arrange - `--major` always wins, so reading the spec is pure waste (and
+      // for an http(s) `--spec`, a whole extra fetch on every `npm run generate`).
+      const provider = specThunk({ document: { info: { version: "17.4.0" } } });
+
+      // Act
+      const result = await stampTargetMajor(provider, {
+        outputPath: OUTPUT,
+        major: "18",
+      });
+
+      // Assert
+      expect(provider).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ major: "18", source: "explicit" });
+    });
+
+    it("is not invoked when the instance lookup answers", async () => {
+      // Arrange - the normal path for a project generating against its own
+      // running Umbraco.
+      setCredentials();
+      mockInstance({ version: "18.0.2" });
+      const provider = specThunk({ document: { info: { version: "17.4.0" } } });
+
+      // Act
+      const result = await stampTargetMajor(provider, { outputPath: OUTPUT });
+
+      // Assert - no spec read at all, so also no "instance and spec disagree"
+      // warning: buying that warning back would cost the fetch this avoids.
+      expect(provider).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ major: "18", source: "instance" });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("is invoked exactly once when nothing else can supply a major", async () => {
+      // Arrange - the last-resort path the thunk exists for.
+      const provider = specThunk({ document: { info: { version: "17.4.0" } } });
+
+      // Act
+      const result = await stampTargetMajor(provider, { outputPath: OUTPUT });
+
+      // Assert
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ major: "17", source: "spec" });
+      expect(readGenerated()).toContain(
+        'export const UMBRACO_TARGET_MAJOR = "17";'
+      );
+    });
+
+    it("is invoked after the instance lookup fails to answer", async () => {
+      // Arrange - offline generation from a committed spec: the instance is
+      // configured but unreachable, so the fallback still has to run.
+      setCredentials();
+      globalThis.fetch = jest.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }) as unknown as typeof fetch;
+      const provider = specThunk({ document: { info: { version: "17.4.0" } } });
+
+      // Act
+      const result = await stampTargetMajor(provider, { outputPath: OUTPUT });
+
+      // Assert
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ major: "17", source: "spec" });
+    });
+
+    it("names the real reason the spec failed in the thrown error", async () => {
+      // Arrange - a typo'd `--spec`, a 404, expired auth or corrupt YAML. The
+      // reason is warned about at the point of failure, but a truncated CI log
+      // or an error tracker that keeps only the throw would lose it.
+      const provider = specThunk({
+        error: "ENOENT: no such file or directory, open './openapi.yaml'",
+        source: "./openapi.yaml",
+      });
+
+      // Act
+      let message = "";
+      try {
+        await stampTargetMajor(provider, { outputPath: OUTPUT });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+
+      // Assert - the actual fault, not the boilerplate about Umbraco's "Latest".
+      expect(message).toContain("Cannot determine the target Umbraco major");
+      expect(message).toContain("./openapi.yaml could not be read");
+      expect(message).toContain("ENOENT");
+      expect(message).not.toContain('hard-codes this to "Latest"');
+    });
+
+    it("still explains the 'Latest' quirk when the spec read fine", async () => {
+      // Arrange - the other half of the distinction: nothing failed, the spec
+      // simply reports what every Umbraco-served spec reports.
+      const provider = specThunk({
+        document: { info: { version: "Latest" } },
+        source: "./openapi.yaml",
+      });
+
+      // Act
+      let message = "";
+      try {
+        await stampTargetMajor(provider, { outputPath: OUTPUT });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+
+      // Assert
+      expect(message).toContain('hard-codes this to "Latest"');
+      expect(message).not.toContain("could not be read");
     });
   });
 

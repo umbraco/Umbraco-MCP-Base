@@ -340,6 +340,129 @@ describe("configureOpenApi", () => {
       );
     }).toThrow("orval.config.ts not found");
   });
+
+  // ── package.json `generate --spec` ────────────────────────────────────────
+  //
+  // The template's `generate` script chains `umbraco-mcp-stamp-target-major`
+  // after orval and passes it `--spec`, the *last-resort* source for the target
+  // Umbraco major. If that argument keeps pointing at the bundled sample spec
+  // (a real `info.version: 17.4.0`) after orval has been repointed at a live
+  // instance, then a project whose credentials break silently stamps "17"
+  // beside tools generated from an 18 instance — umbraco/Umbraco-MCP-Base#220
+  // all over again. Repointed at the live URL, the fallback fetches Umbraco's
+  // hard-coded `"Latest"`, derives nothing, and generation fails loudly.
+
+  const readGenerateScript = (): string =>
+    JSON.parse(mockFs.files.get(path.resolve(PROJECT_DIR, "package.json"))!)
+      .scripts.generate;
+
+  it("should repoint the generate script's --spec at the same URL", () => {
+    const testUrl =
+      "https://localhost:44391/umbraco/swagger/commerce/swagger.json";
+
+    // The fixture ships the bundled sample spec.
+    expect(readGenerateScript()).toContain(
+      "--spec ./src/umbraco-api/api/openapi.yaml"
+    );
+
+    configureOpenApi(PROJECT_DIR, testUrl);
+
+    // Quoted: this is a shell argument to a real bin.
+    expect(readGenerateScript()).toContain(`--spec "${testUrl}"`);
+    expect(readGenerateScript()).not.toContain("openapi.yaml");
+  });
+
+  it("should leave the rest of the generate script untouched", () => {
+    const before = readGenerateScript();
+
+    configureOpenApi(
+      PROJECT_DIR,
+      "https://localhost:44391/umbraco/openapi/management.json"
+    );
+
+    const after = readGenerateScript();
+    expect(after).toContain("orval --config orval.config.ts");
+    expect(after).toContain(
+      "--output ./src/config/umbraco-target.generated.ts"
+    );
+    expect(after).not.toBe(before);
+  });
+
+  it("should be idempotent across repeated runs", () => {
+    const first = "https://localhost:44391/umbraco/openapi/management.json";
+    const second = "https://localhost:44392/umbraco/openapi/management.json";
+
+    configureOpenApi(PROJECT_DIR, first);
+    // A second init/discover has to match its own previous (quoted) output.
+    configureOpenApi(PROJECT_DIR, second);
+
+    expect(readGenerateScript()).toContain(`--spec "${second}"`);
+    expect(readGenerateScript()).not.toContain(first);
+  });
+
+  it("should no-op when the generate script has no --spec argument", () => {
+    // A customized or older template. Not an error: the orval rewrite is the
+    // contract, and this is a best-effort side effect.
+    const pkgPath = path.resolve(PROJECT_DIR, "package.json");
+    const pkg = JSON.parse(mockFs.files.get(pkgPath)!);
+    pkg.scripts.generate = "orval --config orval.config.ts";
+    mockFs.files.set(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+
+    const result = configureOpenApi(
+      PROJECT_DIR,
+      "https://localhost:44391/umbraco/openapi/management.json"
+    );
+
+    // orval.config.ts still updated — the return value is only about that file.
+    expect(result).toBe(true);
+    expect(readGenerateScript()).toBe("orval --config orval.config.ts");
+  });
+
+  it.each([
+    [
+      "package.json is missing",
+      () => mockFs.files.delete(path.resolve(PROJECT_DIR, "package.json")),
+    ],
+    [
+      "package.json is malformed",
+      () =>
+        mockFs.files.set(
+          path.resolve(PROJECT_DIR, "package.json"),
+          "{ not json"
+        ),
+    ],
+    [
+      "package.json has no scripts block",
+      () =>
+        mockFs.files.set(
+          path.resolve(PROJECT_DIR, "package.json"),
+          JSON.stringify({ name: "x" }, null, 2)
+        ),
+    ],
+  ])("should not fail the whole flow when %s", (_label, arrange) => {
+    arrange();
+    const testUrl =
+      "https://localhost:44391/umbraco/openapi/management.json";
+
+    // orval.config.ts is still repointed and the caller still gets its answer.
+    expect(configureOpenApi(PROJECT_DIR, testUrl)).toBe(true);
+    expect(
+      mockFs.files.get(path.resolve(PROJECT_DIR, "orval.config.ts"))
+    ).toContain(testUrl);
+  });
+
+  it.each([
+    ['a double quote', 'https://localhost:44391/a";id;"'],
+    ["a shell expansion", "https://localhost:44391/$(id)"],
+    ["a backtick", "https://localhost:44391/`id`"],
+  ])("should reject a URL containing %s", (_label, url) => {
+    // The URL is written into a double-quoted TypeScript string literal and a
+    // double-quoted shell argument. A real spec URL percent-encodes all of
+    // these, so rejecting is safe — and loud beats silently escaping.
+    expect(() => configureOpenApi(PROJECT_DIR, url)).toThrow(
+      "Invalid URL format"
+    );
+  });
 });
 
 // ── detectBaseUrl priority ─────────────────────────────────────────────────

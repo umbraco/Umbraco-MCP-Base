@@ -568,7 +568,7 @@ extension point:
 |------|---------|
 | `--output <path>` | **Required.** Where to write the generated constant, resolved against the directory `generate` runs in. |
 | `--major <version>` | Declare the target major explicitly. Always wins — use it when the instance is unreachable and the spec carries no real semver (an offline CI job, say). |
-| `--spec <path-or-url>` | The spec to read `info.version` from as a last resort. A local path is read off disk; an `http(s)` URL is fetched. Parsed as YAML either way (YAML 1.2 is a JSON superset, so `.json` and `.yaml` need no special-casing). Omit it and there is simply no spec fallback. |
+| `--spec <path-or-url>` | The spec to read `info.version` from as a last resort. A local path is read off disk; an `http(s)` URL is fetched — but **only if the fallback is reached**: a run answered by `--major` or the instance never opens the file or makes the request. Parsed as YAML either way (YAML 1.2 is a JSON superset, so `.json` and `.yaml` need no special-casing). Omit it and there is simply no spec fallback. |
 | `--constant-name <name>` | Name of the exported constant. Defaults to `UMBRACO_TARGET_MAJOR`. |
 
 The bin loads `.env` itself, so `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` /
@@ -600,6 +600,17 @@ const { major, source, wrote } = await stampTargetMajor(
 );
 ```
 
+Pass a **thunk** instead of a document when obtaining the spec costs something — it is
+invoked only if the fallback is actually reached, and can report *why* it failed so the
+"cannot determine" error names the real cause rather than assuming Umbraco's usual `"Latest"`:
+
+```typescript
+const result = await stampTargetMajor(
+  async () => ({ document: await loadSpecSomehow(), source: './openapi.yaml' }),
+  { outputPath: './src/config/umbraco-target.generated.ts' }
+);
+```
+
 Notes:
 
 - **Commit the generated file.** A freshly scaffolded project must have a working value before
@@ -625,10 +636,16 @@ Notes:
   supply them would just be a second way to get them wrong.
 - An unreadable or unparseable `--spec` **warns** rather than failing: it is only the last-resort
   source, so it must not fail a run the instance can still answer. If nothing else can supply a
-  major either, the "cannot determine" error follows.
+  major either, the "cannot determine" error follows — and it names the actual reason the spec
+  failed, rather than assuming it was read fine and merely reported `"Latest"`.
+- **Point `--spec` at the same target as orval.** `create-umbraco-mcp-server`'s `init` and
+  `discover` repoint both together for exactly this reason. A `--spec` left on a committed
+  sample spec that carries a real semver, while orval generates against a live instance, is a
+  wrong-value-waiting-to-happen: the moment credentials break, the stamp quietly reports the
+  sample's major instead of failing.
 - Related exports: `stampTargetMajor`, `extractSpecMajor`, `renderTargetMajorModule`,
   `DEFAULT_TARGET_MAJOR_CONSTANT`, `SERVER_INFORMATION_PATH`, `TargetMajorSource`,
-  `StampTargetMajorResult`.
+  `StampTargetMajorResult`, `SpecProvider`, `SpecLookupResult`.
 
 ### Wiring in scaffolded projects
 

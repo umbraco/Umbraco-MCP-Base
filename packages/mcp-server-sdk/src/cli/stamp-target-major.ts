@@ -24,38 +24,68 @@
  * debugged without a full codegen, and does not rest on orval `await`ing a
  * third-party hook.
  *
- * Library: {@link readSpecInfo} is exported so the spec-reading half is
- * testable on its own; everything else is re-exported from the writer module.
+ * The `--spec` fallback is resolved **lazily**: it is handed to
+ * {@link stampTargetMajor} as a thunk, so a run that `--major` or the instance
+ * lookup can answer never reads the file or fetches the URL at all.
+ *
+ * Library: {@link readSpecDocument} (and its version-only view
+ * {@link readSpecInfo}) is exported so the spec-reading half is testable on its
+ * own; everything else is re-exported from the writer module.
  */
 import { stampTargetMajor } from "../http/orval-target-major-writer.js";
-import type { OpenApiDocumentWithInfo } from "../http/orval-target-major-writer.js";
+import type {
+  OpenApiDocumentWithInfo,
+  SpecLookupResult,
+} from "../http/orval-target-major-writer.js";
 
 /** How long to wait on a remote `--spec` before giving up on the fallback. */
 const SPEC_FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * Reads the `info.version` of an OpenAPI spec, from a local path or an
- * `http(s)` URL.
+ * The message of a caught value, whatever it turns out to be.
+ *
+ * Duck-typed rather than `instanceof Error`, which is per-realm: a rejection
+ * originating in another realm (a Jest VM context, a `vm` module sandbox) is a
+ * perfectly good `Error` whose `instanceof` check is `false`, and reporting
+ * "unknown error" for an `ENOENT` that arrived with a full message is exactly
+ * the kind of lost detail this file otherwise works to preserve.
+ */
+function messageOf(error: unknown): string {
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message === "string" && message) return message;
+  const rendered = String(error);
+  return rendered === "[object Object]" ? "unknown error" : rendered;
+}
+
+/**
+ * Reads and parses an OpenAPI spec, from a local path or an `http(s)` URL.
  *
  * Parsed with YAML in both cases: YAML 1.2 is a superset of JSON, so one code
  * path covers `.json`, `.yaml` and `.yml` — and a spec served from a URL whose
  * extension says nothing about its content.
  *
- * Returns `undefined` rather than throwing when the spec cannot be read or
- * parsed, mirroring the instance lookup: the spec is only the *last-resort*
- * source, so a missing or malformed one must not fail a run the instance can
- * still answer. If nothing else can supply a major either, the caller throws
- * with the full "cannot determine" error.
+ * Reports failure as a {@link SpecLookupResult} `error` rather than throwing,
+ * mirroring the instance lookup: the spec is only the *last-resort* source, so
+ * a missing or malformed one must not fail a run the instance can still answer.
+ * The reason is both warned about here and carried back to the caller, so that
+ * if nothing else can supply a major either, the thrown "cannot determine"
+ * error can say *why* the spec did not help instead of assuming it merely
+ * reported Umbraco's usual `"Latest"`.
  *
  * @param source - Local file path (resolved against `process.cwd()`) or URL
- * @returns The spec's `info.version`, or `undefined` if it cannot be read
+ * @returns The parsed document, or the reason it could not be read
  */
-export async function readSpecInfo(
+export async function readSpecDocument(
   source: string
-): Promise<string | undefined> {
+): Promise<SpecLookupResult> {
   const { readFileSync } = await import("node:fs");
   const { resolve } = await import("node:path");
   const YAML = await import("yaml");
+
+  const failed = (message: string): SpecLookupResult => {
+    console.warn(message);
+    return { error: message.replace(/^\[umbraco-mcp\] /, ""), source };
+  };
 
   let contents: string;
   try {
@@ -64,31 +94,47 @@ export async function readSpecInfo(
         signal: AbortSignal.timeout(SPEC_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) {
-        console.warn(
+        return failed(
           `[umbraco-mcp] Could not fetch the spec at ${source} ` +
             `(${response.status} ${response.statusText}).`
         );
-        return undefined;
       }
       contents = await response.text();
     } else {
       contents = readFileSync(resolve(process.cwd(), source), "utf8");
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown error";
-    console.warn(`[umbraco-mcp] Could not read the spec ${source}: ${reason}.`);
-    return undefined;
+    const reason = messageOf(error);
+    return failed(`[umbraco-mcp] Could not read the spec ${source}: ${reason}.`);
   }
 
   try {
     const parsed = YAML.parse(contents) as OpenApiDocumentWithInfo | null;
-    const version = parsed?.info?.version;
-    return typeof version === "string" ? version : undefined;
+    return { document: parsed ?? {}, source };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown error";
-    console.warn(`[umbraco-mcp] Could not parse the spec ${source}: ${reason}.`);
-    return undefined;
+    const reason = messageOf(error);
+    return failed(
+      `[umbraco-mcp] Could not parse the spec ${source}: ${reason}.`
+    );
   }
+}
+
+/**
+ * The `info.version` of the spec at `source`, or `undefined` when it cannot be
+ * read, parsed, or does not carry one as a string.
+ *
+ * A thin view over {@link readSpecDocument} for callers that only want the
+ * version string. The stamp itself uses the fuller result, because the *reason*
+ * a spec produced nothing changes the advice in the final error.
+ *
+ * @param source - Local file path (resolved against `process.cwd()`) or URL
+ */
+export async function readSpecInfo(
+  source: string
+): Promise<string | undefined> {
+  const { document } = await readSpecDocument(source);
+  const version = document?.info?.version;
+  return typeof version === "string" ? version : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,10 +169,24 @@ async function mainFromCli(argv: string[]): Promise<void> {
   try {
     const { config: loadEnv } = await import("dotenv");
     loadEnv({ quiet: true });
-  } catch {
-    console.warn(
-      "[umbraco-mcp] dotenv is not installed; reading credentials from the shell environment only."
-    );
+  } catch (error) {
+    // Only a genuinely absent module is "not installed". Anything else — an
+    // unreadable .env, a half-installed node_modules, an ESM/CJS interop
+    // failure — must report its own reason, or someone debugging why their
+    // credentials are ignored is sent to check a dependency that is right
+    // there.
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") {
+      console.warn(
+        "[umbraco-mcp] dotenv is not installed; reading credentials from the shell environment only."
+      );
+    } else {
+      const reason = messageOf(error);
+      console.warn(
+        `[umbraco-mcp] Could not load .env via dotenv: ${reason}. ` +
+          "Reading credentials from the shell environment only."
+      );
+    }
   }
 
   const { values } = parseArgs({
@@ -152,11 +212,15 @@ async function mainFromCli(argv: string[]): Promise<void> {
     throw new Error("[umbraco-mcp] --output is required.");
   }
 
+  // Passed as a thunk, not a value: `--spec` is the last-resort source, so on
+  // every run that `--major` or a working instance lookup can answer, the file
+  // is never read and the URL never fetched. Resolving it eagerly cost an extra
+  // HTTP round-trip per `npm run generate` and warned about a spec nothing
+  // consulted.
   const specSource = values.spec as string | undefined;
-  const specVersion = specSource ? await readSpecInfo(specSource) : undefined;
 
   const result = await stampTargetMajor(
-    { info: { version: specVersion } },
+    specSource ? () => readSpecDocument(specSource) : {},
     {
       outputPath,
       // Presence, not truthiness: an empty `--major` must reach the validation

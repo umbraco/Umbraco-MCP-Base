@@ -311,6 +311,8 @@ export {
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentLike,
   type OpenApiDocumentWithInfo,
+  type SpecLookupResult,
+  type SpecProvider,
   type UmbracoTargetMajorOptions,
   type StampTargetMajorResult,
   type TargetMajorSource,

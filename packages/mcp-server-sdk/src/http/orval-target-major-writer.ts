@@ -74,6 +74,42 @@ import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
  */
 export type OpenApiDocumentWithInfo = { info?: { version?: unknown } };
 
+/**
+ * What a lazy spec provider hands back: the parsed document, or the reason it
+ * could not be produced.
+ *
+ * The reason matters because it changes the advice in the final error. "Your
+ * `--spec` path is a typo / 404s / is corrupt YAML" and "the spec was read fine
+ * but every Umbraco spec says `Latest`" are different problems with different
+ * fixes, and only one of them is worth explaining Umbraco's `"Latest"` quirk
+ * for.
+ */
+export interface SpecLookupResult {
+  /** The parsed document, when it could be read. */
+  document?: OpenApiDocumentWithInfo;
+  /** Why the spec could not be read, fetched or parsed. */
+  error?: string;
+  /** What the caller was pointed at, echoed into the error (`--spec`'s value). */
+  source?: string;
+}
+
+/**
+ * The spec argument of {@link stampTargetMajor}.
+ *
+ * Either a document the caller already has — the library case, and how the unit
+ * tests drive it — or a **thunk**, invoked only if the spec is actually needed.
+ *
+ * The thunk exists because the spec is the last-resort source: an explicit
+ * `major` or a working instance lookup answers first, and in those runs reading
+ * the spec is pure waste (a whole extra HTTP fetch for an `http(s)` `--spec`)
+ * that can also emit warnings about a file nothing consulted. A thunk is
+ * therefore never invoked on those paths — including for the "instance and spec
+ * disagree" warning, which only fires for an eagerly-supplied document.
+ */
+export type SpecProvider =
+  | OpenApiDocumentWithInfo
+  | (() => Promise<SpecLookupResult>);
+
 /** Default name of the exported constant written to the generated file. */
 export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
 
@@ -352,9 +388,17 @@ interface ResolveContext {
   constantName: string;
 }
 
+/** Trimmed `info.version`, when the document carries one as a string. */
+function versionFromSpec(
+  spec: OpenApiDocumentWithInfo | undefined
+): string | undefined {
+  const version = spec?.info?.version;
+  return typeof version === "string" ? version.trim() : undefined;
+}
+
 /** Resolves the target major from the first source that can supply one. */
 async function resolveTargetMajor(
-  spec: OpenApiDocumentWithInfo,
+  spec: SpecProvider,
   { major: explicitMajor, outputPath, constantName }: ResolveContext
 ): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
   if (explicitMajor !== undefined) {
@@ -366,15 +410,15 @@ async function resolveTargetMajor(
       );
     }
     // No "reported version" line: nothing reported it, a human declared it.
+    // Reached without ever touching the spec — a lazy provider stays uncalled.
     return { major, source: "explicit" };
   }
 
+  // Only a document the caller already handed over is free to inspect here. A
+  // lazy provider is deliberately left uninvoked until the instance lookup has
+  // had its turn — see {@link SpecProvider}.
+  const eagerSpec = typeof spec === "function" ? undefined : (spec ?? {});
   const credentials = credentialsFromEnv();
-  const specVersion =
-    typeof spec?.info?.version === "string"
-      ? spec.info.version.trim()
-      : undefined;
-  const specMajor = extractSpecMajor(spec);
 
   if (credentials) {
     const version = await fetchInstanceVersion(credentials);
@@ -385,11 +429,12 @@ async function resolveTargetMajor(
       // UMBRACO_BASE_URL looks like: stamping a major the generated tools were
       // not built from. Silence here would be the same class of bug the whole
       // mechanism exists to prevent, so say it out loud.
-      if (specMajor && specMajor !== major) {
+      const eagerSpecMajor = eagerSpec ? extractSpecMajor(eagerSpec) : null;
+      if (eagerSpecMajor && eagerSpecMajor !== major) {
         console.warn(
           `[umbraco-mcp] ${constantName} resolved to "${major}" from the instance at ` +
-            `${normalizeBaseUrl(credentials.baseUrl)}, but the spec reports "${specVersion}" ` +
-            `(major "${specMajor}"). Using the instance. If these tools were generated from that ` +
+            `${normalizeBaseUrl(credentials.baseUrl)}, but the spec reports "${versionFromSpec(eagerSpec)}" ` +
+            `(major "${eagerSpecMajor}"). Using the instance. If these tools were generated from that ` +
             `spec rather than that instance, one of the two is wrong — check UMBRACO_BASE_URL, or ` +
             `pin the value with the \`major\` option (\`--major\`).`
         );
@@ -397,6 +442,13 @@ async function resolveTargetMajor(
       return { major, version, source: "instance" };
     }
   }
+
+  // Last resort, and only now: read the spec. For a lazy provider this is the
+  // one place the file is read or the URL fetched.
+  const lookup: SpecLookupResult =
+    typeof spec === "function" ? await spec() : { document: eagerSpec };
+  const specVersion = versionFromSpec(lookup.document);
+  const specMajor = lookup.document ? extractSpecMajor(lookup.document) : null;
 
   if (specMajor) {
     if (credentials) {
@@ -411,10 +463,20 @@ async function resolveTargetMajor(
     return { major: specMajor, version: specVersion, source: "spec" };
   }
 
+  // Distinguish "the spec was read and has no usable version" (Umbraco's
+  // `"Latest"`, the common case) from "the spec could not be read at all" (a
+  // typo'd path, a 404, expired auth, corrupt YAML). Only the first is worth
+  // explaining the `"Latest"` quirk for; the second needs its own reason, which
+  // would otherwise survive only in a `console.warn` a truncated CI log or an
+  // error tracker may well have dropped.
+  const specLine = lookup.error
+    ? `  - The spec${lookup.source ? ` at ${lookup.source}` : ""} could not be read: ${lookup.error}\n`
+    : `  - The spec's "info.version" is ${JSON.stringify(lookup.document?.info?.version)}. Every Umbraco-served ` +
+      `spec hard-codes this to "Latest", so it is usually unusable.\n`;
+
   throw new Error(
     `[umbraco-mcp] Cannot determine the target Umbraco major for ${outputPath}.\n` +
-      `  - The spec's "info.version" is ${JSON.stringify(spec?.info?.version)}. Every Umbraco-served ` +
-      `spec hard-codes this to "Latest", so it is usually unusable.\n` +
+      specLine +
       (credentials
         ? `  - The instance lookup via ${SERVER_INFORMATION_PATH} returned no version (see the warning above).\n`
         : `  - No instance lookup was attempted: set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and ` +
@@ -450,7 +512,9 @@ export interface StampTargetMajorResult {
  *
  * The spec argument is only the **last-resort** source, so a caller with no
  * spec at all can pass `{}` — the instance lookup and the explicit `major`
- * option both work without it.
+ * option both work without it. A caller whose spec is expensive to obtain (the
+ * CLI, which reads a file or fetches a URL) passes a thunk instead, and it is
+ * invoked only on the runs that actually need it. See {@link SpecProvider}.
  *
  * The file is only rewritten when its contents change, so repeated
  * `npm run generate` runs leave the working tree clean.
@@ -460,13 +524,14 @@ export interface StampTargetMajorResult {
  * throws, because the version check blocks tool execution on a mismatch and a
  * stale constant is indistinguishable from #220's placeholder.
  *
- * @param spec - Anything carrying an `info.version`; `{}` when there is no spec
+ * @param spec - Anything carrying an `info.version`, `{}` when there is no
+ *   spec, or a thunk resolving to one (invoked only if the spec is needed)
  * @param options - Output path, optional constant name and explicit major
  * @returns The resolved major, its provenance, and whether the file changed
  * @throws If no source yields a target major
  */
 export async function stampTargetMajor(
-  spec: OpenApiDocumentWithInfo,
+  spec: SpecProvider,
   options: UmbracoTargetMajorOptions
 ): Promise<StampTargetMajorResult> {
   const {
