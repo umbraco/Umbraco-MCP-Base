@@ -79,7 +79,8 @@
 
 import fs from "fs";
 import path from "path";
-import { DEFAULT_TOKEN_PATH } from "./umbraco-fetch-client.js";
+import { normalizeBaseUrl } from "../helpers/url.js";
+import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
 
 /**
  * Minimal shape this transformer needs from an OpenAPI document — just
@@ -189,14 +190,36 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
  */
 const SAFE_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,64}$/;
 
-/** Human-readable provenance for each source, used in the doc comment. */
+/**
+ * Human-readable provenance for each source. Plain prose — {@link asJsDocBody}
+ * adds the comment continuations, so rewording these cannot break the shape of
+ * the generated file.
+ */
 const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
   explicit:
     "Declared explicitly via the transformer's `major` option in `orval.config.ts`.",
   instance:
-    "Read from the Umbraco instance this server's tools were generated against,\n * via `GET /umbraco/management/api/v1/server/information`.",
-  spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts`\n * points at.",
+    "Read from the Umbraco instance this server's tools were generated against, via `GET /umbraco/management/api/v1/server/information`.",
+  spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts` points at.",
 };
+
+/** Wraps prose to ~76 columns and prefixes continuations with ` * `. */
+function asJsDocBody(text: string): string {
+  const lines: string[] = [];
+  let line = "";
+
+  for (const word of text.split(/\s+/)) {
+    if (line && `${line} ${word}`.length > 74) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+
+  return lines.join("\n * ");
+}
 
 /**
  * Renders the contents of the generated constant module.
@@ -211,18 +234,19 @@ const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
  * @param major - The Umbraco major version (e.g. `"17"`)
  * @param constantName - Name of the exported constant. Must be a valid
  *   identifier; anything else throws rather than emitting broken/unsafe code.
- * @param version - The full version string the major was derived from, included
- *   in the doc comment for traceability when it is safe to echo
- * @param source - Where the value came from. Recorded so a wrong value is
- *   diagnosable from the committed file alone.
+ * @param provenance - Where the value came from, and the version string it was
+ *   derived from. Recorded so a wrong value is diagnosable from the committed
+ *   file alone. Grouped into one object so adding a field later needs no new
+ *   positional parameter (and no `undefined` padding at call sites).
  * @throws If `constantName` is not a valid JavaScript identifier
  */
 export function renderTargetMajorModule(
   major: string,
   constantName: string = DEFAULT_TARGET_MAJOR_CONSTANT,
-  version?: string,
-  source: TargetMajorSource = "spec"
+  provenance: { version?: string; source?: TargetMajorSource } = {}
 ): string {
+  const { version, source = "spec" } = provenance;
+
   if (!IDENTIFIER_PATTERN.test(constantName)) {
     throw new Error(
       `[umbraco-mcp] Invalid constantName ${JSON.stringify(constantName)}: ` +
@@ -230,7 +254,7 @@ export function renderTargetMajorModule(
     );
   }
 
-  const derivedFrom =
+  const reportedVersionLine =
     version && SAFE_VERSION_PATTERN.test(version)
       ? `\n *\n * Reported version: ${version}.`
       : "";
@@ -240,7 +264,7 @@ export function renderTargetMajorModule(
 /**
  * The Umbraco major version this server's generated tools target.
  *
- * ${SOURCE_DESCRIPTIONS[source]}${derivedFrom}
+ * ${asJsDocBody(SOURCE_DESCRIPTIONS[source])}${reportedVersionLine}
  *
  * Passed to \`checkUmbracoVersion\` at startup, which blocks tool execution when
  * the connected instance's major differs. Set \`UMBRACO_EXPECTED_MAJOR\` (or
@@ -262,50 +286,49 @@ function credentialsFromEnv(): InstanceCredentials | null {
 }
 
 /**
+ * How long to wait on the instance before giving up and falling back.
+ *
+ * Node's fetch has no overall deadline — undici's `headersTimeout`/`bodyTimeout`
+ * default to 300s each — so a host that accepts the connection then goes quiet
+ * (an Umbraco still booting, a stale `UMBRACO_BASE_URL` pointing at something
+ * else on localhost) would stall `npm run generate` for minutes before
+ * producing the same warning it produces immediately here.
+ */
+const INSTANCE_LOOKUP_TIMEOUT_MS = 5_000;
+
+/**
  * Asks a running Umbraco which version it is.
  *
- * Returns `null` rather than throwing on any failure — an unreachable instance
- * at generation time is normal (offline build, spec committed to the repo), and
- * the caller still has the spec to fall back on, then throws if that fails too.
+ * Returns `undefined` rather than throwing on any failure — an unreachable
+ * instance at generation time is normal (offline build, spec committed to the
+ * repo), and the caller still has the spec to fall back on, then throws if that
+ * fails too. Each failure warns with its own reason: which of the two requests
+ * failed, and why, is exactly what someone debugging a wrong constant needs.
  */
 async function fetchInstanceVersion(
   credentials: InstanceCredentials
-): Promise<string | null> {
+): Promise<string | undefined> {
   const { baseUrl, clientId, clientSecret } = credentials;
-  const tokenPath = DEFAULT_TOKEN_PATH;
-  const origin = baseUrl.replace(/\/+$/, "");
+  const origin = normalizeBaseUrl(baseUrl);
 
   try {
-    const tokenResponse = await fetch(`${origin}${tokenPath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: "client_credentials",
-      }).toString(),
+    const { accessToken } = await requestClientCredentialsToken({
+      baseUrl: origin,
+      clientId,
+      clientSecret,
+      signal: AbortSignal.timeout(INSTANCE_LOOKUP_TIMEOUT_MS),
     });
 
-    if (!tokenResponse.ok) {
-      console.warn(
-        `[umbraco-mcp] Could not authenticate against ${origin} to read the target Umbraco major ` +
-          `(token request returned ${tokenResponse.status} ${tokenResponse.statusText}).`
-      );
-      return null;
-    }
-
-    const { access_token: accessToken } = (await tokenResponse.json()) as {
-      access_token?: string;
-    };
     if (!accessToken) {
       console.warn(
         `[umbraco-mcp] Token response from ${origin} contained no access_token.`
       );
-      return null;
+      return undefined;
     }
 
     const infoResponse = await fetch(`${origin}${SERVER_INFORMATION_PATH}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(INSTANCE_LOOKUP_TIMEOUT_MS),
     });
 
     if (!infoResponse.ok) {
@@ -313,7 +336,7 @@ async function fetchInstanceVersion(
         `[umbraco-mcp] Could not read ${SERVER_INFORMATION_PATH} from ${origin} ` +
           `(${infoResponse.status} ${infoResponse.statusText}).`
       );
-      return null;
+      return undefined;
     }
 
     const { version } = (await infoResponse.json()) as { version?: unknown };
@@ -322,24 +345,33 @@ async function fetchInstanceVersion(
         `[umbraco-mcp] ${SERVER_INFORMATION_PATH} on ${origin} returned no "version" string ` +
           `(got ${JSON.stringify(version)}).`
       );
-      return null;
+      return undefined;
     }
     return version;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown error";
     console.warn(
-      `[umbraco-mcp] Could not reach ${origin} to read the target Umbraco major: ${reason}.`
+      `[umbraco-mcp] Could not read the target Umbraco major from ${origin}: ${reason}.`
     );
-    return null;
+    return undefined;
   }
+}
+
+/**
+ * What {@link resolveTargetMajor} needs beyond the spec: the caller's override,
+ * plus the two names that appear in its warnings and errors. Grouped so the
+ * messages can grow without threading more positional parameters.
+ */
+interface ResolveContext {
+  major?: string;
+  outputPath: string;
+  constantName: string;
 }
 
 /** Resolves the target major from the first source that can supply one. */
 async function resolveTargetMajor(
   spec: OpenApiDocumentWithInfo,
-  explicitMajor: string | undefined,
-  outputPath: string,
-  constantName: string
+  { major: explicitMajor, outputPath, constantName }: ResolveContext
 ): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
   if (explicitMajor !== undefined) {
     const major = majorFromVersion(explicitMajor);
@@ -354,20 +386,33 @@ async function resolveTargetMajor(
   }
 
   const credentials = credentialsFromEnv();
+  const specVersion =
+    typeof spec?.info?.version === "string"
+      ? spec.info.version.trim()
+      : undefined;
+  const specMajor = extractSpecMajor(spec);
 
   if (credentials) {
     const version = await fetchInstanceVersion(credentials);
     const major = majorFromVersion(version);
     if (major) {
-      return { major, version: version ?? undefined, source: "instance" };
+      // Both sources answered and disagree. The instance wins — a spec may be an
+      // add-on's, reporting its own release — but this is also what a stale
+      // UMBRACO_BASE_URL looks like: stamping a major the generated tools were
+      // not built from. Silence here would be the same class of bug the whole
+      // mechanism exists to prevent, so say it out loud.
+      if (specMajor && specMajor !== major) {
+        console.warn(
+          `[umbraco-mcp] ${constantName} resolved to "${major}" from the instance at ` +
+            `${normalizeBaseUrl(credentials.baseUrl)}, but the spec reports "${specVersion}" ` +
+            `(major "${specMajor}"). Using the instance. If these tools were generated from that ` +
+            `spec rather than that instance, one of the two is wrong — check UMBRACO_BASE_URL, or ` +
+            `pin the value with the transformer's \`major\` option.`
+        );
+      }
+      return { major, version, source: "instance" };
     }
   }
-
-  const specVersion =
-    typeof spec?.info?.version === "string"
-      ? spec.info.version.trim()
-      : undefined;
-  const specMajor = majorFromVersion(specVersion);
 
   if (specMajor) {
     if (credentials) {
@@ -429,19 +474,16 @@ export function createUmbracoTargetMajorTransformer(
   return async <T extends OpenApiDocumentWithInfo>(spec: T): Promise<T> => {
     const resolved = path.resolve(process.cwd(), outputPath);
 
-    const { major, version, source } = await resolveTargetMajor(
-      spec,
-      explicitMajor,
+    const { major, version, source } = await resolveTargetMajor(spec, {
+      major: explicitMajor,
       outputPath,
-      constantName
-    );
-
-    const contents = renderTargetMajorModule(
-      major,
       constantName,
+    });
+
+    const contents = renderTargetMajorModule(major, constantName, {
       version,
-      source
-    );
+      source,
+    });
 
     // Only write when something actually changed, so a no-op regeneration
     // doesn't dirty the working tree (or churn file watchers).

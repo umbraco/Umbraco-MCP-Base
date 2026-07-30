@@ -48,38 +48,11 @@
  *   4. explicit override + match → silence, tools work
  */
 
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { createCliTestClient, type CliTestClient } from "../helpers/cli-client.js";
-
-/**
- * Minimal stand-in for Umbraco's Management API: serves the OAuth
- * client_credentials token endpoint and the server information endpoint that
- * the template's version-check wiring calls directly (bypassing the
- * USE_MOCK_API example-tool mock store, same as the real get-server-info tool).
- */
-function startMockUmbracoServer(version: string): Promise<{ server: Server; baseUrl: string }> {
-  return new Promise((resolvePromise) => {
-    const server = createServer((req, res) => {
-      if (req.method === "POST" && req.url === "/umbraco/management/api/v1/security/back-office/token") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ access_token: "fake-token", expires_in: 3600 }));
-        return;
-      }
-      if (req.method === "GET" && req.url === "/umbraco/management/api/v1/server/information") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ version, assemblyVersion: version }));
-        return;
-      }
-      res.writeHead(404).end();
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as AddressInfo;
-      resolvePromise({ server, baseUrl: `http://127.0.0.1:${port}` });
-    });
-  });
-}
+import {
+  startMockUmbracoServer,
+  type MockUmbracoServer,
+} from "../helpers/mock-umbraco-server.js";
 
 describe("Version Check (CLI)", () => {
   // Regression proof for #220: a scaffolded server (package version "1.0.0")
@@ -87,12 +60,12 @@ describe("Version Check (CLI)", () => {
   // No explicit override here — the generated UMBRACO_TARGET_MAJOR ("17")
   // applies, and the mock matches it, so this stays silent.
   describe("no override, connected Umbraco matches the generated default", () => {
-    let mockServer: Server;
+    let mockServer: MockUmbracoServer;
     let client: CliTestClient;
 
     beforeAll(async () => {
       const mock = await startMockUmbracoServer("17.0.0");
-      mockServer = mock.server;
+      mockServer = mock;
       client = await createCliTestClient({
         captureStderr: true,
         // Deliberately no UMBRACO_EXPECTED_MAJOR — the generated default is
@@ -103,7 +76,7 @@ describe("Version Check (CLI)", () => {
 
     afterAll(async () => {
       await client?.close();
-      await new Promise<void>((r) => mockServer.close(() => r()));
+      await mockServer.close();
     });
 
     it("stays silent: no warning on stderr, no instructions, first tool call succeeds", async () => {
@@ -119,12 +92,12 @@ describe("Version Check (CLI)", () => {
   // its own to catch a mismatch, without the user ever discovering that
   // UMBRACO_EXPECTED_MAJOR exists.
   describe("no override, connected Umbraco differs from the generated default", () => {
-    let mockServer: Server;
+    let mockServer: MockUmbracoServer;
     let client: CliTestClient;
 
     beforeAll(async () => {
       const mock = await startMockUmbracoServer("16.0.0");
-      mockServer = mock.server;
+      mockServer = mock;
       client = await createCliTestClient({
         captureStderr: true,
         // Deliberately no UMBRACO_EXPECTED_MAJOR: the generated default ("17")
@@ -135,7 +108,7 @@ describe("Version Check (CLI)", () => {
 
     afterAll(async () => {
       await client?.close();
-      await new Promise<void>((r) => mockServer.close(() => r()));
+      await mockServer.close();
     });
 
     it("warns and blocks the first tool call using the generated default target", async () => {
@@ -149,12 +122,12 @@ describe("Version Check (CLI)", () => {
   });
 
   describe("expected major declared, mismatched", () => {
-    let mockServer: Server;
+    let mockServer: MockUmbracoServer;
     let client: CliTestClient;
 
     beforeAll(async () => {
       const mock = await startMockUmbracoServer("16.0.0");
-      mockServer = mock.server;
+      mockServer = mock;
       client = await createCliTestClient({
         captureStderr: true,
         env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_EXPECTED_MAJOR: "17" },
@@ -163,7 +136,7 @@ describe("Version Check (CLI)", () => {
 
     afterAll(async () => {
       await client?.close();
-      await new Promise<void>((r) => mockServer.close(() => r()));
+      await mockServer.close();
     });
 
     it("logs the mismatch warning to stderr", () => {
@@ -194,12 +167,12 @@ describe("Version Check (CLI)", () => {
   });
 
   describe("expected major declared, matching", () => {
-    let mockServer: Server;
+    let mockServer: MockUmbracoServer;
     let client: CliTestClient;
 
     beforeAll(async () => {
       const mock = await startMockUmbracoServer("17.0.0");
-      mockServer = mock.server;
+      mockServer = mock;
       client = await createCliTestClient({
         captureStderr: true,
         env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_EXPECTED_MAJOR: "17" },
@@ -208,7 +181,7 @@ describe("Version Check (CLI)", () => {
 
     afterAll(async () => {
       await client?.close();
-      await new Promise<void>((r) => mockServer.close(() => r()));
+      await mockServer.close();
     });
 
     it("stays silent: no warning on stderr, no instructions, first tool call succeeds", async () => {

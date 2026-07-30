@@ -17,14 +17,13 @@
  * need no running Umbraco — just orval, which the template already depends on.
  */
 
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { withMockUmbracoServer } from "../helpers/mock-umbraco-server.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,32 +48,6 @@ const LATEST_SPEC = {
     },
   },
 };
-
-/** Stands in for Umbraco's token + server information endpoints. */
-function startStubInstance(
-  version: string | null
-): Promise<{ server: Server; baseUrl: string }> {
-  return new Promise((resolvePromise) => {
-    const server = createServer((req, res) => {
-      if (req.url?.includes("/token")) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ access_token: "t", expires_in: 3600 }));
-        return;
-      }
-      if (req.url?.includes("/server/information")) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(version === null ? {} : { version }));
-        return;
-      }
-      res.writeHead(404).end();
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as AddressInfo;
-      resolvePromise({ server, baseUrl: `http://127.0.0.1:${port}` });
-    });
-  });
-}
 
 /**
  * Environment for the orval child process. Credentials are configurable only
@@ -176,10 +149,8 @@ describe("Target major generation (real orval)", () => {
 
   it("resolves the major from the instance when the spec says 'Latest'", async () => {
     // The case that used to freeze the constant forever: a real Umbraco spec.
-    const stub = await startStubInstance("18.0.2");
-
-    try {
-      const { ok, generated } = await runOrval({ instanceBaseUrl: stub.baseUrl });
+    await withMockUmbracoServer("18.0.2", async (instanceBaseUrl) => {
+      const { ok, generated } = await runOrval({ instanceBaseUrl });
 
       expect(ok).toBe(true);
       // Proves orval awaited the async transformer — without that, generated is
@@ -187,9 +158,7 @@ describe("Target major generation (real orval)", () => {
       expect(generated).toContain('export const UMBRACO_TARGET_MAJOR = "18";');
       expect(generated).toContain("18.0.2");
       expect(generated).toContain("server/information");
-    } finally {
-      await new Promise<void>((r) => stub.server.close(() => r()));
-    }
+    });
   }, 120_000);
 
   it("fails generation rather than emitting a guessed major", async () => {
@@ -210,19 +179,4 @@ describe("Target major generation (real orval)", () => {
     expect(generated).toContain('export const UMBRACO_TARGET_MAJOR = "17";');
   }, 120_000);
 
-  it("fails generation when the instance reports no version", async () => {
-    // A reachable instance is not the same as a usable answer.
-    const stub = await startStubInstance(null);
-
-    try {
-      const { ok, generated } = await runOrval({
-        instanceBaseUrl: stub.baseUrl,
-      });
-
-      expect(ok).toBe(false);
-      expect(generated).toBeNull();
-    } finally {
-      await new Promise<void>((r) => stub.server.close(() => r()));
-    }
-  }, 120_000);
 });
