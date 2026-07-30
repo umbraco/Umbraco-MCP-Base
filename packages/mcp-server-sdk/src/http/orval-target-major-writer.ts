@@ -60,6 +60,11 @@
  * export default defineConfig({
  *   myApi: {
  *     input: {
+ *       // Umbraco 18+ serves the spec under /umbraco/openapi/{name}.json;
+ *       // Umbraco 17 and earlier use /umbraco/swagger/{name}/swagger.json.
+ *       // Either works here — the target major comes from the instance, not
+ *       // this URL. See `api-spec-conventions.ts` in create-mcp-server for the
+ *       // switch (OPENAPI_SWITCH_MAJOR = 18).
  *       target: "http://localhost:56472/umbraco/openapi/management.json",
  *       override: {
  *         // Transformers compose: relax the schemas, then stamp the constant.
@@ -92,6 +97,13 @@ export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
  * the only server endpoint that carries it — `server/status` and
  * `server/configuration` are anonymous but version-free, and this one requires
  * authentication.
+ *
+ * Unaffected by the swagger → openapi rename at Umbraco 18: that switch moved
+ * the *spec document* URL (`/umbraco/swagger/{name}/swagger.json` →
+ * `/umbraco/openapi/{name}.json`), while the Management API contract
+ * `/umbraco/management/api/v1/...` is unchanged across it. So one path works
+ * for every supported major — see `api-spec-conventions.ts` in
+ * create-mcp-server, which owns that distinction.
  */
 export const SERVER_INFORMATION_PATH =
   "/umbraco/management/api/v1/server/information";
@@ -100,9 +112,18 @@ export const SERVER_INFORMATION_PATH =
 export type TargetMajorSource = "explicit" | "instance" | "spec";
 
 /**
- * Credentials for the authenticated `server/information` lookup. These are the
- * same three values the MCP server itself runs on, so a project that can run
- * its tools can already resolve its target major.
+ * Credentials for the authenticated `server/information` lookup.
+ *
+ * **You normally never construct this.** Omit the `instance` option and the
+ * transformer reads `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
+ * `UMBRACO_CLIENT_SECRET` from the environment — the same three values the MCP
+ * server itself runs on, so a project that can run its tools can already
+ * resolve its target major with no extra config. (`orval.config.ts` must load
+ * `.env` for that to work; the scaffolding template imports `src/load-env.ts`.)
+ *
+ * Pass this explicitly only when generation needs different credentials from the
+ * ones in the environment — e.g. generating against a staging instance, or a
+ * build that keeps the two in separate variables.
  */
 export interface UmbracoInstanceCredentials {
   /** Base URL of the Umbraco instance, e.g. `http://localhost:56472`. */

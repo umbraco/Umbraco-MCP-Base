@@ -542,7 +542,10 @@ Resolution order:
    /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
    semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
    `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` by default — the same
-   values the server itself runs on — or an explicit `instance` object.
+   values the server itself runs on, so the normal case needs no config at all. Pass an
+   explicit `instance` object only to use different credentials from the environment's. The
+   path is the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec
+   document URL, not the `/umbraco/management/api/v1/...` contract.
 3. **The spec's `info.version`**, for a committed spec carrying a real semver.
 4. Otherwise it **throws**, failing `npm run generate`.
 
@@ -570,6 +573,9 @@ const stampTargetMajor = createUmbracoTargetMajorTransformer({
 export default defineConfig({
   myApi: {
     input: {
+      // Umbraco 18+: /umbraco/openapi/{name}.json
+      // Umbraco 17 and earlier: /umbraco/swagger/{name}/swagger.json
+      // Either is fine — the target major comes from the instance, not this URL.
       target: 'http://localhost:56472/umbraco/openapi/management.json',
       override: {
         // Transformers compose. stampTargetMajor returns the spec untouched —
