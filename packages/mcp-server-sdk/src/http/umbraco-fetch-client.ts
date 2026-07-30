@@ -105,6 +105,58 @@ function serializeParams(params: Record<string, unknown> | undefined): string {
 // ============================================================================
 
 /**
+ * Performs the client-credentials token exchange against Umbraco.
+ *
+ * The one place this request is built. Both the singleton and per-instance
+ * clients below wrap it with their own token caching, and the build-time
+ * target-major writer uses it too — the request itself is identical in all
+ * three, so it lives here rather than being re-implemented per caller.
+ *
+ * @throws If the token endpoint returns a non-2xx response
+ */
+export const requestClientCredentialsToken = async (config: {
+  baseUrl: string;
+  clientId: string;
+  clientSecret?: string;
+  tokenPath?: string;
+  /** Forwarded to `fetch`, so callers can impose their own deadline. */
+  signal?: AbortSignal;
+}): Promise<{ accessToken: string; expiresIn: number }> => {
+  const {
+    baseUrl,
+    clientId,
+    clientSecret,
+    tokenPath = DEFAULT_TOKEN_PATH,
+    signal,
+  } = config;
+
+  const response = await fetch(`${baseUrl}${tokenPath}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret ?? "",
+      grant_type: "client_credentials",
+    }).toString(),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Token request failed: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const data = (await response.json()) as {
+    access_token: string;
+    expires_in: number;
+  };
+  return { accessToken: data.access_token, expiresIn: data.expires_in };
+};
+
+/**
  * Fetches a new access token from Umbraco.
  */
 const fetchAccessToken = async (): Promise<string> => {
@@ -114,31 +166,13 @@ const fetchAccessToken = async (): Promise<string> => {
     );
   }
 
-  const response = await fetch(
-    `${authConfig.baseUrl}${DEFAULT_TOKEN_PATH}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: authConfig.clientId,
-        client_secret: authConfig.clientSecret ?? "",
-        grant_type: "client_credentials",
-      }).toString(),
-    }
+  const { accessToken: token, expiresIn } = await requestClientCredentialsToken(
+    authConfig
   );
 
-  if (!response.ok) {
-    throw new Error(
-      `Token request failed: ${response.status} ${response.statusText}`
-    );
-  }
-
-  const data = await response.json() as { access_token: string; expires_in: number };
-  accessToken = data.access_token;
-  tokenExpiry = Date.now() + data.expires_in * 1000;
-  return data.access_token;
+  accessToken = token;
+  tokenExpiry = Date.now() + expiresIn * 1000;
+  return token;
 };
 
 /**
@@ -438,31 +472,14 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
-    const response = await fetch(
-      `${instanceAuthConfig.baseUrl}${tokenPath}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          client_id: instanceAuthConfig.clientId,
-          client_secret: instanceAuthConfig.clientSecret ?? "",
-          grant_type: "client_credentials",
-        }).toString(),
-      }
-    );
+    const { accessToken, expiresIn } = await requestClientCredentialsToken({
+      ...instanceAuthConfig,
+      tokenPath,
+    });
 
-    if (!response.ok) {
-      throw new Error(
-        `Token request failed: ${response.status} ${response.statusText}`
-      );
-    }
-
-    const data = await response.json() as { access_token: string; expires_in: number };
-    instanceAccessToken = data.access_token;
-    instanceTokenExpiry = Date.now() + data.expires_in * 1000;
-    return data.access_token;
+    instanceAccessToken = accessToken;
+    instanceTokenExpiry = Date.now() + expiresIn * 1000;
+    return accessToken;
   };
 
   const getInstanceToken = async (): Promise<string> => {

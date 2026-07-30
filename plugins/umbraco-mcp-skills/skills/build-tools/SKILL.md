@@ -152,6 +152,8 @@ export default withStandardDecorators(tool);
 - For GET: use `executeGetApiCall`
 - Never require UUIDs from the LLM — generate them server-side
 - Keep input schemas to 3-5 fields max — hide complexity
+- Flatten nested reference wrappers — expose `parentId` / `path`, rebuild `parent: { id }` /
+  `parent: { path }` inside the handler (see `/mcp-patterns`)
 - Write descriptions as mini-prompts: what it does, key constraints, when to use
 
 **After creating EACH tool file, run `npm run compile`. Fix any TypeScript errors in that file before creating the next one.** Common issues:

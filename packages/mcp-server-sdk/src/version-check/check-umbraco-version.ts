@@ -90,9 +90,9 @@ export interface CheckVersionOptions {
   /**
    * The Umbraco major version this server targets (e.g., "17"). **Required.**
    *
-   * Every Umbraco MCP server knows this value by construction: it is derived
-   * from the `info.version` of the OpenAPI spec the tools are generated from
-   * and stamped into a generated constant at generation time (see the SDK's
+   * Every Umbraco MCP server knows this value by construction: it is resolved
+   * at generation time — from the Umbraco instance the tools were generated
+   * against — and stamped into a generated constant (see the SDK's
    * `createUmbracoTargetMajorTransformer`). Making the field required means a
    * hand-wired server that forgets to supply it is a *compile error* rather
    * than a silently disabled check — which is how the check ended up shipping
@@ -117,9 +117,10 @@ export interface CheckVersionOptions {
  * this MCP server targets (`expectedUmbracoMajor`, which is **required**).
  *
  * The target major is not something a caller is expected to invent: it is
- * derived from the `info.version` of the OpenAPI spec the server's tools are
- * generated from and stamped into a generated constant at generation time (see
- * `createUmbracoTargetMajorTransformer`). Because the field is required, a
+ * resolved at generation time from the Umbraco instance the server's tools were
+ * generated against, and stamped into a generated constant (see
+ * `createUmbracoTargetMajorTransformer`). Note it cannot come from the spec —
+ * every Umbraco spec hard-codes `info.version` to `"Latest"`. Because the field is required, a
  * server that omits it fails to compile instead of silently running with the
  * check disabled.
  *
@@ -211,7 +212,7 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
  * @example
  * ```typescript
  * // UMBRACO_TARGET_MAJOR comes from the generated constant that the orval
- * // target-major transformer stamps out of the spec's `info.version`.
+ * // target-major transformer stamps out at generation time.
  * import { UMBRACO_TARGET_MAJOR } from "./config/umbraco-target.generated.js";
  *
  * await checkUmbracoVersion({

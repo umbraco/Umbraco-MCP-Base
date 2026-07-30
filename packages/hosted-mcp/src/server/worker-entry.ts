@@ -103,6 +103,8 @@ export interface HostedMcpServerOptions {
   siteRouting?: SiteRoutingConfig;
   /** Chained MCP servers to include on consent screen and /info endpoint */
   chainedServers?: ChainedServerConsentConfig[];
+  /** Umbraco major this server's tools target (see CreateServerOptions.expectedUmbracoMajor) */
+  expectedUmbracoMajor?: string;
 }
 
 /**
@@ -131,6 +133,7 @@ export function getServerOptions(
     multiSite: options.multiSite,
     resolveSite: options.siteRouting?.resolveSite ?? options.resolveSite,
     instructions: options.instructions,
+    expectedUmbracoMajor: options.expectedUmbracoMajor,
   };
 }
 
