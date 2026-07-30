@@ -4,12 +4,13 @@
  * The Umbraco major version this server's generated tools target.
  *
  * Derived from the `info.version` of the OpenAPI spec that `orval.config.ts`
- * points at (`info.version`: 17.4.0), so it always matches the tool surface that was
- * actually generated. Regenerating against a different Umbraco updates it
- * here automatically — there is nothing to keep in sync by hand.
+ * points at.
  *
- * Passed to `checkUmbracoVersion` at startup. Set `UMBRACO_EXPECTED_MAJOR`
- * (or `--umbraco-expected-major`) to override it at runtime when deliberately
+ * Reported version: 17.4.0.
+ *
+ * Passed to `checkUmbracoVersion` at startup, which blocks tool execution when
+ * the connected instance's major differs. Set `UMBRACO_EXPECTED_MAJOR` (or
+ * `--umbraco-expected-major`) to override it at runtime when deliberately
  * pointing at a different Umbraco major.
  */
 export const UMBRACO_TARGET_MAJOR = "17";

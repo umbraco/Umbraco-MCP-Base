@@ -308,9 +308,12 @@ export {
   extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
+  SERVER_INFORMATION_PATH,
   type OpenApiDocumentLike,
   type OpenApiDocumentWithInfo,
   type UmbracoTargetMajorOptions,
+  type UmbracoInstanceCredentials,
+  type TargetMajorSource,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,
