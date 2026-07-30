@@ -20,7 +20,7 @@
     "postbuild": "umbraco-mcp-generate-types",
     "compile": "tsc --noEmit",
     "watch": "tsup --config tsup.config.ts --watch",
-    "generate": "orval --config orval.config.ts",
+    "generate": "orval --config orval.config.ts && umbraco-mcp-stamp-target-major --output ./src/config/umbraco-target.generated.ts --spec ./src/umbraco-api/api/openapi.yaml",
     "start:umbraco": "bash scripts/start-umbraco.sh",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand",

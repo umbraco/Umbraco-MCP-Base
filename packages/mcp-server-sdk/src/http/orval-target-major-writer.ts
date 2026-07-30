@@ -1,5 +1,5 @@
 /**
- * Orval Target-Major Writer
+ * Target-Major Writer
  *
  * Derives the Umbraco major version an MCP server targets and stamps it into a
  * generated TypeScript constant. The constant is then passed to
@@ -25,7 +25,7 @@
  *
  * **Where the major actually comes from**, in order:
  *
- * 1. `options.major` — set explicitly in `orval.config.ts`. Always wins.
+ * 1. `options.major` — declared explicitly (`--major` on the CLI). Always wins.
  * 2. The connected instance's `GET /umbraco/management/api/v1/server/information`,
  *    which reports a real semver. That endpoint requires authentication, so it
  *    is used when `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
@@ -37,43 +37,26 @@
  *    stale one — that is #220's failure mode, and the version check now blocks
  *    tool execution on a mismatch.
  *
- * **Why an orval input transformer?** Orval's `afterAllFilesWrite` hook
- * receives written file paths, not the spec, so it cannot see `info.version`.
- * An input transformer receives the fully parsed OpenAPI document whatever the
- * spec source was, and orval awaits it, so it can also do the authenticated
- * lookup above. It runs on every `orval` invocation, i.e. every
- * `npm run generate`.
+ * **Why a postgenerate CLI step?** This used to be wired as an orval *input
+ * transformer*, because that was the only orval extension point that could see
+ * the parsed spec (`afterAllFilesWrite` only receives file paths). Since the
+ * primary source became the instance lookup, the spec is no longer needed for
+ * the normal path at all — so the work moved to `umbraco-mcp-stamp-target-major`
+ * (`src/cli/stamp-target-major.ts`), a bin chained after orval in the
+ * template's `generate` script. That step owns its own `.env` loading, can be
+ * run and debugged on its own without a full codegen, and no longer depends on
+ * orval awaiting a third-party extension point. The last-resort `info.version`
+ * fallback survives: the CLI reads and parses the spec itself via `--spec`.
  *
  * @example
  * ```typescript
- * // In orval.config.ts
- * import { defineConfig, type HookFunction } from "orval";
- * import {
- *   createUmbracoTargetMajorTransformer,
- *   relaxUntypedArrays,
- * } from "@umbraco-cms/mcp-server-sdk";
+ * import { stampTargetMajor } from "@umbraco-cms/mcp-server-sdk";
  *
- * const stampTargetMajor = createUmbracoTargetMajorTransformer({
- *   outputPath: "./src/config/umbraco-target.generated.ts",
- * });
- *
- * export default defineConfig({
- *   myApi: {
- *     input: {
- *       // Umbraco 18+ serves the spec under /umbraco/openapi/{name}.json;
- *       // Umbraco 17 and earlier use /umbraco/swagger/{name}/swagger.json.
- *       // Either works here — the target major comes from the instance, not
- *       // this URL. See `api-spec-conventions.ts` in create-mcp-server for the
- *       // switch (OPENAPI_SWITCH_MAJOR = 18).
- *       target: "http://localhost:56472/umbraco/openapi/management.json",
- *       override: {
- *         // Transformers compose: relax the schemas, then stamp the constant.
- *         transformer: (spec) => stampTargetMajor(relaxUntypedArrays(spec)),
- *       },
- *     },
- *     // ... output config
- *   },
- * });
+ * // Same work `umbraco-mcp-stamp-target-major` does, called as a library.
+ * const { major, source } = await stampTargetMajor(
+ *   { info: { version: "Latest" } }, // whatever the spec says, if anything
+ *   { outputPath: "./src/config/umbraco-target.generated.ts" }
+ * );
  * ```
  */
 
@@ -83,10 +66,11 @@ import { normalizeBaseUrl } from "../helpers/url.js";
 import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
 
 /**
- * Minimal shape this transformer needs from an OpenAPI document — just
- * `info.version`. Typed structurally so the SDK needs no dependency on
- * `orval`; consumers can assign the transformer directly (or cast to orval's
- * `InputTransformerFn` if their config types require it).
+ * Minimal shape the resolution needs from an OpenAPI document — just
+ * `info.version`. Typed structurally so the SDK needs no dependency on `orval`,
+ * and so a caller that only has a version string (the CLI, which parses the
+ * spec itself) can hand over `{ info: { version } }` rather than a whole
+ * document.
  */
 export type OpenApiDocumentWithInfo = { info?: { version?: unknown } };
 
@@ -120,8 +104,8 @@ export type TargetMajorSource = "explicit" | "instance" | "spec";
  * the MCP server itself runs on, so a project that can run its tools can
  * already resolve its target major with no extra config, and anything that
  * needs to override the result has `major` — a clearer knob than a second set
- * of credentials. (`orval.config.ts` must load `.env` for these to be visible;
- * the scaffolding template imports `src/load-env.ts`.)
+ * of credentials. (`umbraco-mcp-stamp-target-major` loads `.env` itself, so the
+ * normal case needs no extra wiring.)
  */
 interface InstanceCredentials {
   baseUrl: string;
@@ -129,12 +113,12 @@ interface InstanceCredentials {
   clientSecret: string;
 }
 
-/** Options for {@link createUmbracoTargetMajorTransformer}. */
+/** Options for {@link stampTargetMajor}. */
 export interface UmbracoTargetMajorOptions {
   /**
    * Where to write the generated constant, resolved against `process.cwd()`
-   * (i.e. the directory `orval` / `npm run generate` runs in — the same base
-   * orval itself uses for relative `output.target` paths).
+   * (i.e. the directory `npm run generate` runs in — the same base orval itself
+   * uses for relative `output.target` paths).
    *
    * Intermediate directories are created if missing. Commit the result: a
    * freshly scaffolded project must have a working value before anyone runs
@@ -197,10 +181,10 @@ const SAFE_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,64}$/;
  */
 const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
   explicit:
-    "Declared explicitly via the transformer's `major` option in `orval.config.ts`.",
+    "Declared explicitly via the `major` option (`--major` on `umbraco-mcp-stamp-target-major`).",
   instance:
     "Read from the Umbraco instance this server's tools were generated against, via `GET /umbraco/management/api/v1/server/information`.",
-  spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts` points at.",
+  spec: "Derived from the `info.version` of the OpenAPI spec passed to `umbraco-mcp-stamp-target-major` via `--spec`.",
 };
 
 /** Wraps prose to ~76 columns and prefixes continuations with ` * `. */
@@ -259,7 +243,7 @@ export function renderTargetMajorModule(
       ? `\n *\n * Reported version: ${version}.`
       : "";
 
-  return `// AUTO-GENERATED by @umbraco-cms/mcp-server-sdk's orval target-major transformer.
+  return `// AUTO-GENERATED by @umbraco-cms/mcp-server-sdk's umbraco-mcp-stamp-target-major.
 // Do not edit by hand — regenerate via \`npm run generate\`.
 /**
  * The Umbraco major version this server's generated tools target.
@@ -407,7 +391,7 @@ async function resolveTargetMajor(
             `${normalizeBaseUrl(credentials.baseUrl)}, but the spec reports "${specVersion}" ` +
             `(major "${specMajor}"). Using the instance. If these tools were generated from that ` +
             `spec rather than that instance, one of the two is wrong — check UMBRACO_BASE_URL, or ` +
-            `pin the value with the transformer's \`major\` option.`
+            `pin the value with the \`major\` option (\`--major\`).`
         );
       }
       return { major, version, source: "instance" };
@@ -421,7 +405,7 @@ async function resolveTargetMajor(
       console.warn(
         `[umbraco-mcp] Falling back to the spec's "info.version" (${specVersion}) for ${constantName}. ` +
           `Verify this is the Umbraco major these tools target — an add-on's spec reports the add-on's ` +
-          `own version. Set the transformer's \`major\` option to pin it.`
+          `own version. Set the \`major\` option (\`--major\`) to pin it.`
       );
     }
     return { major: specMajor, version: specVersion, source: "spec" };
@@ -435,20 +419,38 @@ async function resolveTargetMajor(
         ? `  - The instance lookup via ${SERVER_INFORMATION_PATH} returned no version (see the warning above).\n`
         : `  - No instance lookup was attempted: set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and ` +
           `UMBRACO_CLIENT_SECRET so the target major can be read from ${SERVER_INFORMATION_PATH}.\n`) +
-      `  - Or declare it explicitly: createUmbracoTargetMajorTransformer({ major: "18", ... }).\n` +
+      `  - Or declare it explicitly: umbraco-mcp-stamp-target-major --major 18 ` +
+      `(\`major: "18"\` when calling stampTargetMajor as a library).\n` +
       `${constantName} is required by checkUmbracoVersion, which blocks tool execution on a mismatch — ` +
       `so a wrong or stale value is worse than this error.`
   );
 }
 
+/** What {@link stampTargetMajor} resolved, and what it did with it. */
+export interface StampTargetMajorResult {
+  /** The resolved Umbraco major, digits only (e.g. `"18"`). */
+  major: string;
+  /** The full version the major came from, when a source reported one. */
+  version?: string;
+  /** Which source supplied the value. */
+  source: TargetMajorSource;
+  /** Absolute path of the generated file. */
+  outputPath: string;
+  /** `false` when the file was already byte-identical and was left alone. */
+  wrote: boolean;
+}
+
 /**
- * Creates an orval input transformer that stamps the target Umbraco major into
- * a generated TypeScript constant and returns the spec unchanged.
+ * Resolves the target Umbraco major and stamps it into a generated TypeScript
+ * constant.
  *
- * The spec itself is **not** modified — the transformer is used purely as the
- * one orval extension point that gets to see the parsed document. Compose it
- * with other transformers (e.g. `relaxUntypedArrays`) if you need both. Orval
- * awaits input transformers, so returning a promise is supported.
+ * This is the whole job of `umbraco-mcp-stamp-target-major`; the bin is a thin
+ * argument-parsing wrapper around it (plus `.env` loading and reading `--spec`
+ * off disk or a URL).
+ *
+ * The spec argument is only the **last-resort** source, so a caller with no
+ * spec at all can pass `{}` — the instance lookup and the explicit `major`
+ * option both work without it.
  *
  * The file is only rewritten when its contents change, so repeated
  * `npm run generate` runs leave the working tree clean.
@@ -458,45 +460,44 @@ async function resolveTargetMajor(
  * throws, because the version check blocks tool execution on a mismatch and a
  * stale constant is indistinguishable from #220's placeholder.
  *
+ * @param spec - Anything carrying an `info.version`; `{}` when there is no spec
  * @param options - Output path, optional constant name and explicit major
- * @returns An orval-compatible async input transformer
+ * @returns The resolved major, its provenance, and whether the file changed
  * @throws If no source yields a target major
  */
-export function createUmbracoTargetMajorTransformer(
+export async function stampTargetMajor(
+  spec: OpenApiDocumentWithInfo,
   options: UmbracoTargetMajorOptions
-): <T extends OpenApiDocumentWithInfo>(spec: T) => Promise<T> {
+): Promise<StampTargetMajorResult> {
   const {
     outputPath,
     constantName = DEFAULT_TARGET_MAJOR_CONSTANT,
     major: explicitMajor,
   } = options;
 
-  return async <T extends OpenApiDocumentWithInfo>(spec: T): Promise<T> => {
-    const resolved = path.resolve(process.cwd(), outputPath);
+  const resolved = path.resolve(process.cwd(), outputPath);
 
-    const { major, version, source } = await resolveTargetMajor(spec, {
-      major: explicitMajor,
-      outputPath,
-      constantName,
-    });
+  const { major, version, source } = await resolveTargetMajor(spec ?? {}, {
+    major: explicitMajor,
+    outputPath,
+    constantName,
+  });
 
-    const contents = renderTargetMajorModule(major, constantName, {
-      version,
-      source,
-    });
+  const contents = renderTargetMajorModule(major, constantName, {
+    version,
+    source,
+  });
 
-    // Only write when something actually changed, so a no-op regeneration
-    // doesn't dirty the working tree (or churn file watchers).
-    const existing = fs.existsSync(resolved)
-      ? fs.readFileSync(resolved, "utf8")
-      : null;
-    if (existing !== contents) {
-      fs.mkdirSync(path.dirname(resolved), { recursive: true });
-      fs.writeFileSync(resolved, contents, "utf8");
-    }
+  // Only write when something actually changed, so a no-op regeneration
+  // doesn't dirty the working tree (or churn file watchers).
+  const existing = fs.existsSync(resolved)
+    ? fs.readFileSync(resolved, "utf8")
+    : null;
+  const wrote = existing !== contents;
+  if (wrote) {
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, contents, "utf8");
+  }
 
-    return spec;
-  };
+  return { major, version, source, outputPath: resolved, wrote };
 }
-
-export default createUmbracoTargetMajorTransformer;

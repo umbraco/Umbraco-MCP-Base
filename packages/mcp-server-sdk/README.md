@@ -457,9 +457,9 @@ major your server's tools were generated against, compared at startup against th
 instance's major version. Because it is required, a server that omits it is a *compile error*
 rather than a silently disabled check.
 
-The value is discovered at generation time: `createUmbracoTargetMajorTransformer` (an orval
-input transformer) resolves the target major during `npm run generate` and stamps it into a
-generated constant, so regenerating against a newer Umbraco updates it automatically. See
+The value is discovered at generation time: `umbraco-mcp-stamp-target-major` (a CLI step chained
+after orval in `npm run generate`) resolves the target major and stamps it into a generated
+constant, so regenerating against a newer Umbraco updates it automatically. See
 [Deriving the target major](#deriving-the-target-major).
 
 `mcpVersion` is accepted for logging/diagnostics but is **never** compared: an MCP server's own
@@ -525,7 +525,7 @@ clearVersionCheckMessage();
 
 ### Deriving the target major
 
-`createUmbracoTargetMajorTransformer` resolves the Umbraco major your tools target during
+The `umbraco-mcp-stamp-target-major` bin resolves the Umbraco major your tools target during
 `npm run generate` and writes it to a committed TypeScript constant, so no human ever types it.
 
 **It cannot come from the spec.** Every Umbraco Management API spec hard-codes `info.version` to
@@ -537,7 +537,8 @@ that happens to carry a real semver.
 
 Resolution order:
 
-1. **`major`** passed to the transformer. Always wins.
+1. **`--major`** passed to the CLI (`major` when calling `stampTargetMajor` as a library).
+   Always wins.
 2. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
    semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
@@ -546,54 +547,57 @@ Resolution order:
    `generate` invocation to point elsewhere; leave them unset to skip the lookup. The path is
    the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
    URL, not the `/umbraco/management/api/v1/...` contract.
-3. **The spec's `info.version`**, for a committed spec carrying a real semver.
+3. **The spec's `info.version`**, read from `--spec`, for a committed spec carrying a real
+   semver.
 4. Otherwise it **throws**, failing `npm run generate`.
 
-Why an orval **input transformer** rather than a hook: orval's only lifecycle hook,
-`afterAllFilesWrite`, receives written file paths and never sees the spec. An input transformer
-receives the fully parsed OpenAPI document, so it works identically for a local YAML/JSON file
-and a live Umbraco spec URL. Orval `await`s input transformers, so the same extension point can
-do the authenticated lookup. It runs on every `orval` invocation, i.e. every `npm run generate`.
+#### Wiring: a postgenerate CLI step
 
-```typescript
-// orval.config.ts
-import 'dotenv/config'; // so UMBRACO_* from .env reach the transformer
-import { defineConfig } from 'orval';
-import {
-  createUmbracoTargetMajorTransformer,
-  relaxUntypedArrays,
-} from '@umbraco-cms/mcp-server-sdk';
+Chain the bin after orval in your `generate` script — it is a plain build step, not an orval
+extension point:
 
-const stampTargetMajor = createUmbracoTargetMajorTransformer({
-  outputPath: './src/config/umbraco-target.generated.ts', // resolved against cwd
-  // major: '18',  // pin explicitly when the instance is unreachable
-});
-
-export default defineConfig({
-  myApi: {
-    input: {
-      // Umbraco 18+: /umbraco/openapi/{name}.json
-      // Umbraco 17 and earlier: /umbraco/swagger/{name}/swagger.json
-      // Either is fine — the target major comes from the instance, not this URL.
-      target: 'http://localhost:56472/umbraco/openapi/management.json',
-      override: {
-        // Transformers compose. stampTargetMajor returns the spec untouched —
-        // it only writes the constant as a side effect. It is async; orval
-        // awaits input transformers, so returning the promise is correct.
-        transformer: (spec) => stampTargetMajor(relaxUntypedArrays(spec)),
-      },
-    },
-    // ... output config
-  },
-});
+```json
+{
+  "scripts": {
+    "generate": "orval --config orval.config.ts && umbraco-mcp-stamp-target-major --output ./src/config/umbraco-target.generated.ts --spec ./src/umbraco-api/api/openapi.yaml"
+  }
+}
 ```
+
+| Flag | Purpose |
+|------|---------|
+| `--output <path>` | **Required.** Where to write the generated constant, resolved against the directory `generate` runs in. |
+| `--major <version>` | Declare the target major explicitly. Always wins — use it when the instance is unreachable and the spec carries no real semver (an offline CI job, say). |
+| `--spec <path-or-url>` | The spec to read `info.version` from as a last resort. A local path is read off disk; an `http(s)` URL is fetched. Parsed as YAML either way (YAML 1.2 is a JSON superset, so `.json` and `.yaml` need no special-casing). Omit it and there is simply no spec fallback. |
+| `--constant-name <name>` | Name of the exported constant. Defaults to `UMBRACO_TARGET_MAJOR`. |
+
+The bin loads `.env` itself, so `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` /
+`UMBRACO_CLIENT_SECRET` reach the instance lookup with no wiring in `orval.config.ts`.
+
+This used to be an orval **input transformer**, because that was the only orval extension point
+that could see the parsed spec (`afterAllFilesWrite` only receives file paths). Once the
+instance lookup became the primary source, the spec stopped being needed for the normal path —
+so the step became a bin of its own. It no longer depends on orval `await`ing a third-party
+extension point, it can be run and debugged without a full codegen, and `orval.config.ts` no
+longer needs a side-effect `.env` import ordered before everything else.
 
 Produces:
 
 ```typescript
-// AUTO-GENERATED by @umbraco-cms/mcp-server-sdk's orval target-major transformer.
+// AUTO-GENERATED by @umbraco-cms/mcp-server-sdk's umbraco-mcp-stamp-target-major.
 // Do not edit by hand — regenerate via `npm run generate`.
 export const UMBRACO_TARGET_MAJOR = "18";
+```
+
+The same work is available as a library function for anything that needs to script it:
+
+```typescript
+import { stampTargetMajor } from '@umbraco-cms/mcp-server-sdk';
+
+const { major, source, wrote } = await stampTargetMajor(
+  { info: { version: 'Latest' } }, // whatever the spec says, if anything
+  { outputPath: './src/config/umbraco-target.generated.ts' }
+);
 ```
 
 Notes:
@@ -605,8 +609,8 @@ Notes:
   indistinguishable from the placeholder that shipped
   [#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) — the earlier warn-and-keep
   behaviour meant a project regenerating against a new Umbraco major silently kept the old one.
-- **Generating offline** (no reachable instance) needs an explicit `major`, or an `info.version`
-  that carries a real Umbraco semver.
+- **Generating offline** (no reachable instance) needs an explicit `--major`, or a `--spec`
+  whose `info.version` carries a real Umbraco semver.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
   `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env` — the same variable the server itself uses.
 - If the instance lookup fails but the spec supplies a version, generation continues **with a
@@ -619,8 +623,12 @@ Notes:
 - `major` is the only option beyond `outputPath`/`constantName`. Credentials are environment-only
   by design: they are the same three variables the server already needs, and a second way to
   supply them would just be a second way to get them wrong.
-- Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
-  `SERVER_INFORMATION_PATH`, `TargetMajorSource`.
+- An unreadable or unparseable `--spec` **warns** rather than failing: it is only the last-resort
+  source, so it must not fail a run the instance can still answer. If nothing else can supply a
+  major either, the "cannot determine" error follows.
+- Related exports: `stampTargetMajor`, `extractSpecMajor`, `renderTargetMajorModule`,
+  `DEFAULT_TARGET_MAJOR_CONSTANT`, `SERVER_INFORMATION_PATH`, `TargetMajorSource`,
+  `StampTargetMajorResult`.
 
 ### Wiring in scaffolded projects
 

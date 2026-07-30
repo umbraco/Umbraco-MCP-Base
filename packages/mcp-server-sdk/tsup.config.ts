@@ -11,6 +11,7 @@ export default defineConfig({
     "src/constants/index.ts",
     "src/cli/generate-tool-types.ts",
     "src/cli/generate-chained-deps.ts",
+    "src/cli/stamp-target-major.ts",
   ],
   format: ["esm"],
   dts: true,

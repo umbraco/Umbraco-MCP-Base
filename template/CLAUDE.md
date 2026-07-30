@@ -165,10 +165,17 @@ Always pass `CAPTURE_RAW_HTTP_RESPONSE` to API methods when using toolkit helper
 export const UMBRACO_TARGET_MAJOR = "17";
 ```
 
-It is stamped out by `createUmbracoTargetMajorTransformer`, wired as an orval **input
-transformer** in `orval.config.ts` (orval's `afterAllFilesWrite` hook only receives file paths
-and never sees the spec, so a transformer is the only extension point that can read it — and
-orval awaits transformers, so it can also make an HTTP call).
+It is stamped out by `umbraco-mcp-stamp-target-major` (an SDK bin), chained after orval in the
+`generate` script:
+
+```
+"generate": "orval --config orval.config.ts && umbraco-mcp-stamp-target-major --output ./src/config/umbraco-target.generated.ts --spec ./src/umbraco-api/api/openapi.yaml"
+```
+
+It used to be an orval **input transformer**, since that was the only extension point that could
+see the parsed spec. It no longer needs the spec for the normal path (the instance lookup does
+not use it), so it is a plain build step: it loads `.env` itself, reads `--spec` off disk or a
+URL for the fallback, and can be run on its own without a full codegen.
 
 **The value does not come from the spec.** Every Umbraco Management API spec hard-codes
 `info.version` to the literal string `"Latest"` — `ConfigureUmbracoManagementApiSwaggerGenOptions`
@@ -178,12 +185,12 @@ document, and none in the response headers.
 
 Resolution order:
 
-1. `major` passed to the transformer in `orval.config.ts`. Always wins.
+1. `--major` passed to `umbraco-mcp-stamp-target-major`. Always wins.
 2. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, which reports a real semver. Uses
-   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`; `orval.config.ts` imports
-   `src/load-env.ts` so they are read from `.env`.
-3. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
+   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`, which the step reads from
+   `.env` itself.
+3. The `--spec`'s `info.version`, for a committed spec file carrying a real semver (the bundled
    `openapi.yaml` reports `17.4.0`).
 4. Otherwise `npm run generate` **fails**.
 
@@ -199,7 +206,7 @@ Rules:
   indistinguishable from the placeholder that shipped Umbraco-MCP-Base#220 — failing loudly is
   the cheaper outcome.
 - **Generating somewhere the instance is unreachable** (offline CI, air-gapped build) needs an
-  explicit `major` in `orval.config.ts`, or an `info.version` that carries a real Umbraco semver.
+  explicit `--major`, or a `--spec` whose `info.version` carries a real Umbraco semver.
 - If the instance lookup fails but the spec *does* carry a version, generation continues with a
   warning — worth reading, because an add-on's spec reports the add-on's own release, not
   Umbraco's.

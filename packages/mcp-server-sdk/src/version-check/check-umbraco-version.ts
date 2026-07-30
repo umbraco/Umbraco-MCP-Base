@@ -93,7 +93,7 @@ export interface CheckVersionOptions {
    * Every Umbraco MCP server knows this value by construction: it is resolved
    * at generation time — from the Umbraco instance the tools were generated
    * against — and stamped into a generated constant (see the SDK's
-   * `createUmbracoTargetMajorTransformer`). Making the field required means a
+   * `umbraco-mcp-stamp-target-major`). Making the field required means a
    * hand-wired server that forgets to supply it is a *compile error* rather
    * than a silently disabled check — which is how the check ended up shipping
    * dark in downstream consumers.
@@ -119,7 +119,7 @@ export interface CheckVersionOptions {
  * The target major is not something a caller is expected to invent: it is
  * resolved at generation time from the Umbraco instance the server's tools were
  * generated against, and stamped into a generated constant (see
- * `createUmbracoTargetMajorTransformer`). Note it cannot come from the spec —
+ * `umbraco-mcp-stamp-target-major`). Note it cannot come from the spec —
  * every Umbraco spec hard-codes `info.version` to `"Latest"`. Because the field is required, a
  * server that omits it fails to compile instead of silently running with the
  * check disabled.

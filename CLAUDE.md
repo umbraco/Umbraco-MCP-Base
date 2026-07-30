@@ -46,7 +46,7 @@ Run all tests before merging. Tests are grouped by what they cover and what infr
 
 | Command | What it tests | Tests |
 |---------|--------------|-------|
-| `npm run test:cli` | CLI integration tests — runs built template binary with filtering, introspection, dry-run, input sanitization; plus real-orval target-major generation | ~31 |
+| `npm run test:cli` | CLI integration tests — runs built template binary with filtering, introspection, dry-run, input sanitization; plus the target-major stamp CLI | ~31 |
 | `npm run test:integration` | Hosted MCP Wrangler integration tests | ~20 |
 | `npm run test:integration:chained` | Chained hosted MCP integration tests | ~18 |
 

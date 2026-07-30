@@ -7,7 +7,8 @@
   "types": "dist/index.d.ts",
   "bin": {
     "umbraco-mcp-generate-types": "./dist/cli/generate-tool-types.js",
-    "umbraco-mcp-generate-chained-deps": "./dist/cli/generate-chained-deps.js"
+    "umbraco-mcp-generate-chained-deps": "./dist/cli/generate-chained-deps.js",
+    "umbraco-mcp-stamp-target-major": "./dist/cli/stamp-target-major.js"
   },
   "exports": {
     ".": {
@@ -75,6 +76,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "json-schema-to-typescript": "^15.0.4",
+    "yaml": "^2.8.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {

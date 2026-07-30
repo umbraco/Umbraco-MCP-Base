@@ -28,13 +28,14 @@ export {
   type OpenApiDocumentLike,
 } from "./orval-relax-untyped-arrays.js";
 export {
-  createUmbracoTargetMajorTransformer,
+  stampTargetMajor,
   extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentWithInfo,
   type UmbracoTargetMajorOptions,
+  type StampTargetMajorResult,
   type TargetMajorSource,
 } from "./orval-target-major-writer.js";
 export {

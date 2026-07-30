@@ -304,7 +304,7 @@ export {
   camelCaseZodExports,
   restoreV7OptionalDefaults,
   postProcessZodFiles,
-  createUmbracoTargetMajorTransformer,
+  stampTargetMajor,
   extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
@@ -312,6 +312,7 @@ export {
   type OpenApiDocumentLike,
   type OpenApiDocumentWithInfo,
   type UmbracoTargetMajorOptions,
+  type StampTargetMajorResult,
   type TargetMajorSource,
   // Types
   type UmbracoFetchAuthConfig,
