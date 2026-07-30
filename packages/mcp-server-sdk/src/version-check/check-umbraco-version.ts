@@ -6,6 +6,7 @@
  */
 
 import { configurePreExecutionHook } from "../helpers/tool-decorators.js";
+import { majorFromVersion } from "./major-from-version.js";
 
 /**
  * Interface for a client that can fetch server information.
@@ -171,7 +172,19 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
 
     // Compare the connected instance's major against the explicitly declared
     // target major (never against the MCP server's own package version).
-    const umbracoMajor = umbracoVersion.split('.')[0]; // "16.3.1" → "16"
+    const umbracoMajor = majorFromVersion(umbracoVersion); // "16.3.1" → "16"
+
+    if (umbracoMajor === null) {
+      // A real Umbraco instance always reports a numeric-leading semver, so
+      // this is not the "false mismatch" case #220 was about — it's an
+      // instance reporting something unparseable. Treat it like the network
+      // error below: don't block on it, but don't stay silent either.
+      const message = `⚠️ Unable to verify Umbraco version compatibility: connected instance reported an unparseable version "${umbracoVersion}".`;
+      service.setMessage(message);
+      service.setBlocked(false);
+      console.error(message);
+      return;
+    }
 
     if (umbracoMajor === targetMajor) {
       // Versions match - no message needed

@@ -19,6 +19,7 @@ import {
   expandModesToCollections,
   checkUmbracoVersion,
   VersionCheckService,
+  SERVER_INFORMATION_PATH,
   type ToolCollectionExport,
   type ToolModeDefinition,
   type CollectionConfiguration,
@@ -375,7 +376,7 @@ export async function createPerRequestServer(
       client: {
         getServerInformation: async () => {
           const info = (await client({
-            url: "/umbraco/management/api/v1/server/information",
+            url: SERVER_INFORMATION_PATH,
             method: "GET",
           })) as { version: string };
           return { version: info.version };

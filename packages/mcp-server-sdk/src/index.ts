@@ -250,6 +250,7 @@ export {
 
 export {
   BLANK_UUID,
+  SERVER_INFORMATION_PATH,
   TRANSLATORS_USER_GROUP_ID,
   WRITERS_USER_GROUP_ID,
   Default_Memeber_TYPE_ID,
@@ -307,7 +308,6 @@ export {
   createUmbracoTargetMajorTransformer,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
-  SERVER_INFORMATION_PATH,
   type OpenApiDocumentLike,
   type OpenApiDocumentPassthrough,
   type UmbracoTargetMajorOptions,

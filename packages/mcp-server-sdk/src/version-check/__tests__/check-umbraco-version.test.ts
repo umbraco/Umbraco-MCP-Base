@@ -169,6 +169,30 @@ describe("checkUmbracoVersion", () => {
     expect(isToolExecutionBlocked()).toBe(true);
   });
 
+  it("should handle a non-numeric reported version gracefully without blocking", async () => {
+    // Arrange - every real Umbraco reports a numeric-leading semver, but a
+    // reported version that doesn't parse to a major (e.g. some non-Umbraco
+    // endpoint, or a future format) must not produce a "null.x" message nor a
+    // false mismatch block.
+    const mockClient: VersionCheckClient = {
+      getServerInformation: jest.fn<() => Promise<{ version: string }>>()
+        .mockResolvedValue({ version: "Latest" })
+    };
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "17",
+      client: mockClient
+    });
+
+    // Assert
+    const message = getVersionCheckMessage();
+    expect(message).toContain("⚠️ Unable to verify");
+    expect(message).toContain("Latest");
+    expect(isToolExecutionBlocked()).toBe(false);
+  });
+
   it("should handle API errors gracefully without blocking", async () => {
     // Arrange
     const mockClient: VersionCheckClient = {
