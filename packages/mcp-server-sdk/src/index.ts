@@ -305,12 +305,11 @@ export {
   restoreV7OptionalDefaults,
   postProcessZodFiles,
   createUmbracoTargetMajorTransformer,
-  extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
   type OpenApiDocumentLike,
-  type OpenApiDocumentWithInfo,
+  type OpenApiDocumentPassthrough,
   type UmbracoTargetMajorOptions,
   type TargetMajorSource,
   // Types

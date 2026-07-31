@@ -176,34 +176,32 @@ in Umbraco CMS, on 15.x through 18.x — as does the shared `ConfigureUmbracoSwa
 that add-ons (Forms, Commerce, Deploy, …) inherit. There is no version anywhere else in the
 document, and none in the response headers.
 
-Resolution order:
+**One source: the connected instance.** An authenticated `GET
+/umbraco/management/api/v1/server/information`, using `UMBRACO_BASE_URL` /
+`UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` — `orval.config.ts` imports `src/load-env.ts` so
+they are read from `.env`.
 
-1. **The connected instance** — an authenticated `GET
-   /umbraco/management/api/v1/server/information`, which reports a real semver. Uses
-   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`; `orval.config.ts` imports
-   `src/load-env.ts` so they are read from `.env`.
-2. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
-   `openapi.yaml` reports `17.4.0`).
-3. Otherwise `npm run generate` **fails**. There is no way to pin the major by hand — a
-   hand-written value is one nobody revisits, which is how Umbraco-MCP-Base#220 shipped.
+If it can't answer, `npm run generate` **fails**. There is no spec fallback, no `major` option
+and no env override: the spec's `info.version` is `"Latest"` on every Umbraco, and a
+hand-written value is one nobody revisits, which is how Umbraco-MCP-Base#220 shipped.
 
 `src/index.ts` passes `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` to the
 SDK's `checkUmbracoVersion`, where `expectedUmbracoMajor` is a **required** field — so the check
 can't be silently left off.
 
 Rules:
-- **Never edit the generated file by hand** — regenerate instead. It *is* committed, so a fresh
-  scaffold works before anyone runs `generate`.
+- **Never edit the generated file by hand** — regenerate instead.
+- The committed value is a **placeholder**, not a real reading — its own doc comment says so. A
+  fresh scaffold compiles, but the first `npm run generate` against your instance is what makes
+  the version check meaningful.
 - **There is no "keep the last value" fallback.** A target major that can't be resolved fails the
   build. The version check *blocks* tool execution on a mismatch, so a stale constant is
   indistinguishable from the placeholder that shipped Umbraco-MCP-Base#220 — failing loudly is
   the cheaper outcome.
-- **Generating somewhere the instance is unreachable** (offline CI, air-gapped build) needs an
-  `info.version` that carries a real Umbraco semver — otherwise generation fails. In practice you
-  reach the instance for the spec anyway, so this is rare.
-- If the instance lookup fails but the spec *does* carry a version, generation continues with a
-  warning — worth reading, because an add-on's spec reports the add-on's own release, not
-  Umbraco's.
+- **`npm run generate` needs credentials.** `init`/`discover` sets them up; without them
+  generation fails rather than guessing. You need the instance to fetch the spec anyway.
+- Each lookup failure warns with its own reason before the throw, so a broken `.env` is
+  diagnosable from the generate output.
 - Set `UMBRACO_EXPECTED_MAJOR` only to deliberately point at a different Umbraco major at
   runtime.
 

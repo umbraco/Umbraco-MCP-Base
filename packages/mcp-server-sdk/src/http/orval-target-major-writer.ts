@@ -12,37 +12,33 @@
  * placeholder — which is how umbraco/Umbraco-MCP-Base#220 shipped a check that
  * falsely blocked the first tool call of every scaffolded server.
  *
- * **Why not the spec's `info.version`?** That was the original design, and it
- * does not work against a real Umbraco. Every Umbraco Management API spec
- * hard-codes `info.version` to the literal string `"Latest"`
- * (`ConfigureUmbracoManagementApiSwaggerGenOptions` in Umbraco CMS, verified on
- * 15.x through 18.x), as does the shared `ConfigureUmbracoSwaggerGenOptions`
- * that add-ons (Forms, Commerce, Deploy, ...) inherit. There is no version
- * anywhere else in the document and none in the response headers. So a
- * spec-derived major only ever works for a committed spec file that happens to
- * carry a real semver, and silently freezes for everyone generating against a
- * live instance.
+ * **Why not the spec's `info.version`?** Because no Umbraco spec has a usable
+ * one. It is hard-coded to the literal string `"Latest"` in both
+ * `ConfigureUmbracoManagementApiSwaggerGenOptions` (CMS) and the shared
+ * `ConfigureUmbracoSwaggerGenOptions` that add-ons (Forms, Commerce, Deploy,
+ * ...) inherit — verified on 15.x through 18.x. There is no version anywhere
+ * else in the document and none in the response headers.
  *
- * **Where the major actually comes from**, in order:
+ * An earlier revision kept `info.version` as a last-resort fallback. It was
+ * removed because it could only ever do one of two things: nothing (an
+ * Umbraco-served spec, i.e. every real project), or supply a number that is
+ * *not* Umbraco's (a third-party or add-on spec reporting its own release —
+ * which needed a warning of its own to say so). The one case where it appeared
+ * to work was a hand-written sample spec, i.e. a hardcoded version wearing the
+ * costume of a discovered one.
  *
- * 1. The connected instance's `GET /umbraco/management/api/v1/server/information`,
- *    which reports a real semver. That endpoint requires authentication, so it
- *    is used when `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
- *    `UMBRACO_CLIENT_SECRET` are all set — the same values the server itself
- *    runs on. Leave them unset to skip the lookup.
- * 2. The spec's `info.version`, for a committed spec file carrying a real
- *    semver (the scaffolding template's sample spec does).
- * 3. Otherwise: **throw**. A missing target major must never degrade into a
- *    stale one — that is #220's failure mode, and the version check now blocks
- *    tool execution on a mismatch.
+ * **So there is exactly one source: the connected instance.**
+ * `GET /umbraco/management/api/v1/server/information` reports a real semver. It
+ * requires authentication, so `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
+ * `UMBRACO_CLIENT_SECRET` must all be set — the same values the server itself
+ * runs on. If the lookup cannot answer, this **throws**: a target major must
+ * never degrade into a stale or asserted one, which is #220's failure mode, and
+ * the version check now blocks tool execution on a mismatch.
  *
- * **There is deliberately no way to declare the major by hand.** Both remaining
- * sources are anchored to something real — the instance you are pointed at, or
- * the spec you generated from — so the constant cannot assert a version nothing
- * verified. An earlier `major` option existed for an offline-generation case
- * that turned out not to occur: you need the instance for the spec anyway, so if
- * you can generate at all, you can be asked which Umbraco you are generating
- * against. A hand-pinned major is one nobody revisits, which is #220 again.
+ * There is deliberately **no way to declare the major by hand** — no option, no
+ * env var, no spec fallback. You need the instance to fetch the spec anyway, so
+ * anything able to generate can be asked which Umbraco it is generating
+ * against. Every value this file writes was reported by a running Umbraco.
  *
  * **Why an orval input transformer?** Orval's `afterAllFilesWrite` hook
  * receives written file paths, not the spec, so it cannot see `info.version`.
@@ -90,12 +86,12 @@ import { normalizeBaseUrl } from "../helpers/url.js";
 import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
 
 /**
- * Minimal shape this transformer needs from an OpenAPI document — just
- * `info.version`. Typed structurally so the SDK needs no dependency on
- * `orval`; consumers can assign the transformer directly (or cast to orval's
- * `InputTransformerFn` if their config types require it).
+ * The spec is passed through untouched — this transformer never reads it. It
+ * only uses the orval input-transformer slot because that is the one extension
+ * point guaranteed to run as part of the same invocation that generates the
+ * client, which is what keeps the constant and the tools from drifting apart.
  */
-export type OpenApiDocumentWithInfo = { info?: { version?: unknown } };
+export type OpenApiDocumentPassthrough = object;
 
 /** Default name of the exported constant written to the generated file. */
 export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
@@ -116,8 +112,16 @@ export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
 export const SERVER_INFORMATION_PATH =
   "/umbraco/management/api/v1/server/information";
 
-/** Where a resolved target major came from, recorded in the generated file. */
-export type TargetMajorSource = "instance" | "spec";
+/**
+ * Where a value in the generated file came from.
+ *
+ * `instance` is the only thing the transformer produces. `placeholder` exists
+ * for the value a scaffolding template commits so a fresh project compiles
+ * before anyone has run `generate` — stamped via
+ * {@link renderTargetMajorModule} directly, and honest about not having been
+ * reported by anything. Reading the committed file tells you which you have.
+ */
+export type TargetMajorSource = "instance" | "placeholder";
 
 /**
  * Credentials for the authenticated `server/information` lookup, read from the
@@ -163,20 +167,6 @@ function majorFromVersion(version: unknown): string | null {
   return match ? match[1] : null;
 }
 
-/**
- * Extracts the leading numeric component of an OpenAPI spec's `info.version`.
- *
- * Note that no Umbraco-served spec has a usable one — see the module docs. This
- * stays useful for committed spec files that carry a real semver.
- *
- * @param spec - Parsed OpenAPI document
- * @returns The major version as a string (e.g. `"17"`), or `null` when
- *   `info.version` is absent or has no leading numeric component.
- */
-export function extractSpecMajor(spec: OpenApiDocumentWithInfo): string | null {
-  return majorFromVersion(spec?.info?.version);
-}
-
 /** Valid JavaScript/TypeScript identifier, conservatively defined. */
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -194,7 +184,8 @@ const SAFE_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,64}$/;
 const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
   instance:
     "Read from the Umbraco instance this server's tools were generated against, via `GET /umbraco/management/api/v1/server/information`.",
-  spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts` points at.",
+  placeholder:
+    "Placeholder committed with the project scaffold so it compiles before anything has been generated. NOT reported by any Umbraco — run `npm run generate` against your instance to replace it.",
 };
 
 /** Wraps prose to ~76 columns and prefixes continuations with ` * `. */
@@ -239,7 +230,7 @@ export function renderTargetMajorModule(
   constantName: string = DEFAULT_TARGET_MAJOR_CONSTANT,
   provenance: { version?: string; source?: TargetMajorSource } = {}
 ): string {
-  const { version, source = "spec" } = provenance;
+  const { version, source = "instance" } = provenance;
 
   if (!IDENTIFIER_PATTERN.test(constantName)) {
     throw new Error(
@@ -362,63 +353,30 @@ interface ResolveContext {
 }
 
 /** Resolves the target major from the first source that can supply one. */
-async function resolveTargetMajor(
-  spec: OpenApiDocumentWithInfo,
-  { outputPath, constantName }: ResolveContext
-): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
+async function resolveTargetMajor({
+  outputPath,
+  constantName,
+}: ResolveContext): Promise<{ major: string; version: string }> {
   const credentials = credentialsFromEnv();
-  const specVersion =
-    typeof spec?.info?.version === "string"
-      ? spec.info.version.trim()
-      : undefined;
-  const specMajor = extractSpecMajor(spec);
 
   if (credentials) {
     const version = await fetchInstanceVersion(credentials);
     const major = majorFromVersion(version);
-    if (major) {
-      // Both sources answered and disagree. The instance wins — a spec may be an
-      // add-on's, reporting its own release — but this is also what a stale
-      // UMBRACO_BASE_URL looks like: stamping a major the generated tools were
-      // not built from. Silence here would be the same class of bug the whole
-      // mechanism exists to prevent, so say it out loud.
-      if (specMajor && specMajor !== major) {
-        console.warn(
-          `[umbraco-mcp] ${constantName} resolved to "${major}" from the instance at ` +
-            `${normalizeBaseUrl(credentials.baseUrl)}, but the spec reports "${specVersion}" ` +
-            `(major "${specMajor}"). Using the instance. If these tools were generated from that ` +
-            `spec rather than that instance, one of the two is wrong — check UMBRACO_BASE_URL, or ` +
-            `pin the value with the transformer's \`major\` option.`
-        );
-      }
-      return { major, version, source: "instance" };
-    }
-  }
-
-  if (specMajor) {
-    if (credentials) {
-      // The instance is the reliable source; a spec may belong to an add-on
-      // whose `info.version` is its own release, not Umbraco's.
-      console.warn(
-        `[umbraco-mcp] Falling back to the spec's "info.version" (${specVersion}) for ${constantName}. ` +
-          `Verify this is the Umbraco major these tools target — an add-on's spec reports the add-on's ` +
-          `own version. Set the transformer's \`major\` option to pin it.`
-      );
-    }
-    return { major: specMajor, version: specVersion, source: "spec" };
+    if (major && version) return { major, version };
   }
 
   throw new Error(
     `[umbraco-mcp] Cannot determine the target Umbraco major for ${outputPath}.\n` +
-      `  - The spec's "info.version" is ${JSON.stringify(spec?.info?.version)}. Every Umbraco-served ` +
-      `spec hard-codes this to "Latest", so it is usually unusable.\n` +
       (credentials
-        ? `  - The instance lookup via ${SERVER_INFORMATION_PATH} returned no version (see the warning above).\n`
-        : `  - No instance lookup was attempted: set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and ` +
-          `UMBRACO_CLIENT_SECRET so the target major can be read from ${SERVER_INFORMATION_PATH}.\n`) +
-      `${constantName} is required by checkUmbracoVersion, which blocks tool execution on a mismatch — ` +
-      `so a wrong or stale value is worse than this error. There is deliberately no way to pin the ` +
-      `major by hand: point this at the Umbraco these tools are for, and it will tell you.`
+        ? `  - The instance lookup via ${SERVER_INFORMATION_PATH} did not return a usable version ` +
+          `(see the warning above for which step failed).\n`
+        : `  - No instance was configured: set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and ` +
+          `UMBRACO_CLIENT_SECRET so the major can be read from ${SERVER_INFORMATION_PATH}.\n`) +
+      `The connected instance is the only source. The spec cannot supply this — every Umbraco spec ` +
+      `hard-codes "info.version" to "Latest" — and there is deliberately no option, env var or ` +
+      `fallback for asserting it by hand: ${constantName} is compared against a live instance by ` +
+      `checkUmbracoVersion, which blocks tool execution on a mismatch, so a value nothing verified ` +
+      `is worse than this error.`
   );
 }
 
@@ -445,21 +403,18 @@ async function resolveTargetMajor(
  */
 export function createUmbracoTargetMajorTransformer(
   options: UmbracoTargetMajorOptions
-): <T extends OpenApiDocumentWithInfo>(spec: T) => Promise<T> {
+): <T extends OpenApiDocumentPassthrough>(spec: T) => Promise<T> {
   const { outputPath, constantName = DEFAULT_TARGET_MAJOR_CONSTANT } = options;
 
-  return async <T extends OpenApiDocumentWithInfo>(spec: T): Promise<T> => {
+  return async <T extends OpenApiDocumentPassthrough>(spec: T): Promise<T> => {
     const resolved = path.resolve(process.cwd(), outputPath);
 
-    const { major, version, source } = await resolveTargetMajor(spec, {
+    const { major, version } = await resolveTargetMajor({
       outputPath,
       constantName,
     });
 
-    const contents = renderTargetMajorModule(major, constantName, {
-      version,
-      source,
-    });
+    const contents = renderTargetMajorModule(major, constantName, { version });
 
     // Only write when something actually changed, so a no-op regeneration
     // doesn't dirty the working tree (or churn file watchers).

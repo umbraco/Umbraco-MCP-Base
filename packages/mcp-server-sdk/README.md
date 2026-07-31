@@ -535,26 +535,30 @@ add-ons (Forms, Commerce, Deploy, …) inherit. There is no version anywhere els
 and none in the response headers, so a spec-derived major only works for a committed spec file
 that happens to carry a real semver.
 
-Resolution order:
+**There is exactly one source: the connected instance.** An authenticated `GET
+/umbraco/management/api/v1/server/information` — the only server endpoint that reports a real
+semver (`server/status` and `server/configuration` are anonymous but version-free). It uses
+`UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`, the same three values the
+server itself runs on, so a project that can run its tools needs no extra config. The path is
+identical on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
+URL, not the `/umbraco/management/api/v1/...` contract.
 
-1. **The connected instance** — an authenticated `GET
-   /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
-   semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
-   `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` — the same values the
-   server itself runs on, so the normal case needs no config at all. Set them for the
-   `generate` invocation to point elsewhere; leave them unset to skip the lookup. The path is
-   the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
-   URL, not the `/umbraco/management/api/v1/...` contract.
-2. **The spec's `info.version`**, for a committed spec carrying a real semver.
-3. Otherwise it **throws**, failing `npm run generate`.
+If the lookup can't answer, generation **throws**. There is deliberately no option, no env var
+and no spec fallback for supplying the major another way:
 
-There is deliberately **no way to declare the major by hand.** Both sources are anchored to
-something real — the instance you are pointed at, or the spec you generated from — so the
-constant can never assert a version nothing verified. An earlier `major` option existed for
-offline generation, which turned out not to occur in practice: you need the instance for the
-spec anyway, so anything able to generate can be asked which Umbraco it is generating against.
-A hand-pinned major is a value nobody revisits, which is
-[#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) again.
+- **Not `info.version`.** Every Umbraco spec hard-codes it to `"Latest"`. An earlier revision
+  kept it as a last resort, which could only ever do nothing (an Umbraco-served spec, i.e. every
+  real project) or supply a number that isn't Umbraco's (a third-party or add-on spec reporting
+  its own release). The one case where it appeared to work was a hand-written sample spec — a
+  hardcoded version dressed as a discovered one.
+- **Not a `major` option or env var.** You need the instance to fetch the spec anyway, so
+  anything able to generate can be asked which Umbraco it is generating against. A value nobody
+  revisits is how [#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) shipped.
+
+Every value this writes was reported by a running Umbraco. The one exception is deliberate and
+labelled: a scaffolding template may commit a `placeholder` value so a fresh project compiles
+before anything has been generated, and the generated file's own doc comment says it was not
+reported by any Umbraco.
 
 Why an orval **input transformer** rather than a hook: orval's only lifecycle hook,
 `afterAllFilesWrite`, receives written file paths and never sees the spec. An input transformer
@@ -604,28 +608,29 @@ export const UMBRACO_TARGET_MAJOR = "18";
 
 Notes:
 
-- **Commit the generated file.** A freshly scaffolded project must have a working value before
-  anyone runs `generate` themselves.
+- **Commit the generated file.** A freshly scaffolded project must compile before anyone runs
+  `generate`. Stamp that committed value with `source: 'placeholder'` so it cannot be mistaken
+  for a discovered one.
 - **There is no "keep the previous value" fallback.** An unresolvable target major fails the
   build. `checkUmbracoVersion` *blocks* tool execution on a mismatch, so a stale constant is
   indistinguishable from the placeholder that shipped
   [#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) — the earlier warn-and-keep
   behaviour meant a project regenerating against a new Umbraco major silently kept the old one.
-- **Generating offline** (no reachable instance) needs an `info.version` that carries a real
-  Umbraco semver. Without one, generation fails rather than accepting a value on trust.
+- **`npm run generate` requires credentials.** That is the trade for never asserting an
+  unverified major. In practice `init`/`discover` provisions the API user and writes `.env`
+  before `generate` ever runs.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
   `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env` — the same variable the server itself uses.
-- If the instance lookup fails but the spec supplies a version, generation continues **with a
-  warning** — an add-on's spec reports the add-on's own release, not Umbraco's, so the value
-  needs a human eye.
-- The generated file records which source the value came from, so a wrong one is diagnosable
-  from the committed file alone.
+- Each lookup failure warns with its own reason — which of the two requests failed and why —
+  before the throw, so a broken `.env` is diagnosable from the generate output.
+- The generated file records whether the value was read from an instance or is a scaffold
+  placeholder, so a project that has never generated is obvious from the committed file alone.
 - The file is only rewritten when the resolved value changes, so a no-op `npm run generate`
   leaves the working tree clean.
 - `outputPath` and `constantName` are the only options. Credentials are environment-only by
-  design — they are the same three variables the server already needs — and there is no option to
-  supply the major itself: every extra way to state it is another way to state it wrongly.
-- Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
+  design — the same three variables the server already needs — and there is no option for the
+  major itself: every extra way to state it is another way to state it wrongly.
+- Related exports: `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
   `SERVER_INFORMATION_PATH`, `TargetMajorSource`.
 
 ### Wiring in scaffolded projects

@@ -15,27 +15,25 @@ import {
  * Stamps the Umbraco major version this server targets into a generated
  * constant.
  *
- * It cannot come from the spec: every Umbraco Management API spec hard-codes
- * `info.version` to the literal string `"Latest"`, as does the shared config
- * add-ons inherit. So the transformer asks the instance instead — an
- * authenticated `GET /umbraco/management/api/v1/server/information`, using the
- * credentials in `.env` — and only falls back to `info.version` for a committed
- * spec file that carries a real semver (the bundled `openapi.yaml` does).
+ * The value comes from one place: an authenticated
+ * `GET /umbraco/management/api/v1/server/information` against the instance in
+ * `.env`. It cannot come from the spec — every Umbraco spec hard-codes
+ * `info.version` to the literal string `"Latest"` — and there is deliberately
+ * no option, env var or fallback for asserting it by hand, because a value
+ * nothing reported is a value nobody revisits (Umbraco-MCP-Base#220).
  *
- * Orval's input transformer is the only extension point that sees the parsed
- * OpenAPI document (the `afterAllFilesWrite` hook only gets file paths), and
- * orval awaits it, so the lookup fits here. After `init`/`discover` repoints
- * `input.target` below, regenerating updates the constant with no extra step
- * and no value to maintain by hand.
+ * So `npm run generate` needs `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
+ * `UMBRACO_CLIENT_SECRET` — the same three the server itself runs on, which
+ * `init`/`discover` sets up. Without them it fails rather than guessing.
  *
- * If neither source works, `npm run generate` fails rather than keeping a stale
- * value — the version check blocks tool execution on a mismatch, so a wrong
- * major is worse than a failed build (Umbraco-MCP-Base#220). There is
- * deliberately no way to pin the major by hand: point `.env` at the Umbraco
- * these tools are for, and it will tell you.
+ * It sits in orval's input-transformer slot not because it needs the spec (it
+ * ignores it) but because that slot runs as part of the same invocation that
+ * generates the client — so the constant and the tools cannot drift apart. A
+ * separate step could be skipped; this cannot.
  *
- * The generated file is committed so a fresh scaffold has a working value
- * before anyone runs `generate` themselves.
+ * The committed `umbraco-target.generated.ts` is a *placeholder* so a fresh
+ * scaffold compiles before anyone has generated anything. It says so in its own
+ * doc comment. Your first `npm run generate` replaces it with a real value.
  */
 const stampTargetMajor = createUmbracoTargetMajorTransformer({
   outputPath: "./src/config/umbraco-target.generated.ts",
