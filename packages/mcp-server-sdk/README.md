@@ -573,7 +573,7 @@ import { defineConfig } from 'orval';
 import {
   createUmbracoTargetMajorTransformer,
   relaxUntypedArrays,
-} from '@umbraco-cms/mcp-server-sdk';
+} from '@umbraco-cms/mcp-server-sdk/orval';
 
 const stampTargetMajor = createUmbracoTargetMajorTransformer({
   outputPath: './src/config/umbraco-target.generated.ts', // resolved against cwd
@@ -811,6 +811,7 @@ The SDK provides several subpath exports for tree-shaking:
 - `@umbraco-cms/mcp-server-sdk/helpers` - Helper functions
 - `@umbraco-cms/mcp-server-sdk/types` - Type definitions
 - `@umbraco-cms/mcp-server-sdk/constants` - Umbraco well-known IDs
+- `@umbraco-cms/mcp-server-sdk/orval` - Build-time Orval codegen helpers (not re-exported from the main entry: they import `fs`/`path`, which the hosted Worker bundle can't use)
 
 ## Requirements
 

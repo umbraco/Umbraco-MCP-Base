@@ -32,7 +32,13 @@ const REPO_ROOT = path.resolve(
   "../../../.."
 );
 const ORVAL_BIN = path.join(REPO_ROOT, "node_modules/orval/dist/bin/orval.mjs");
-const SDK_DIST = path.join(REPO_ROOT, "packages/mcp-server-sdk/dist/index.js");
+// The `./orval` entry, not the main barrel: the codegen helpers live behind
+// their own subpath so `fs`/`path` stay out of the bundle hosted-mcp ships to a
+// Cloudflare Worker.
+const SDK_ORVAL_DIST = path.join(
+  REPO_ROOT,
+  "packages/mcp-server-sdk/dist/orval/index.js"
+);
 const GENERATED_PATH = "src/config/umbraco-target.generated.ts";
 
 /** A spec that reports what every real Umbraco reports: no usable version. */
@@ -86,7 +92,7 @@ async function runOrval(options: {
 
     fs.writeFileSync(
       path.join(dir, "orval.config.mjs"),
-      `import { createUmbracoTargetMajorTransformer, relaxUntypedArrays } from ${JSON.stringify(SDK_DIST)};
+      `import { createUmbracoTargetMajorTransformer, relaxUntypedArrays } from ${JSON.stringify(SDK_ORVAL_DIST)};
 
 const stamp = createUmbracoTargetMajorTransformer({
   outputPath: "./${GENERATED_PATH}",
@@ -133,9 +139,9 @@ export default {
 
 describe("Target major generation (real orval)", () => {
   beforeAll(() => {
-    if (!fs.existsSync(SDK_DIST)) {
+    if (!fs.existsSync(SDK_ORVAL_DIST)) {
       throw new Error(
-        `SDK not built. Run \`npm run build\` first. Looked for ${SDK_DIST}`
+        `SDK not built. Run \`npm run build\` first. Looked for ${SDK_ORVAL_DIST}`
       );
     }
     if (!fs.existsSync(ORVAL_BIN)) {

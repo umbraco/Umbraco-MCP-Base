@@ -37,6 +37,10 @@
     "./constants": {
       "types": "./dist/constants/index.d.ts",
       "import": "./dist/constants/index.js"
+    },
+    "./orval": {
+      "types": "./dist/orval/index.d.ts",
+      "import": "./dist/orval/index.js"
     }
   },
   "files": [

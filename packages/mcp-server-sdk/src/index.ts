@@ -297,21 +297,6 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
-  // Orval helpers
-  orvalImportFixer,
-  relaxUntypedArrays,
-  collectZodFiles,
-  relaxUuidToGuid,
-  camelCaseZodExports,
-  restoreV7OptionalDefaults,
-  postProcessZodFiles,
-  createUmbracoTargetMajorTransformer,
-  renderTargetMajorModule,
-  DEFAULT_TARGET_MAJOR_CONSTANT,
-  type OpenApiDocumentLike,
-  type OpenApiDocumentPassthrough,
-  type UmbracoTargetMajorOptions,
-  type TargetMajorSource,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,
@@ -319,3 +304,12 @@ export {
   type CreateUmbracoFetchClientOptions,
   type UmbracoFetchClientResult,
 } from "./http/index.js";
+
+// The Orval codegen helpers are deliberately **not** re-exported here. They
+// import `fs`/`path` and only run at build time, whereas this barrel is what
+// `@umbraco-cms/mcp-hosted` and `template/src/worker.ts` bundle into a
+// Cloudflare Worker. Re-exporting them would leave the Worker bundle relying on
+// treeshaking and `nodejs_compat_v2` to drop Node builtins it can't use.
+//
+// Import them from `@umbraco-cms/mcp-server-sdk/orval` instead — see
+// `src/orval/index.ts`.

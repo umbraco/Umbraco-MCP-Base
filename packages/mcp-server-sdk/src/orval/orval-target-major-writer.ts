@@ -83,7 +83,7 @@
 import fs from "fs";
 import path from "path";
 import { normalizeBaseUrl } from "../helpers/url.js";
-import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
+import { requestClientCredentialsToken } from "../http/umbraco-fetch-client.js";
 import { SERVER_INFORMATION_PATH } from "../constants/index.js";
 import { majorFromVersion } from "../version-check/major-from-version.js";
 
