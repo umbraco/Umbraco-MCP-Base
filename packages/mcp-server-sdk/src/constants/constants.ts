@@ -5,13 +5,6 @@ export const BLANK_UUID = "00000000-0000-0000-0000-000000000000";
  * the only server endpoint that carries it — `server/status` and
  * `server/configuration` are anonymous but version-free, and this one requires
  * authentication.
- *
- * Unaffected by the swagger → openapi rename at Umbraco 18: that switch moved
- * the *spec document* URL (`/umbraco/swagger/{name}/swagger.json` →
- * `/umbraco/openapi/{name}.json`), while the Management API contract
- * `/umbraco/management/api/v1/...` is unchanged across it. So one path works
- * for every supported major — see `api-spec-conventions.ts` in
- * create-mcp-server, which owns that distinction.
  */
 export const SERVER_INFORMATION_PATH =
   "/umbraco/management/api/v1/server/information";
