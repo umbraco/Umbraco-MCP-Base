@@ -537,8 +537,7 @@ that happens to carry a real semver.
 
 Resolution order:
 
-1. **`major`** passed to the transformer. Always wins.
-2. **The connected instance** — an authenticated `GET
+1. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, the only server endpoint that reports a real
    semver (`server/status` and `server/configuration` are anonymous but version-free). Uses
    `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` — the same values the
@@ -546,8 +545,16 @@ Resolution order:
    `generate` invocation to point elsewhere; leave them unset to skip the lookup. The path is
    the same on every Umbraco major: the swagger → openapi rename at 18 moved the spec document
    URL, not the `/umbraco/management/api/v1/...` contract.
-3. **The spec's `info.version`**, for a committed spec carrying a real semver.
-4. Otherwise it **throws**, failing `npm run generate`.
+2. **The spec's `info.version`**, for a committed spec carrying a real semver.
+3. Otherwise it **throws**, failing `npm run generate`.
+
+There is deliberately **no way to declare the major by hand.** Both sources are anchored to
+something real — the instance you are pointed at, or the spec you generated from — so the
+constant can never assert a version nothing verified. An earlier `major` option existed for
+offline generation, which turned out not to occur in practice: you need the instance for the
+spec anyway, so anything able to generate can be asked which Umbraco it is generating against.
+A hand-pinned major is a value nobody revisits, which is
+[#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) again.
 
 Why an orval **input transformer** rather than a hook: orval's only lifecycle hook,
 `afterAllFilesWrite`, receives written file paths and never sees the spec. An input transformer
@@ -566,7 +573,6 @@ import {
 
 const stampTargetMajor = createUmbracoTargetMajorTransformer({
   outputPath: './src/config/umbraco-target.generated.ts', // resolved against cwd
-  // major: '18',  // pin explicitly when the instance is unreachable
 });
 
 export default defineConfig({
@@ -605,8 +611,8 @@ Notes:
   indistinguishable from the placeholder that shipped
   [#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220) — the earlier warn-and-keep
   behaviour meant a project regenerating against a new Umbraco major silently kept the old one.
-- **Generating offline** (no reachable instance) needs an explicit `major`, or an `info.version`
-  that carries a real Umbraco semver.
+- **Generating offline** (no reachable instance) needs an `info.version` that carries a real
+  Umbraco semver. Without one, generation fails rather than accepting a value on trust.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
   `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env` — the same variable the server itself uses.
 - If the instance lookup fails but the spec supplies a version, generation continues **with a
@@ -616,9 +622,9 @@ Notes:
   from the committed file alone.
 - The file is only rewritten when the resolved value changes, so a no-op `npm run generate`
   leaves the working tree clean.
-- `major` is the only option beyond `outputPath`/`constantName`. Credentials are environment-only
-  by design: they are the same three variables the server already needs, and a second way to
-  supply them would just be a second way to get them wrong.
+- `outputPath` and `constantName` are the only options. Credentials are environment-only by
+  design — they are the same three variables the server already needs — and there is no option to
+  supply the major itself: every extra way to state it is another way to state it wrongly.
 - Related exports: `extractSpecMajor`, `renderTargetMajorModule`, `DEFAULT_TARGET_MAJOR_CONSTANT`,
   `SERVER_INFORMATION_PATH`, `TargetMajorSource`.
 

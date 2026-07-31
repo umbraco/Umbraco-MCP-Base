@@ -25,17 +25,24 @@
  *
  * **Where the major actually comes from**, in order:
  *
- * 1. `options.major` — set explicitly in `orval.config.ts`. Always wins.
- * 2. The connected instance's `GET /umbraco/management/api/v1/server/information`,
+ * 1. The connected instance's `GET /umbraco/management/api/v1/server/information`,
  *    which reports a real semver. That endpoint requires authentication, so it
  *    is used when `UMBRACO_BASE_URL`, `UMBRACO_CLIENT_ID` and
  *    `UMBRACO_CLIENT_SECRET` are all set — the same values the server itself
  *    runs on. Leave them unset to skip the lookup.
- * 3. The spec's `info.version`, for a committed spec file carrying a real
+ * 2. The spec's `info.version`, for a committed spec file carrying a real
  *    semver (the scaffolding template's sample spec does).
- * 4. Otherwise: **throw**. A missing target major must never degrade into a
+ * 3. Otherwise: **throw**. A missing target major must never degrade into a
  *    stale one — that is #220's failure mode, and the version check now blocks
  *    tool execution on a mismatch.
+ *
+ * **There is deliberately no way to declare the major by hand.** Both remaining
+ * sources are anchored to something real — the instance you are pointed at, or
+ * the spec you generated from — so the constant cannot assert a version nothing
+ * verified. An earlier `major` option existed for an offline-generation case
+ * that turned out not to occur: you need the instance for the spec anyway, so if
+ * you can generate at all, you can be asked which Umbraco you are generating
+ * against. A hand-pinned major is one nobody revisits, which is #220 again.
  *
  * **Why an orval input transformer?** Orval's `afterAllFilesWrite` hook
  * receives written file paths, not the spec, so it cannot see `info.version`.
@@ -110,7 +117,7 @@ export const SERVER_INFORMATION_PATH =
   "/umbraco/management/api/v1/server/information";
 
 /** Where a resolved target major came from, recorded in the generated file. */
-export type TargetMajorSource = "explicit" | "instance" | "spec";
+export type TargetMajorSource = "instance" | "spec";
 
 /**
  * Credentials for the authenticated `server/information` lookup, read from the
@@ -145,17 +152,6 @@ export interface UmbracoTargetMajorOptions {
    * Name of the exported constant. Defaults to `UMBRACO_TARGET_MAJOR`.
    */
   constantName?: string;
-  /**
-   * Declare the target major explicitly instead of discovering it. Use this
-   * when generation happens somewhere the instance is unreachable and the spec
-   * carries no real version — an offline CI job generating from a committed
-   * `"Latest"` spec, say. Takes precedence over every other source.
-   *
-   * This is the only override. To point the lookup somewhere else, set
-   * `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET` for the
-   * `generate` invocation; to skip it, leave them unset.
-   */
-  major?: string;
 }
 
 /** Extracts the leading numeric component of a version string. */
@@ -196,8 +192,6 @@ const SAFE_VERSION_PATTERN = /^[A-Za-z0-9.+-]{1,64}$/;
  * the generated file.
  */
 const SOURCE_DESCRIPTIONS: Record<TargetMajorSource, string> = {
-  explicit:
-    "Declared explicitly via the transformer's `major` option in `orval.config.ts`.",
   instance:
     "Read from the Umbraco instance this server's tools were generated against, via `GET /umbraco/management/api/v1/server/information`.",
   spec: "Derived from the `info.version` of the OpenAPI spec that `orval.config.ts` points at.",
@@ -363,7 +357,6 @@ async function fetchInstanceVersion(
  * messages can grow without threading more positional parameters.
  */
 interface ResolveContext {
-  major?: string;
   outputPath: string;
   constantName: string;
 }
@@ -371,20 +364,8 @@ interface ResolveContext {
 /** Resolves the target major from the first source that can supply one. */
 async function resolveTargetMajor(
   spec: OpenApiDocumentWithInfo,
-  { major: explicitMajor, outputPath, constantName }: ResolveContext
+  { outputPath, constantName }: ResolveContext
 ): Promise<{ major: string; version?: string; source: TargetMajorSource }> {
-  if (explicitMajor !== undefined) {
-    const major = majorFromVersion(explicitMajor);
-    if (!major) {
-      throw new Error(
-        `[umbraco-mcp] Invalid \`major\` option ${JSON.stringify(explicitMajor)}: ` +
-          `expected a version starting with a number, e.g. "18".`
-      );
-    }
-    // No "reported version" line: nothing reported it, a human declared it.
-    return { major, source: "explicit" };
-  }
-
   const credentials = credentialsFromEnv();
   const specVersion =
     typeof spec?.info?.version === "string"
@@ -435,9 +416,9 @@ async function resolveTargetMajor(
         ? `  - The instance lookup via ${SERVER_INFORMATION_PATH} returned no version (see the warning above).\n`
         : `  - No instance lookup was attempted: set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and ` +
           `UMBRACO_CLIENT_SECRET so the target major can be read from ${SERVER_INFORMATION_PATH}.\n`) +
-      `  - Or declare it explicitly: createUmbracoTargetMajorTransformer({ major: "18", ... }).\n` +
       `${constantName} is required by checkUmbracoVersion, which blocks tool execution on a mismatch — ` +
-      `so a wrong or stale value is worse than this error.`
+      `so a wrong or stale value is worse than this error. There is deliberately no way to pin the ` +
+      `major by hand: point this at the Umbraco these tools are for, and it will tell you.`
   );
 }
 
@@ -458,24 +439,19 @@ async function resolveTargetMajor(
  * throws, because the version check blocks tool execution on a mismatch and a
  * stale constant is indistinguishable from #220's placeholder.
  *
- * @param options - Output path, optional constant name and explicit major
+ * @param options - Output path and optional constant name
  * @returns An orval-compatible async input transformer
  * @throws If no source yields a target major
  */
 export function createUmbracoTargetMajorTransformer(
   options: UmbracoTargetMajorOptions
 ): <T extends OpenApiDocumentWithInfo>(spec: T) => Promise<T> {
-  const {
-    outputPath,
-    constantName = DEFAULT_TARGET_MAJOR_CONSTANT,
-    major: explicitMajor,
-  } = options;
+  const { outputPath, constantName = DEFAULT_TARGET_MAJOR_CONSTANT } = options;
 
   return async <T extends OpenApiDocumentWithInfo>(spec: T): Promise<T> => {
     const resolved = path.resolve(process.cwd(), outputPath);
 
     const { major, version, source } = await resolveTargetMajor(spec, {
-      major: explicitMajor,
       outputPath,
       constantName,
     });

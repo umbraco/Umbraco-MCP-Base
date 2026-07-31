@@ -119,7 +119,6 @@ describe("renderTargetMajorModule", () => {
     expect(render({ version: "18.0.2", source: "instance" })).toContain(
       SERVER_INFORMATION_PATH
     );
-    expect(render({ source: "explicit" })).toContain("`major` option");
     expect(render({ version: "18.0.2", source: "spec" })).toContain("info.version");
   });
 
@@ -351,42 +350,14 @@ describe("createUmbracoTargetMajorTransformer", () => {
     });
   });
 
-  describe("explicit major", () => {
-    it("wins over both the instance and the spec", async () => {
-      // Arrange - credentials present and the spec versioned, so this proves
-      // precedence rather than absence of the alternatives.
-      setCredentials();
-      const fetchMock = mockInstance({ version: "18.0.2" });
-      const transformer = makeTransformer({ major: "15" });
-
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(
-        readGenerated()
-      ).toContain('export const UMBRACO_TARGET_MAJOR = "15";');
-    });
-
-    it("rejects a major that is not a version", async () => {
-      // Arrange - catches `major: "Latest"` copied from the spec.
-      const transformer = makeTransformer({ major: "Latest" });
-
-      // Act / Assert
-      await expect(transformer({ info: {} })).rejects.toThrow(
-        /Invalid `major` option/
-      );
-    });
-  });
-
   describe("failure is loud", () => {
     it("throws rather than preserving a previously-generated value", async () => {
       // Arrange - THE regression this change exists to prevent. Before, an
       // unusable version plus an existing file meant "warn and keep", so a
       // project regenerating against a new Umbraco major silently kept the old
       // one and then blocked every tool call (#220's failure mode).
-      await makeTransformer({ major: "17" })({ info: {} });
+      // Seed via the spec, the only remaining way to produce a file offline.
+      await makeTransformer()({ info: { version: "17.4.0" } });
       const before = readGenerated();
 
       const transformer = makeTransformer();
@@ -400,7 +371,7 @@ describe("createUmbracoTargetMajorTransformer", () => {
       expect(readGenerated()).toBe(before);
     });
 
-    it("names every way out in the error", async () => {
+    it("names the real fix in the error, and no hand-pinned escape hatch", async () => {
       // Arrange
       const transformer = makeTransformer();
 
@@ -412,10 +383,12 @@ describe("createUmbracoTargetMajorTransformer", () => {
         message = (error as Error).message;
       }
 
-      // Assert - an actionable error, not just "cannot derive".
+      // Assert - an actionable error, not just "cannot derive". The only fix it
+      // offers is pointing at the instance, because that is the only fix: a
+      // hand-pinned major would be a value nobody revisits (#220).
       expect(message).toContain("UMBRACO_BASE_URL");
       expect(message).toContain(SERVER_INFORMATION_PATH);
-      expect(message).toContain('major: "18"');
+      expect(message).not.toContain("major:");
     });
   });
 

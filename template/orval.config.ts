@@ -30,9 +30,9 @@ import {
  *
  * If neither source works, `npm run generate` fails rather than keeping a stale
  * value — the version check blocks tool execution on a mismatch, so a wrong
- * major is worse than a failed build (Umbraco-MCP-Base#220). Pass
- * `major: "18"` here to pin it explicitly when generating somewhere the
- * instance is unreachable.
+ * major is worse than a failed build (Umbraco-MCP-Base#220). There is
+ * deliberately no way to pin the major by hand: point `.env` at the Umbraco
+ * these tools are for, and it will tell you.
  *
  * The generated file is committed so a fresh scaffold has a working value
  * before anyone runs `generate` themselves.

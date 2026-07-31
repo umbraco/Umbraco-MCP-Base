@@ -178,14 +178,14 @@ document, and none in the response headers.
 
 Resolution order:
 
-1. `major` passed to the transformer in `orval.config.ts`. Always wins.
-2. **The connected instance** — an authenticated `GET
+1. **The connected instance** — an authenticated `GET
    /umbraco/management/api/v1/server/information`, which reports a real semver. Uses
    `UMBRACO_BASE_URL` / `UMBRACO_CLIENT_ID` / `UMBRACO_CLIENT_SECRET`; `orval.config.ts` imports
    `src/load-env.ts` so they are read from `.env`.
-3. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
+2. The spec's `info.version`, for a committed spec file carrying a real semver (the bundled
    `openapi.yaml` reports `17.4.0`).
-4. Otherwise `npm run generate` **fails**.
+3. Otherwise `npm run generate` **fails**. There is no way to pin the major by hand — a
+   hand-written value is one nobody revisits, which is how Umbraco-MCP-Base#220 shipped.
 
 `src/index.ts` passes `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` to the
 SDK's `checkUmbracoVersion`, where `expectedUmbracoMajor` is a **required** field — so the check
@@ -199,7 +199,8 @@ Rules:
   indistinguishable from the placeholder that shipped Umbraco-MCP-Base#220 — failing loudly is
   the cheaper outcome.
 - **Generating somewhere the instance is unreachable** (offline CI, air-gapped build) needs an
-  explicit `major` in `orval.config.ts`, or an `info.version` that carries a real Umbraco semver.
+  `info.version` that carries a real Umbraco semver — otherwise generation fails. In practice you
+  reach the instance for the spec anyway, so this is rare.
 - If the instance lookup fails but the spec *does* carry a version, generation continues with a
   warning — worth reading, because an add-on's spec reports the add-on's own release, not
   Umbraco's.
