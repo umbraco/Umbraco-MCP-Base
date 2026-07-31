@@ -1,5 +1,14 @@
 export const BLANK_UUID = "00000000-0000-0000-0000-000000000000";
 
+/**
+ * The Management API endpoint reporting the running Umbraco's version. This is
+ * the only server endpoint that carries it — `server/status` and
+ * `server/configuration` are anonymous but version-free, and this one requires
+ * authentication.
+ */
+export const SERVER_INFORMATION_PATH =
+  "/umbraco/management/api/v1/server/information";
+
 //Umbraco CMS User Group IDs
 export const TRANSLATORS_USER_GROUP_ID = "F2012E4C-D232-4BD1-8EAE-4384032D97D8";
 export const WRITERS_USER_GROUP_ID = "9fc2a16f-528c-46d6-a014-75bf4ec2480c";

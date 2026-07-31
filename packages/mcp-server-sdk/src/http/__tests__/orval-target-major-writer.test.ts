@@ -19,9 +19,9 @@ import {
   createUmbracoTargetMajorTransformer,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
-  SERVER_INFORMATION_PATH,
   type UmbracoTargetMajorOptions,
 } from "../orval-target-major-writer.js";
+import { SERVER_INFORMATION_PATH } from "../../constants/index.js";
 
 /**
  * Configures the instance lookup the only way a consumer can: the three env

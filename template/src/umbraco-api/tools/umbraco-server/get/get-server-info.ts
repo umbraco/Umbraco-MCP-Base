@@ -14,6 +14,7 @@ import {
   createToolResult,
   UmbracoManagementClient,
   CAPTURE_RAW_HTTP_RESPONSE,
+  SERVER_INFORMATION_PATH,
   type ToolDefinition,
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -38,7 +39,7 @@ const getServerInfoTool: ToolDefinition = {
     // CAPTURE_RAW_HTTP_RESPONSE returns HttpResponse<T> at runtime,
     // but the generic signature returns T — cast to access .data.
     const response = await UmbracoManagementClient<ServerInfo>(
-      { url: "/umbraco/management/api/v1/server/information", method: "GET" },
+      { url: SERVER_INFORMATION_PATH, method: "GET" },
       CAPTURE_RAW_HTTP_RESPONSE,
     ) as unknown as HttpResponse<ServerInfo>;
 

@@ -84,6 +84,8 @@ import fs from "fs";
 import path from "path";
 import { normalizeBaseUrl } from "../helpers/url.js";
 import { requestClientCredentialsToken } from "./umbraco-fetch-client.js";
+import { SERVER_INFORMATION_PATH } from "../constants/index.js";
+import { majorFromVersion } from "../version-check/major-from-version.js";
 
 /**
  * The spec is passed through untouched — this transformer never reads it. It
@@ -95,22 +97,6 @@ export type OpenApiDocumentPassthrough = object;
 
 /** Default name of the exported constant written to the generated file. */
 export const DEFAULT_TARGET_MAJOR_CONSTANT = "UMBRACO_TARGET_MAJOR";
-
-/**
- * The Management API endpoint reporting the running Umbraco's version. This is
- * the only server endpoint that carries it — `server/status` and
- * `server/configuration` are anonymous but version-free, and this one requires
- * authentication.
- *
- * Unaffected by the swagger → openapi rename at Umbraco 18: that switch moved
- * the *spec document* URL (`/umbraco/swagger/{name}/swagger.json` →
- * `/umbraco/openapi/{name}.json`), while the Management API contract
- * `/umbraco/management/api/v1/...` is unchanged across it. So one path works
- * for every supported major — see `api-spec-conventions.ts` in
- * create-mcp-server, which owns that distinction.
- */
-export const SERVER_INFORMATION_PATH =
-  "/umbraco/management/api/v1/server/information";
 
 /**
  * Where a value in the generated file came from.
@@ -156,15 +142,6 @@ export interface UmbracoTargetMajorOptions {
    * Name of the exported constant. Defaults to `UMBRACO_TARGET_MAJOR`.
    */
   constantName?: string;
-}
-
-/** Extracts the leading numeric component of a version string. */
-function majorFromVersion(version: unknown): string | null {
-  if (typeof version !== "string") return null;
-
-  // "17.4.0" → "17", "17" → "17", " 18.0.0-rc1 " → "18", "Latest" → null.
-  const match = version.trim().match(/^(\d+)/);
-  return match ? match[1] : null;
 }
 
 /** Valid JavaScript/TypeScript identifier, conservatively defined. */
