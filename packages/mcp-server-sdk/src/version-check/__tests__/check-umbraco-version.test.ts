@@ -169,6 +169,50 @@ describe("checkUmbracoVersion", () => {
     expect(isToolExecutionBlocked()).toBe(true);
   });
 
+  it("should not block when the declared target major is non-numeric", async () => {
+    // Arrange - the mirror of the case below, and the reason both sides must use
+    // the same parser. With `split('.')[0]` the declared target "Latest" was
+    // truthy, cleared the guard, compared unequal to every real major, and so
+    // blocked every tool call against a perfectly healthy instance — reporting
+    // "this server targets Umbraco Latest.x" and blaming the instance rather
+    // than the misconfigured override. Plausible input: someone reads that
+    // Umbraco's spec says "Latest" and pastes it into UMBRACO_EXPECTED_MAJOR,
+    // or a script does UMBRACO_EXPECTED_MAJOR=$(jq -r .info.version spec.json).
+    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
+      .mockResolvedValue({ version: "18.0.2" });
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "Latest",
+      client: { getServerInformation }
+    });
+
+    // Assert - reported, not enforced.
+    expect(isToolExecutionBlocked()).toBe(false);
+    expect(getVersionCheckMessage()).toContain("is not a version");
+    expect(getVersionCheckMessage()).not.toContain("Version Mismatch");
+  });
+
+  it("should stay silent when no target major is declared at all", async () => {
+    // Arrange - absent is the documented degrade-quietly case, distinct from
+    // present-but-unusable above: nothing was set, so there is nothing to report.
+    const getServerInformation = jest.fn<() => Promise<{ version: string }>>()
+      .mockResolvedValue({ version: "18.0.2" });
+
+    // Act
+    await checkUmbracoVersion({
+      mcpVersion: "1.0.0",
+      expectedUmbracoMajor: "",
+      client: { getServerInformation }
+    });
+
+    // Assert
+    expect(isToolExecutionBlocked()).toBe(false);
+    expect(getVersionCheckMessage()).toBeNull();
+    expect(getServerInformation).not.toHaveBeenCalled();
+  });
+
   it("should handle a non-numeric reported version gracefully without blocking", async () => {
     // Arrange - every real Umbraco reports a numeric-leading semver, but a
     // reported version that doesn't parse to a major (e.g. some non-Umbraco

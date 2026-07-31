@@ -150,17 +150,36 @@ export interface CheckVersionOptions {
 export async function checkUmbracoVersion(options: CheckVersionOptions): Promise<void> {
   const { expectedUmbracoMajor, client, service = versionCheckService } = options;
 
-  // Normalise the declared target: it may arrive via an env var / CLI flag
-  // override, so tolerate surrounding whitespace and a full version string
-  // ("17.0.0") when only the major ("17") is meaningful.
-  const targetMajor = expectedUmbracoMajor?.trim().split('.')[0];
+  // Normalise the declared target with the *same* parser used on the instance's
+  // reported version below. Using `split('.')[0]` here instead would accept a
+  // non-numeric value: `UMBRACO_EXPECTED_MAJOR=Latest` yielded the truthy string
+  // "Latest", cleared the guard, compared unequal to every real major, and so
+  // blocked every tool call with "this server targets Umbraco Latest.x". Both
+  // operands of one comparison must answer "what's the major" the same way.
+  const targetMajor = majorFromVersion(expectedUmbracoMajor);
 
-  // Runtime guard, not a supported way to disable the check. The field is
-  // required, so by construction this is never empty — but an override read
-  // from a misconfigured `UMBRACO_EXPECTED_MAJOR=""` (or a JS caller ignoring
-  // the types) can still reach here. With nothing to compare against, degrade
-  // gracefully: skip the check, clear state, don't crash the server.
   if (!targetMajor) {
+    // Runtime guard, not a supported way to disable the check. The field is
+    // required, so by construction it is never absent — but an override read
+    // from the environment (or a JS caller ignoring the types) can still reach
+    // here. Either way there is nothing to compare against, so degrade
+    // gracefully rather than crashing or guessing.
+    const declared = expectedUmbracoMajor?.trim();
+
+    if (declared) {
+      // Present but unusable — a misconfigured override, not an absent one.
+      // Worth saying out loud: the user set something and it did nothing. Same
+      // treatment as an instance that reports an unparseable version.
+      const message =
+        `⚠️ Unable to verify Umbraco version compatibility: the declared target major ` +
+        `"${declared}" is not a version. Set it to the Umbraco major these tools target ` +
+        `(e.g. "17"), or unset it to use the generated default.`;
+      service.setMessage(message);
+      service.setBlocked(false);
+      console.error(message);
+      return;
+    }
+
     service.setMessage(null);
     service.setBlocked(false);
     return;

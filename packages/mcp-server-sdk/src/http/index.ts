@@ -31,7 +31,6 @@ export {
   createUmbracoTargetMajorTransformer,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
-  SERVER_INFORMATION_PATH,
   type OpenApiDocumentPassthrough,
   type UmbracoTargetMajorOptions,
   type TargetMajorSource,
