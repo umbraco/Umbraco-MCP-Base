@@ -17,7 +17,6 @@ import os from "node:os";
 import path from "node:path";
 import {
   createUmbracoTargetMajorTransformer,
-  extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
   SERVER_INFORMATION_PATH,
@@ -74,30 +73,6 @@ function mockInstance(options: {
   return fetchMock;
 }
 
-describe("extractSpecMajor", () => {
-  it.each([
-    ["a full semver", "17.4.0", "17"],
-    ["a bare major", "17", "17"],
-    ["a prerelease", "18.0.0-rc1", "18"],
-    ["surrounding whitespace", "  17.4.0  ", "17"],
-    ["a multi-digit major", "100.1.2", "100"],
-  ])("derives the major from %s", (_label, version, expected) => {
-    expect(extractSpecMajor({ info: { version } })).toBe(expected);
-  });
-
-  it.each([
-    ["a missing info object", {}],
-    ["a missing version", { info: {} }],
-    ["a non-string version", { info: { version: 17 } }],
-    ["a non-numeric version", { info: { version: "v-next" } }],
-    ["an empty version", { info: { version: "" } }],
-    // What every Umbraco Management API spec actually reports.
-    ["Umbraco's hard-coded placeholder", { info: { version: "Latest" } }],
-  ])("returns null for %s", (_label, spec) => {
-    expect(extractSpecMajor(spec as { info?: { version?: unknown } })).toBeNull();
-  });
-});
-
 describe("renderTargetMajorModule", () => {
   it("emits a do-not-edit banner and the exported constant", () => {
     const output = renderTargetMajorModule("17", DEFAULT_TARGET_MAJOR_CONSTANT, {
@@ -119,8 +94,8 @@ describe("renderTargetMajorModule", () => {
     expect(render({ version: "18.0.2", source: "instance" })).toContain(
       SERVER_INFORMATION_PATH
     );
-    expect(render({ source: "explicit" })).toContain("`major` option");
-    expect(render({ version: "18.0.2", source: "spec" })).toContain("info.version");
+    // A committed scaffold value must announce that nothing reported it.
+    expect(render({ source: "placeholder" })).toContain("NOT reported by any Umbraco");
   });
 
   it("honours a custom constant name", () => {
@@ -226,9 +201,10 @@ describe("createUmbracoTargetMajorTransformer", () => {
       );
     });
 
-    it("prefers the instance over a spec that carries its own version", async () => {
+    it("ignores a spec that carries its own version", async () => {
       // Arrange - an add-on's spec reports the add-on's release (e.g. Forms
-      // 16.1.0) while the Umbraco it runs on is 18. The instance is the truth.
+      // 16.1.0) while the Umbraco it runs on is 18. Only the instance counts;
+      // the spec's number is not Umbraco's and is never consulted.
       setCredentials();
       mockInstance({ version: "18.0.2" });
       const transformer = makeTransformer();
@@ -237,33 +213,29 @@ describe("createUmbracoTargetMajorTransformer", () => {
       await transformer({ info: { version: "16.1.0" } });
 
       // Assert
-      expect(
-        readGenerated()
-      ).toContain('export const UMBRACO_TARGET_MAJOR = "18";');
+      expect(readGenerated()).toContain(
+        'export const UMBRACO_TARGET_MAJOR = "18";'
+      );
     });
 
-    it("falls back to the spec when the instance is unreachable", async () => {
-      // Arrange - offline generation from a committed spec with a real semver.
+    it("fails when the instance is unreachable, even with a versioned spec", async () => {
+      // Arrange - a committed spec carrying a real semver used to be the
+      // fallback here. It isn't: that number is either hand-written or an
+      // add-on's own release, never a reported Umbraco version.
       setCredentials();
       globalThis.fetch = jest.fn(async () => {
         throw new Error("ECONNREFUSED");
       }) as unknown as typeof fetch;
       const transformer = makeTransformer();
 
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert - value still written, but the fallback is announced: the spec
-      // may be an add-on's, so the major needs a human eye.
-      expect(
-        readGenerated()
-      ).toContain('export const UMBRACO_TARGET_MAJOR = "17";');
+      // Act / Assert
+      await expect(
+        transformer({ info: { version: "17.4.0" } })
+      ).rejects.toThrow(/Cannot determine the target Umbraco major/);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("ECONNREFUSED")
       );
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Falling back to the spec")
-      );
+      expect(fs.existsSync(path.join(tmpDir, OUTPUT))).toBe(false);
     });
 
     it.each([
@@ -285,99 +257,31 @@ describe("createUmbracoTargetMajorTransformer", () => {
     });
 
     it.each([
-      // How a project generating offline from a committed spec opts out.
-      ["none are configured", () => {}],
+      ["are absent entirely", () => {}],
       // A half-filled .env can't authenticate, and must not produce a
       // confusing 401 warning either.
       [
-        "they are partial",
+        "are partial",
         () => {
           process.env.UMBRACO_BASE_URL = "http://localhost:56472";
         },
       ],
-    ])("skips the lookup entirely when %s", async (_label, arrangeEnv) => {
+    ])("makes no request and fails when credentials %s", async (_label, arrangeEnv) => {
       // Arrange - env is cleared in beforeEach; each case adds what it needs.
       arrangeEnv();
       const fetchMock = mockInstance({ version: "18.0.2" });
       const transformer = makeTransformer();
 
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert - no network, spec used, and no warning: nothing was expected to
-      // happen, so there is nothing to report.
+      // Act / Assert - no instance means no answer, and a versioned spec is not
+      // a substitute. The error names the three variables to set.
+      await expect(
+        transformer({ info: { version: "17.4.0" } })
+      ).rejects.toThrow(/UMBRACO_BASE_URL/);
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(readGenerated()).toContain(
-        'export const UMBRACO_TARGET_MAJOR = "17";'
-      );
+      // No half-configured 401 warning either — nothing was attempted.
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it("warns when the instance and a versioned spec disagree", async () => {
-      // Arrange - the silent-wrong-value case: generating from a committed 17
-      // spec while UMBRACO_BASE_URL points at an 18 instance stamps "18" beside
-      // a 17 tool surface. The instance still wins, but it must not be quiet.
-      setCredentials();
-      mockInstance({ version: "18.0.2" });
-      const transformer = makeTransformer();
-
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert
-      expect(readGenerated()).toContain(
-        'export const UMBRACO_TARGET_MAJOR = "18";'
-      );
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('but the spec reports "17.4.0"')
-      );
-    });
-
-    it("stays quiet when the instance and the spec agree", async () => {
-      // Arrange - the normal case for a project generating from its own
-      // instance's spec. A warning here would be noise on every generate.
-      setCredentials();
-      mockInstance({ version: "17.4.2" });
-      const transformer = makeTransformer();
-
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert
-      expect(readGenerated()).toContain(
-        'export const UMBRACO_TARGET_MAJOR = "17";'
-      );
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("explicit major", () => {
-    it("wins over both the instance and the spec", async () => {
-      // Arrange - credentials present and the spec versioned, so this proves
-      // precedence rather than absence of the alternatives.
-      setCredentials();
-      const fetchMock = mockInstance({ version: "18.0.2" });
-      const transformer = makeTransformer({ major: "15" });
-
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
-
-      // Assert
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(
-        readGenerated()
-      ).toContain('export const UMBRACO_TARGET_MAJOR = "15";');
-    });
-
-    it("rejects a major that is not a version", async () => {
-      // Arrange - catches `major: "Latest"` copied from the spec.
-      const transformer = makeTransformer({ major: "Latest" });
-
-      // Act / Assert
-      await expect(transformer({ info: {} })).rejects.toThrow(
-        /Invalid `major` option/
-      );
-    });
   });
 
   describe("failure is loud", () => {
@@ -386,21 +290,26 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // unusable version plus an existing file meant "warn and keep", so a
       // project regenerating against a new Umbraco major silently kept the old
       // one and then blocked every tool call (#220's failure mode).
-      await makeTransformer({ major: "17" })({ info: {} });
+      // Seed a file the way a real project would: one successful generate.
+      setCredentials();
+      mockInstance({ version: "17.4.0" });
+      await makeTransformer()({});
       const before = readGenerated();
 
+      // Now the instance stops answering.
+      mockInstance({ version: null });
       const transformer = makeTransformer();
 
       // Act / Assert
-      await expect(
-        transformer({ info: { version: "Latest" } })
-      ).rejects.toThrow(/Cannot determine the target Umbraco major/);
+      await expect(transformer({})).rejects.toThrow(
+        /Cannot determine the target Umbraco major/
+      );
       // The stale file is left alone rather than rewritten with a wrong value —
       // the build failed, so nothing was generated to match it anyway.
       expect(readGenerated()).toBe(before);
     });
 
-    it("names every way out in the error", async () => {
+    it("names the real fix in the error, and no hand-pinned escape hatch", async () => {
       // Arrange
       const transformer = makeTransformer();
 
@@ -412,22 +321,26 @@ describe("createUmbracoTargetMajorTransformer", () => {
         message = (error as Error).message;
       }
 
-      // Assert - an actionable error, not just "cannot derive".
+      // Assert - an actionable error, not just "cannot derive". The only fix it
+      // offers is pointing at the instance, because that is the only fix: a
+      // hand-pinned major would be a value nobody revisits (#220).
       expect(message).toContain("UMBRACO_BASE_URL");
       expect(message).toContain(SERVER_INFORMATION_PATH);
-      expect(message).toContain('major: "18"');
+      expect(message).not.toContain("major:");
     });
   });
 
   describe("file writing", () => {
     it("creates intermediate directories", async () => {
       // Arrange
+      setCredentials();
+      mockInstance({ version: "18.0.0" });
       const transformer = makeTransformer({
         outputPath: "./deeply/nested/dir/target.generated.ts",
       });
 
       // Act
-      await transformer({ info: { version: "18.0.0" } });
+      await transformer({});
 
       // Assert
       expect(
@@ -437,12 +350,14 @@ describe("createUmbracoTargetMajorTransformer", () => {
 
     it("does not rewrite the file when the resolved value is unchanged", async () => {
       // Arrange
+      setCredentials();
+      mockInstance({ version: "17.4.0" });
       const transformer = makeTransformer();
-      await transformer({ info: { version: "17.4.0" } });
+      await transformer({});
       const firstMtime = fs.statSync(path.join(tmpDir, OUTPUT)).mtimeMs;
 
-      // Act
-      await transformer({ info: { version: "17.4.0" } });
+      // Act - same instance, same answer.
+      await transformer({});
 
       // Assert - untouched, so a no-op `npm run generate` leaves git clean
       expect(fs.statSync(path.join(tmpDir, OUTPUT)).mtimeMs).toBe(firstMtime);
@@ -453,11 +368,11 @@ describe("createUmbracoTargetMajorTransformer", () => {
       // updates the constant with no per-repo bump.
       setCredentials();
       mockInstance({ version: "17.4.0" });
-      await makeTransformer()({ info: { version: "Latest" } });
+      await makeTransformer()({});
 
       // Act - the same project, now pointed at an upgraded instance.
       mockInstance({ version: "18.0.2" });
-      await makeTransformer()({ info: { version: "Latest" } });
+      await makeTransformer()({});
 
       // Assert
       expect(readGenerated()).toContain(
@@ -465,17 +380,20 @@ describe("createUmbracoTargetMajorTransformer", () => {
       );
     });
 
-    it("composes with another input transformer", async () => {
+    it("composes with another input transformer and passes the spec through", async () => {
       // Arrange - the template does `stampTargetMajor(relaxUntypedArrays(spec))`.
+      setCredentials();
+      mockInstance({ version: "17.4.0" });
       const transformer = makeTransformer();
       const other = <T extends object>(spec: T): T =>
         Object.assign(spec, { touched: true });
 
       // Act
-      const result = await transformer(other({ info: { version: "17.0.0" } }));
+      const result = await transformer(other({ paths: {} }));
 
-      // Assert
-      expect(result).toMatchObject({ touched: true });
+      // Assert - the other transformer's edit survives, and this one adds
+      // nothing to the document.
+      expect(result).toMatchObject({ touched: true, paths: {} });
       expect(readGenerated()).toContain('"17"');
     });
   });

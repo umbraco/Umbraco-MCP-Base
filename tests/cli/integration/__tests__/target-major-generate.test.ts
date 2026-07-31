@@ -75,7 +75,6 @@ function childEnv(instanceBaseUrl?: string): NodeJS.ProcessEnv {
  */
 async function runOrval(options: {
   instanceBaseUrl?: string;
-  major?: string;
 }): Promise<{ ok: boolean; output: string; generated: string | null }> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "target-major-orval-"));
 
@@ -85,15 +84,12 @@ async function runOrval(options: {
       JSON.stringify(LATEST_SPEC, null, 2)
     );
 
-    const major = options.major ? `major: ${JSON.stringify(options.major)},` : "";
-
     fs.writeFileSync(
       path.join(dir, "orval.config.mjs"),
       `import { createUmbracoTargetMajorTransformer, relaxUntypedArrays } from ${JSON.stringify(SDK_DIST)};
 
 const stamp = createUmbracoTargetMajorTransformer({
   outputPath: "./${GENERATED_PATH}",
-  ${major}
 });
 
 export default {
@@ -169,14 +165,6 @@ describe("Target major generation (real orval)", () => {
     expect(ok).toBe(false);
     expect(output).toContain("Cannot determine the target Umbraco major");
     expect(generated).toBeNull();
-  }, 120_000);
-
-  it("honours an explicit major with no instance available", async () => {
-    // The documented escape hatch for offline generation.
-    const { ok, generated } = await runOrval({ major: "17" });
-
-    expect(ok).toBe(true);
-    expect(generated).toContain('export const UMBRACO_TARGET_MAJOR = "17";');
   }, 120_000);
 
 });
