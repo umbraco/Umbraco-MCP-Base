@@ -11,11 +11,9 @@ export {
 } from "./orval-relax-untyped-arrays.js";
 export {
   createUmbracoTargetMajorTransformer,
-  extractSpecMajor,
   renderTargetMajorModule,
   DEFAULT_TARGET_MAJOR_CONSTANT,
-  SERVER_INFORMATION_PATH,
-  type OpenApiDocumentWithInfo,
+  type OpenApiDocumentPassthrough,
   type UmbracoTargetMajorOptions,
   type TargetMajorSource,
 } from "./orval-target-major-writer.js";
