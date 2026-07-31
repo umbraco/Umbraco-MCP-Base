@@ -1,7 +1,7 @@
 /**
  * HTTP Utilities
  *
- * Fetch-based client and Orval helpers for Umbraco API access.
+ * Fetch-based client for Umbraco API access.
  */
 
 export {
@@ -21,26 +21,3 @@ export {
   type CreateUmbracoFetchClientOptions,
   type UmbracoFetchClientResult,
 } from "./umbraco-fetch-client.js";
-
-export { orvalImportFixer } from "./orval-import-fixer.js";
-export {
-  relaxUntypedArrays,
-  type OpenApiDocumentLike,
-} from "./orval-relax-untyped-arrays.js";
-export {
-  createUmbracoTargetMajorTransformer,
-  extractSpecMajor,
-  renderTargetMajorModule,
-  DEFAULT_TARGET_MAJOR_CONSTANT,
-  SERVER_INFORMATION_PATH,
-  type OpenApiDocumentWithInfo,
-  type UmbracoTargetMajorOptions,
-  type TargetMajorSource,
-} from "./orval-target-major-writer.js";
-export {
-  collectZodFiles,
-  relaxUuidToGuid,
-  camelCaseZodExports,
-  restoreV7OptionalDefaults,
-  postProcessZodFiles,
-} from "./orval-zod-post-process.js";

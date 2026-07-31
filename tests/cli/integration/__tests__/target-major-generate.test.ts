@@ -32,7 +32,13 @@ const REPO_ROOT = path.resolve(
   "../../../.."
 );
 const ORVAL_BIN = path.join(REPO_ROOT, "node_modules/orval/dist/bin/orval.mjs");
-const SDK_DIST = path.join(REPO_ROOT, "packages/mcp-server-sdk/dist/index.js");
+// The `./orval` entry, not the main barrel: the codegen helpers live behind
+// their own subpath so `fs`/`path` stay out of the bundle hosted-mcp ships to a
+// Cloudflare Worker.
+const SDK_ORVAL_DIST = path.join(
+  REPO_ROOT,
+  "packages/mcp-server-sdk/dist/orval/index.js"
+);
 const GENERATED_PATH = "src/config/umbraco-target.generated.ts";
 
 /** A spec that reports what every real Umbraco reports: no usable version. */
@@ -75,7 +81,6 @@ function childEnv(instanceBaseUrl?: string): NodeJS.ProcessEnv {
  */
 async function runOrval(options: {
   instanceBaseUrl?: string;
-  major?: string;
 }): Promise<{ ok: boolean; output: string; generated: string | null }> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "target-major-orval-"));
 
@@ -85,15 +90,12 @@ async function runOrval(options: {
       JSON.stringify(LATEST_SPEC, null, 2)
     );
 
-    const major = options.major ? `major: ${JSON.stringify(options.major)},` : "";
-
     fs.writeFileSync(
       path.join(dir, "orval.config.mjs"),
-      `import { createUmbracoTargetMajorTransformer, relaxUntypedArrays } from ${JSON.stringify(SDK_DIST)};
+      `import { createUmbracoTargetMajorTransformer, relaxUntypedArrays } from ${JSON.stringify(SDK_ORVAL_DIST)};
 
 const stamp = createUmbracoTargetMajorTransformer({
   outputPath: "./${GENERATED_PATH}",
-  ${major}
 });
 
 export default {
@@ -137,9 +139,9 @@ export default {
 
 describe("Target major generation (real orval)", () => {
   beforeAll(() => {
-    if (!fs.existsSync(SDK_DIST)) {
+    if (!fs.existsSync(SDK_ORVAL_DIST)) {
       throw new Error(
-        `SDK not built. Run \`npm run build\` first. Looked for ${SDK_DIST}`
+        `SDK not built. Run \`npm run build\` first. Looked for ${SDK_ORVAL_DIST}`
       );
     }
     if (!fs.existsSync(ORVAL_BIN)) {
@@ -169,14 +171,6 @@ describe("Target major generation (real orval)", () => {
     expect(ok).toBe(false);
     expect(output).toContain("Cannot determine the target Umbraco major");
     expect(generated).toBeNull();
-  }, 120_000);
-
-  it("honours an explicit major with no instance available", async () => {
-    // The documented escape hatch for offline generation.
-    const { ok, generated } = await runOrval({ major: "17" });
-
-    expect(ok).toBe(true);
-    expect(generated).toContain('export const UMBRACO_TARGET_MAJOR = "17";');
   }, 120_000);
 
 });

@@ -50,6 +50,7 @@ src/
 | `./helpers` | API call helpers only |
 | `./types` | Type definitions only |
 | `./constants` | Umbraco well-known IDs (BLANK_UUID, media type IDs, etc.) |
+| `./orval` | Build-time codegen helpers: import fixer, untyped-array relaxer, zod post-processor, target-major transformer. **Deliberately not in the main barrel** — they import `fs`/`path`, and the main barrel is what hosted-mcp bundles into a Cloudflare Worker. |
 
 ## Key Exports
 

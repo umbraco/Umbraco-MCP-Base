@@ -3,10 +3,9 @@
 /**
  * The Umbraco major version this server's generated tools target.
  *
- * Derived from the `info.version` of the OpenAPI spec that `orval.config.ts`
- * points at.
- *
- * Reported version: 17.4.0.
+ * Placeholder committed with the project scaffold so it compiles before
+ * anything has been generated. NOT reported by any Umbraco — run `npm run
+ * generate` against your instance to replace it.
  *
  * Passed to `checkUmbracoVersion` at startup, which blocks tool execution when
  * the connected instance's major differs. Set `UMBRACO_EXPECTED_MAJOR` (or

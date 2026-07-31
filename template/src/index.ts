@@ -25,6 +25,7 @@ import {
   getVersionCheckMessage,
   UmbracoManagementClient,
   CAPTURE_RAW_HTTP_RESPONSE,
+  SERVER_INFORMATION_PATH,
   type CollectionConfiguration,
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -147,7 +148,7 @@ if (clientId) {
     client: {
       getServerInformation: async () => {
         const response = (await UmbracoManagementClient<{ version: string }>(
-          { url: "/umbraco/management/api/v1/server/information", method: "GET" },
+          { url: SERVER_INFORMATION_PATH, method: "GET" },
           CAPTURE_RAW_HTTP_RESPONSE,
         )) as unknown as HttpResponse<{ version: string }>;
         return { version: response.data.version };
