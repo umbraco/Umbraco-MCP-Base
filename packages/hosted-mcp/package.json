@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@umbraco-cms/mcp-server-sdk": "file:../mcp-server-sdk",
     "zod": "^4.4.3"
   },
