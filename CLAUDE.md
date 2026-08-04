@@ -176,13 +176,22 @@ The full workflow lives in the **`release-and-branching` skill** (`.claude/skill
 
 ### Nightly / pre-release builds (MyGet)
 
-Releases go to npm, but you don't have to wait for one to test a change. The `Deploy_MyGet` stage in `build/azure-pipelines.yml` publishes all three packages to an Umbraco MyGet npm feed:
+Releases go to public npm, but you don't have to wait for one to test a change. `build/azure-pipelines.yml` has two extra deploy stages that reuse the artifacts `BuildAndTest` already produced (nothing is rebuilt) and push all three packages to Umbraco's MyGet feeds. `main` is excluded from both — that's `Deploy_Npm`'s job.
 
-- **Trigger:** every push to `dev` (nightlies) and to a `release/*` branch (prereleases). Never `main` — that's `Deploy_Npm`'s job on the public npm registry. It reuses the artifacts `BuildAndTest` already produced, so nothing is rebuilt.
-- **Version scheme:** `<version-in-package.json>-nightly.<date>.<Build.BuildId>` — illustrative only, e.g. `1.0.0-beta.32-nightly.20260729.4711`, not tied to any particular release version or date. The `<date>` component (`nightlyDate` pipeline variable) is computed once per run, not per job, so every package in the same run gets an identical suffix. Committed `package.json` files are never touched — `scripts/publish-nightly.sh` repacks the extracted tarball. Intra-monorepo deps (`mcp-hosted` → `mcp-server-sdk`) are repointed at the sibling's nightly, verified via `npm view` rather than assumed — the `Deploy_MyGet` hosted job also `dependsOn` the SDK job so the sibling has actually published first.
-- **Dist-tag:** `nightly`, published to a separate MyGet feed entirely — it never touches npm's `latest` / `alpha` / `beta` / `rc` tags. Install with `npm i @umbraco-cms/mcp-server-sdk@nightly --registry <feed>` (or scope `@umbraco-cms` to the feed in your `.npmrc`).
+| Stage | Trigger | Feed | Version | Dist-tag |
+|-------|---------|------|---------|----------|
+| `Deploy_Nightly` | push to `dev` | `umbraconightly` | `<version in package.json>-nightly.<Build.BuildId>` | `nightly` |
+| `Deploy_Prerelease` | push to `release/*` | `umbracoprereleases` | as committed | `alpha` / `beta` / `rc` |
 
-**Manual prerequisite — this stage is a no-op until a human does this.** The stage is gated on the `publishNightly` pipeline variable (default `false`) precisely so it doesn't fail on every `dev`/`release/*` push in the meantime. Someone with Azure DevOps admin rights must create an **npm service connection named exactly `MyGet - Umbraco MCP`** (MyGet feed URL + API key), confirm the feed URL in the `myGetNpmRegistry` pipeline variable — the committed value (`https://www.myget.org/F/umbraco-mcp/npm/`) follows MyGet's standard npm endpoint shape but the feed name is a **placeholder**, unverified against a real Umbraco feed — and then flip `publishNightly` to `'true'`. `BuildAndTest` and `Deploy_Npm` are unaffected either way.
+Install with `npm i @umbraco-cms/mcp-server-sdk@nightly --registry https://www.myget.org/F/umbraconightly/npm/`, or scope `@umbraco-cms` to the feed in your `.npmrc`.
+
+Notes:
+
+- `dev`'s `package.json` version is only bumped when a release is cut, so nightlies need the `Build.BuildId` suffix to avoid colliding on the feed. Release branches already carry a real version, so their artifact is published untouched.
+- Committed `package.json` files are never modified — the nightly job versions the extracted tarball copy and repacks it.
+- `mcp-hosted`'s dependency on `mcp-server-sdk` is repointed at the matching nightly (same `Build.BuildId`, and all packages are versioned in lockstep). On a release branch prepack has already pinned it to the version being released, which the same run publishes to the same feed.
+- Both stages skip rather than fail if the version is already on the feed, matching `Deploy_Npm`.
+- Each feed has its own npm-type Azure DevOps service connection holding its API key: `NPM MyGet Nightly Feed` and `NPM MyGet Prereleases Feed`. These are the same feeds and connections Umbraco's other MCP repos publish to.
 
 ### Post-release: tag the release (automated)
 
