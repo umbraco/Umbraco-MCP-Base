@@ -1,10 +1,22 @@
 # Dependabot configuration.
 #
-# Policy: monthly cadence, minor + patch updates batched into a single grouped PR
-# per ecosystem, and major updates raised as individual PRs (they need a
-# deliberate review). Version-update PRs target `dev` (not the default branch
-# `main`) so they fit the branch-into-dev workflow — see the
-# `release-and-branching` skill / CLAUDE.md.
+# Policy: monthly cadence, with the two ecosystems treated differently because
+# their majors carry very different risk.
+#
+#   npm            — minor + patch batched into one grouped PR; majors raised
+#                    individually. A major here (typescript, tedious, inspector)
+#                    can change compiler semantics or break the test harness, so
+#                    each one needs a deliberate review of its own.
+#   github-actions — everything batched into one grouped PR, majors included. An
+#                    action major is almost always a runner/Node bump with no
+#                    effect on our code: CI is either green or it isn't, and that
+#                    verdict is the review. Splitting them out just left them to
+#                    rot (see #159/#162/#164, all closed unmerged and re-raised a
+#                    major higher), which is how the runners ended up still on a
+#                    deprecated Node.
+#
+# Version-update PRs target `dev` (not the default branch `main`) so they fit the
+# branch-into-dev workflow — see the `release-and-branching` skill / CLAUDE.md.
 #
 # NOTE: Dependabot *security* updates always target the repository's default
 # branch (`main`) and cannot be redirected with `target-branch`. Only the
@@ -32,9 +44,8 @@ updates:
     target-branch: "dev"
     open-pull-requests-limit: 5
     groups:
-      github-actions-minor-and-patch:
+      # No `update-types` filter: this group deliberately swallows majors too, so
+      # there is only ever one open github-actions PR per cycle.
+      github-actions-all:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
