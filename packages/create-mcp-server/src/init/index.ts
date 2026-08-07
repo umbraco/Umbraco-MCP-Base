@@ -13,7 +13,8 @@ import { readLaunchSettingsUrl, updateEnvBaseUrl, updateEnvVar } from "../discov
 import { checkHealth } from "../discover/health-check.js";
 import { checkApiUser } from "../discover/check-api-user.js";
 import { discoverSwaggerEndpoints } from "../discover/discover-swagger.js";
-import { promptApiSelection } from "../discover/prompts.js";
+import { promptApiSelection, promptOpenApiUrl } from "../discover/prompts.js";
+import { validateOpenApiUrl, toDirectSwaggerEndpoint } from "../discover/direct-spec-url.js";
 import {
   promptUmbracoSetup,
   promptToolMode,
@@ -108,6 +109,7 @@ export async function runInit(dir?: string): Promise<void> {
     | undefined;
   let selectedSwaggerUrl: string | undefined;
   let connectionString: string | undefined;
+  let directOpenApiUrl: string | undefined;
 
   let umbracoVersion: string | undefined;
 
@@ -118,6 +120,8 @@ export async function runInit(dir?: string): Promise<void> {
     instanceLocation = getInstanceLocation(projectDir);
   } else if (umbracoChoice === "existing") {
     existingInstance = await promptExistingInstance();
+  } else if (umbracoChoice === "url") {
+    directOpenApiUrl = await promptOpenApiUrl();
   }
 
   // Step 5: Tool mode — API tools or container?
@@ -227,6 +231,36 @@ export async function runInit(dir?: string): Promise<void> {
         console.log(pc.green("  .env → UMBRACO_CLIENT_SECRET=1234567890"));
       }
     }
+  }
+
+  // Step 8b: Direct OpenAPI spec URL — bypasses health check, API-user setup,
+  // and discovery entirely (there may be no reachable Umbraco instance behind it).
+  if (directOpenApiUrl && !isContainerMode) {
+    console.log(pc.dim(`\nValidating ${directOpenApiUrl}...`));
+    const validation = await validateOpenApiUrl(directOpenApiUrl);
+
+    if (validation.parseable) {
+      console.log(pc.green(`  Found ${validation.title ?? "OpenAPI"} spec`));
+    } else {
+      console.log(
+        pc.yellow(
+          `  Could not verify the spec (${validation.error ?? "unknown error"}) — continuing anyway. The URL may be behind authentication.`
+        )
+      );
+    }
+
+    const endpoint = toDirectSwaggerEndpoint(directOpenApiUrl, validation.title);
+    const updated = configureOpenApi(projectDir, directOpenApiUrl, endpoint.name);
+    if (updated) {
+      selectedSwaggerUrl = directOpenApiUrl;
+      console.log(pc.green(`  orval.config.ts → ${directOpenApiUrl}`));
+    }
+
+    console.log(
+      pc.dim(
+        "  No Umbraco base URL is known for this spec — set UMBRACO_BASE_URL, UMBRACO_CLIENT_ID and UMBRACO_CLIENT_SECRET in .env manually if the API requires authentication."
+      )
+    );
   }
 
   // Step 9: Apply feature removals

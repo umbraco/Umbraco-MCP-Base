@@ -133,8 +133,21 @@ jest.unstable_mockModule("../../discover/discover-swagger.js", () => ({
 const mockPromptApiSelection = jest.fn<
   (endpoints: Array<{ url: string; name: string }>) => Promise<{ url: string; name: string }>
 >();
+const mockPromptOpenApiUrl = jest.fn<() => Promise<string>>();
 jest.unstable_mockModule("../../discover/prompts.js", () => ({
   promptApiSelection: mockPromptApiSelection,
+  promptOpenApiUrl: mockPromptOpenApiUrl,
+}));
+
+const mockValidateOpenApiUrl = jest.fn<
+  (url: string) => Promise<{ reachable: boolean; parseable: boolean; title?: string; error?: string }>
+>();
+jest.unstable_mockModule("../../discover/direct-spec-url.js", () => ({
+  validateOpenApiUrl: mockValidateOpenApiUrl,
+  toDirectSwaggerEndpoint: jest.fn((url: string, title?: string) => {
+    const match = /\/([^/.]+)(?:\.json)?$/.exec(url);
+    return { url, name: title || (match ? match[1] : "api") };
+  }),
 }));
 
 const { runInit } = await import("../index.js");
@@ -358,6 +371,69 @@ describe("runInit", () => {
         .map((c: unknown[]) => c[0])
         .join("\n");
       expect(output).toContain("Could not reach Umbraco instance");
+      expect(output).toContain("Configuration complete");
+    });
+  });
+
+  describe("direct OpenAPI spec URL", () => {
+    it("configures orval directly and skips health check / API user setup", async () => {
+      const specUrl = "https://internal.example.com/umbraco/openapi/myapi.json";
+
+      mockPromptUmbracoSetup.mockResolvedValue("url");
+      mockPromptOpenApiUrl.mockResolvedValue(specUrl);
+      mockValidateOpenApiUrl.mockResolvedValue({
+        reachable: true,
+        parseable: true,
+        title: "My Internal API",
+      });
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      expect(mockCheckHealth).not.toHaveBeenCalled();
+      expect(mockCheckApiUser).not.toHaveBeenCalled();
+      expect(mockDiscoverSwaggerEndpoints).not.toHaveBeenCalled();
+
+      const orvalConfig = mockFs.files.get(
+        path.resolve(PROJECT_DIR, "orval.config.ts"),
+      )!;
+      expect(orvalConfig).toContain(specUrl);
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Configuration complete");
+    });
+
+    it("warns but continues when the spec URL can't be verified", async () => {
+      const specUrl = "https://internal.example.com/umbraco/openapi/myapi.json";
+
+      mockPromptUmbracoSetup.mockResolvedValue("url");
+      mockPromptOpenApiUrl.mockResolvedValue(specUrl);
+      mockValidateOpenApiUrl.mockResolvedValue({
+        reachable: false,
+        parseable: false,
+        error: "HTTP 401",
+      });
+      mockPromptFeatureChoices.mockResolvedValue({
+        removeMocks: false,
+        removeChaining: false,
+        removeExamples: false,
+        removeEvals: false,
+      });
+
+      await runInit(PROJECT_DIR);
+
+      const orvalConfig = mockFs.files.get(
+        path.resolve(PROJECT_DIR, "orval.config.ts"),
+      )!;
+      expect(orvalConfig).toContain(specUrl);
+
+      const output = consoleLogSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+      expect(output).toContain("Could not verify the spec");
       expect(output).toContain("Configuration complete");
     });
   });
