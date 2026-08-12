@@ -70,6 +70,20 @@ export interface HostedMcpEnv {
   /** Optional HTTP base URL for server-side calls (token exchange, API).
    *  Use when workerd can't reach UMBRACO_BASE_URL (e.g. self-signed cert in local dev). */
   UMBRACO_SERVER_URL?: string;
+  /**
+   * Name of an extra header sent on every server-side request this Worker
+   * makes to Umbraco (Management API calls, OAuth token exchange/refresh,
+   * and the Cloud reachability check), so operators behind an IP allow-list
+   * firewall can mark MCP traffic and let it through. Defaults to
+   * `X-Umbraco-Mcp` when `UMBRACO_MCP_HEADER_VALUE` is set and this is unset.
+   */
+  UMBRACO_MCP_HEADER_NAME?: string;
+  /**
+   * Value for the firewall-allowlist header. Treat as sensitive — set via
+   * `wrangler secret put UMBRACO_MCP_HEADER_VALUE`, alongside
+   * `UMBRACO_OAUTH_CLIENT_SECRET`. Unset = feature off (no header sent).
+   */
+  UMBRACO_MCP_HEADER_VALUE?: string;
 
   // Umbraco OAuth client (registered as a public client in Umbraco's OpenIdDict)
   /** OAuth client ID registered in Umbraco */

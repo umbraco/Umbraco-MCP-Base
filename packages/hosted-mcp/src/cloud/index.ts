@@ -17,6 +17,7 @@ import type {
   SiteRoutingConfig,
   SiteRoutingResolver,
 } from "../types/multi-site.js";
+import { buildFirewallHeader } from "../http/firewall-header.js";
 
 export interface UmbracoCloudRoutingOptions {
   /**
@@ -170,12 +171,13 @@ export function umbracoCloudSiteRouting(
 async function defaultValidateProject(
   _siteId: string,
   baseUrl: string,
-  _env: HostedMcpEnv
+  env: HostedMcpEnv
 ): Promise<boolean> {
   try {
     const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
       method: "GET",
       redirect: "manual",
+      headers: buildFirewallHeader(env),
       signal: AbortSignal.timeout(5_000),
     });
     response.body?.cancel();

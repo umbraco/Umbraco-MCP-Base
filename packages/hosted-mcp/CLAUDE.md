@@ -97,3 +97,19 @@ The package implements the MCP Authorization spec's Third-Party Authorization Fl
 - Single-use state parameters with 10-minute TTL
 - Umbraco tokens stored in KV, never exposed to MCP clients
 - Consent choices stored in KV state, narrowing-only model (user can't expand admin config)
+
+## Firewall Allow-Listing
+
+If the target Umbraco sits behind an IP allow-list firewall, set `UMBRACO_MCP_HEADER_NAME` /
+`UMBRACO_MCP_HEADER_VALUE` on `HostedMcpEnv` to send a fixed header on every server-side
+request this Worker makes to Umbraco — Management API calls, OAuth token exchange/refresh,
+and the Cloud `/umbraco` reachability probe (`umbracoCloudSiteRouting`'s default
+`validateProject`) — so a firewall rule can recognize and allow MCP traffic. The browser-driven
+`/authorize` redirect can't carry a custom header; an operator whose firewall also blocks that
+endpoint needs a separate allow rule for it.
+
+`UMBRACO_MCP_HEADER_NAME` defaults to `X-Umbraco-Mcp` when `UMBRACO_MCP_HEADER_VALUE` is set and
+the name is left unset. Leaving the value unset sends no extra header (default off). Treat the
+value as sensitive — it's effectively a firewall bypass token — and set it via
+`wrangler secret put UMBRACO_MCP_HEADER_VALUE`, alongside `UMBRACO_OAUTH_CLIENT_SECRET`. One
+value per Worker deployment; there's no per-site override for multi-site Workers (`SiteConfig`).

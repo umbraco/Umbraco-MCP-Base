@@ -102,6 +102,26 @@ describe("umbracoCloudSiteRouting", () => {
     expect(site).toBeNull();
   });
 
+  it("sends the firewall-allowlist header on the reachability probe when configured", async () => {
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await config.resolveSite("abc", { ...env, UMBRACO_MCP_HEADER_VALUE: "secret-value" } as HostedMcpEnv);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect((options as RequestInit).headers).toEqual(
+      expect.objectContaining({ "X-Umbraco-Mcp": "secret-value" })
+    );
+  });
+
+  it("sends no extra header on the reachability probe when not configured", async () => {
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await config.resolveSite("abc", env);
+
+    const [, options] = fetchSpy.mock.calls[0];
+    expect(Object.keys((options as RequestInit).headers as Record<string, string>)).not.toContain(
+      "X-Umbraco-Mcp"
+    );
+  });
+
   it("supports a custom validateProject hook", async () => {
     const validateProject = jest.fn<
       (siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean

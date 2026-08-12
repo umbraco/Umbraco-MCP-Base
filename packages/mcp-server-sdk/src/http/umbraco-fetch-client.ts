@@ -37,6 +37,15 @@ export interface UmbracoFetchAuthConfig {
   clientId: string;
   /** OAuth client secret */
   clientSecret?: string;
+  /**
+   * Name of an extra header sent on every request to Umbraco (Management API
+   * calls plus the OAuth token request/refresh), so operators behind an IP
+   * allow-list firewall can mark MCP traffic and let it through. Defaults to
+   * `X-Umbraco-Mcp` when `headerValue` is set and this is left unset.
+   */
+  headerName?: string;
+  /** Value for the firewall-allowlist header. Unset = feature off (no header sent). */
+  headerValue?: string;
 }
 
 /**
@@ -70,6 +79,20 @@ if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
+
+/** Default name for the firewall-allowlist header when `headerValue` is set but `headerName` isn't. */
+export const DEFAULT_UMBRACO_MCP_HEADER_NAME = "X-Umbraco-Mcp";
+
+/**
+ * Builds the firewall-allowlist header, or `{}` when no value is configured
+ * (the feature is opt-in).
+ */
+function buildFirewallHeader(
+  headerName: string | undefined,
+  headerValue: string | undefined
+): Record<string, string> {
+  return headerValue ? { [headerName || DEFAULT_UMBRACO_MCP_HEADER_NAME]: headerValue } : {};
+}
 
 let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
@@ -119,6 +142,8 @@ export const requestClientCredentialsToken = async (config: {
   clientId: string;
   clientSecret?: string;
   tokenPath?: string;
+  headerName?: string;
+  headerValue?: string;
   /** Forwarded to `fetch`, so callers can impose their own deadline. */
   signal?: AbortSignal;
 }): Promise<{ accessToken: string; expiresIn: number }> => {
@@ -127,6 +152,8 @@ export const requestClientCredentialsToken = async (config: {
     clientId,
     clientSecret,
     tokenPath = DEFAULT_TOKEN_PATH,
+    headerName,
+    headerValue,
     signal,
   } = config;
 
@@ -134,6 +161,7 @@ export const requestClientCredentialsToken = async (config: {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      ...buildFirewallHeader(headerName, headerValue),
     },
     body: new URLSearchParams({
       client_id: clientId,
@@ -298,6 +326,7 @@ async function doFetch<T>(
     Authorization: `Bearer ${token}`,
     ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
     Accept: "application/json",
+    ...buildFirewallHeader(authConfig.headerName, authConfig.headerValue),
     ...config.headers,
     ...options?.headers,
   };
@@ -514,6 +543,7 @@ export function createUmbracoFetchClient(
       Authorization: `Bearer ${token}`,
       ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
+      ...buildFirewallHeader(instanceAuthConfig.headerName, instanceAuthConfig.headerValue),
       ...config.headers,
     };
 

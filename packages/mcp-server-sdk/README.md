@@ -114,6 +114,19 @@ Features:
 - Repeat-style query string serialization for array params
 - Error logging
 
+**Firewall allow-listing.** If the Umbraco instance sits behind an IP allow-list firewall, set `headerName`/`headerValue` (or the `UMBRACO_MCP_HEADER_NAME`/`UMBRACO_MCP_HEADER_VALUE` env vars if you're wiring them up yourself) to send a fixed header on every request — Management API calls plus the OAuth token request/refresh — so a firewall rule can recognize and allow MCP traffic:
+
+```typescript
+initializeUmbracoFetch({
+  baseUrl: 'https://localhost:44391',
+  clientId: 'my-client-id',
+  clientSecret: 'my-client-secret',
+  headerValue: process.env.UMBRACO_MCP_HEADER_VALUE, // headerName defaults to "X-Umbraco-Mcp"
+});
+```
+
+Leaving `headerValue` unset sends no extra header (default off). Treat the value as sensitive — it's effectively a firewall bypass token.
+
 #### `UmbracoManagementClient`
 
 Orval mutator for generated API clients. Use with `client: "axios"` in your Orval config — the mutator accepts a config-object shape `{ url, method, params, data, headers }` and supports `returnFullResponse` for the SDK's `CAPTURE_RAW_HTTP_RESPONSE` helpers.

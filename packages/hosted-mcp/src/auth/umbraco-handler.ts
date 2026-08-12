@@ -42,6 +42,7 @@ import {
   isClientAuthed,
   type TokenResponse,
 } from "./token-storage.js";
+import { buildFirewallHeader } from "../http/firewall-header.js";
 
 // ============================================================================
 // Confused-deputy helper
@@ -613,7 +614,10 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     const tokenResp = await fetch(endpoints.token_endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...buildFirewallHeader(env),
+      },
       body: tokenParams.toString(),
     });
 
