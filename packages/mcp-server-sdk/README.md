@@ -160,6 +160,8 @@ const { mutator, initialize, clearToken } = createUmbracoFetchClient();
 initialize({ baseUrl, clientId, clientSecret });
 ```
 
+`initialize()` accepts the same config as `initializeUmbracoFetch` — including `headerName`/`headerValue` (see Firewall allow-listing above).
+
 ### Tool Helpers
 
 #### `createToolResult(structuredContent?, includeStructured?, content?)`

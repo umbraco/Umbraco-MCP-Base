@@ -65,6 +65,35 @@ describe("umbracoCloudSiteRouting", () => {
     );
   });
 
+  // Security regression (PR #270 review): `siteId` comes from a caller-
+  // supplied OAuth `resource` parameter. `extractSiteIdFromOneResource`'s
+  // fallback for a non-absolute-URL value pattern-matches the raw string, so
+  // a value like "at/evil.example#" survives extraction as siteId
+  // "evil.example#". Templated into `https://${siteId}.${region}.umbraco.io`,
+  // that resolves (via the URL fragment) to host "evil.example" — an
+  // attacker-chosen host — turning the reachability probe (which now also
+  // carries the firewall-allowlist header) into an SSRF that leaks it. A
+  // siteId must be rejected before it's ever used to build a URL.
+  it.each([
+    ["evil.example#", "dot + fragment marker"],
+    ["evil.example", "dot (subdomain smuggling)"],
+    ["evil/example", "path separator"],
+    ["evil@example", "userinfo separator"],
+    ["", "empty string"],
+  ])("rejects an unsafe siteId (%s: %s) without ever fetching", async (unsafeSiteId) => {
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    const site = await config.resolveSite(unsafeSiteId, env);
+    expect(site).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("still resolves a safe alphanumeric+hyphen siteId", async () => {
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    const site = await config.resolveSite("safe-alias-123", env);
+    expect(site?.baseUrl).toBe("https://safe-alias-123.euwest01.umbraco.io");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the supplied oauthClientId for every project", async () => {
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
     const a = await config.resolveSite("project-a", env);

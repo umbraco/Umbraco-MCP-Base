@@ -3,7 +3,7 @@
  *
  * Wraps the generic `SiteRoutingConfig` with Cloud conventions:
  *   - URL pattern `https://{alias}.{region}.umbraco.io`
- *   - Pre-flight validation against `.well-known/oauth-authorization-server`
+ *   - Pre-flight validation against `/umbraco` (see `defaultValidateProject`)
  *   - Cached resolution (ms-level memo, scoped to a worker isolate)
  *
  * Each Umbraco Cloud project is expected to register its own OAuth client with
@@ -41,9 +41,9 @@ export interface UmbracoCloudRoutingOptions {
     env: HostedMcpEnv
   ) => string | null | undefined | Promise<string | null | undefined>;
   /**
-   * Override the default validation. The default fetches
-   * `https://{alias}.{region}.umbraco.io/.well-known/oauth-authorization-server`
-   * and treats a 2xx response with a JSON body as "exists".
+   * Override the default validation. The default GETs
+   * `https://{alias}.{region}.umbraco.io/umbraco` and treats a non-4xx/5xx
+   * response as "exists" (see `defaultValidateProject`).
    *
    * Return `true` to allow the project, `false` to reject (the router
    * surfaces this as 404). Throw to surface 502.
@@ -78,6 +78,17 @@ export interface UmbracoCloudRoutingOptions {
 const DEFAULT_REGION = "euwest01";
 const DEFAULT_PATH_PREFIX = "/at/:siteId";
 const DEFAULT_CACHE_TTL = { ok: 60_000, miss: 30_000, error: 10_000 };
+// `siteId` is extracted from a caller-supplied OAuth `resource` parameter
+// (see `extractSiteIdFromOneResource`'s permissive fallback for values that
+// aren't a parseable absolute URL) and is string-templated straight into the
+// probe/token host below. Without this check, a value like
+// "at/evil.example#" survives extraction as siteId "evil.example#", and
+// `` `https://${siteId}.${region}.umbraco.io` `` parses with host
+// "evil.example" (everything from "#" on becomes the fragment) — turning the
+// reachability probe (and any header attached to it) into an SSRF against an
+// attacker-chosen host. Real Cloud aliases are DNS labels, so reject anything
+// else before it ever reaches a URL.
+const SAFE_SITE_ID = /^[a-zA-Z0-9-]+$/;
 // Cap to keep the per-isolate cache bounded — at this point we evict expired
 // entries and, if still over the cap, drop the oldest. Stops a stream of
 // unique aliases (typos, scans) from growing the Map without bound.
@@ -120,6 +131,12 @@ export function umbracoCloudSiteRouting(
     // `createDefaultHandler`, which consult the same `enabled` predicate
     // exposed below and short-circuit before this resolver is invoked.
     if (!enabled(env)) {
+      return null;
+    }
+
+    // Reject before this siteId is ever used to build a URL — see
+    // SAFE_SITE_ID above for why.
+    if (!SAFE_SITE_ID.test(siteId)) {
       return null;
     }
 

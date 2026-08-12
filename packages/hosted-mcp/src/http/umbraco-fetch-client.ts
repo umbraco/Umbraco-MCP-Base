@@ -71,7 +71,16 @@ export interface UmbracoFetchClientConfig {
   baseUrl: string;
   /** The stored Umbraco Bearer token */
   accessToken: string;
-  /** Name of the firewall-allowlist header (see `HostedMcpEnv.UMBRACO_MCP_HEADER_NAME`) */
+  /**
+   * Name of the firewall-allowlist header sent on this client's requests
+   * (see `HostedMcpEnv.UMBRACO_MCP_HEADER_NAME`). Independent of
+   * `refreshContext.env` below — on token refresh, the header comes from
+   * `refreshContext.env.UMBRACO_MCP_HEADER_NAME`/`_VALUE`, not from this
+   * field. The one production caller, `createFetchClientFromKV`, always sets
+   * both from the same env so they can't diverge; a caller constructing this
+   * directly with a different `refreshContext.env` should set both sets of
+   * fields consistently too.
+   */
   headerName?: string;
   /** Value of the firewall-allowlist header (see `HostedMcpEnv.UMBRACO_MCP_HEADER_VALUE`) */
   headerValue?: string;

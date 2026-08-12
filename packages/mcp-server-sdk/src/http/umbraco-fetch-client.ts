@@ -83,15 +83,32 @@ export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-offi
 /** Default name for the firewall-allowlist header when `headerValue` is set but `headerName` isn't. */
 export const DEFAULT_UMBRACO_MCP_HEADER_NAME = "X-Umbraco-Mcp";
 
+// Control characters (CR/LF in particular) make `fetch` throw when building
+// the Headers object. Rejecting them here means a misconfigured value fails
+// loudly with a clear, actionable message pointing at the two config fields —
+// rather than as an opaque `TypeError` from deep inside `fetch` on the first
+// live request, or (worse, in callers with a broad try/catch around the
+// request) as a silently swallowed failure with no trace of the real cause.
+const INVALID_HEADER_CHARS = /[\x00-\x1F\x7F]/;
+
 /**
  * Builds the firewall-allowlist header, or `{}` when no value is configured
- * (the feature is opt-in).
+ * (the feature is opt-in) or the configured name/value is unsafe to send as
+ * an HTTP header (logged instead of thrown — see `INVALID_HEADER_CHARS`).
  */
 function buildFirewallHeader(
   headerName: string | undefined,
   headerValue: string | undefined
 ): Record<string, string> {
-  return headerValue ? { [headerName || DEFAULT_UMBRACO_MCP_HEADER_NAME]: headerValue } : {};
+  if (!headerValue) return {};
+  const name = headerName || DEFAULT_UMBRACO_MCP_HEADER_NAME;
+  if (INVALID_HEADER_CHARS.test(name) || INVALID_HEADER_CHARS.test(headerValue)) {
+    console.error(
+      "[umbraco-mcp] headerName/headerValue (or UMBRACO_MCP_HEADER_NAME/UMBRACO_MCP_HEADER_VALUE) contains a control character — e.g. a stray newline from a copy/paste — and will be omitted from requests to Umbraco."
+    );
+    return {};
+  }
+  return { [name]: headerValue };
 }
 
 let authConfig: UmbracoFetchAuthConfig | null = null;

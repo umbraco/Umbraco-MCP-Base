@@ -76,6 +76,80 @@ describe("firewall-allowlist header", () => {
         "X-Umbraco-Mcp"
       );
     });
+
+    // A misconfigured value (e.g. a trailing newline from a copy/paste) would
+    // otherwise make the underlying `fetch` throw a generic, hard-to-trace
+    // TypeError on every request. Rejecting it up front fails loudly with a
+    // clear cause instead.
+    it("omits the header and logs (does not throw) when headerValue contains a control character", async () => {
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+      mockFetch.mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }));
+
+      await requestClientCredentialsToken({
+        baseUrl: "https://example.com",
+        clientId: "cid",
+        clientSecret: "sec",
+        headerValue: "bad\nvalue",
+      });
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(Object.keys((options as RequestInit).headers as Record<string, string>)).not.toContain(
+        "X-Umbraco-Mcp"
+      );
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("control character"));
+      consoleError.mockRestore();
+    });
+
+    it("omits the header when headerName contains a control character", async () => {
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+      mockFetch.mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }));
+
+      await requestClientCredentialsToken({
+        baseUrl: "https://example.com",
+        clientId: "cid",
+        clientSecret: "sec",
+        headerName: "X-Bad\r\nHeader",
+        headerValue: "secret-value",
+      });
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).headers).toEqual({
+        "Content-Type": "application/x-www-form-urlencoded",
+      });
+      consoleError.mockRestore();
+    });
+  });
+
+  describe("header precedence", () => {
+    it("coexists with caller-supplied headers of a different name (doFetch)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
+        .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      initializeUmbracoFetch({
+        baseUrl: "https://example.com",
+        clientId: "cid",
+        clientSecret: "sec",
+        headerValue: "secret-value",
+      });
+
+      await UmbracoManagementClient(
+        {
+          method: "get",
+          url: "/umbraco/management/api/v1/item",
+          headers: { "X-Request-Id": "abc-123" },
+        },
+        { returnFullResponse: true }
+      );
+
+      const [, apiOptions] = mockFetch.mock.calls[1];
+      expect((apiOptions as RequestInit).headers).toEqual(
+        expect.objectContaining({
+          "X-Umbraco-Mcp": "secret-value",
+          "X-Request-Id": "abc-123",
+        })
+      );
+    });
   });
 
   describe("initializeUmbracoFetch (singleton)", () => {
@@ -156,6 +230,29 @@ describe("firewall-allowlist header", () => {
       );
       expect((apiOptions as RequestInit).headers).toEqual(
         expect.objectContaining({ "X-Custom-Header": "secret-value" })
+      );
+    });
+
+    it("sends no extra header when not configured", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
+        .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      const { initialize, mutator } = createUmbracoFetchClient();
+      initialize({
+        baseUrl: "https://example.com",
+        clientId: "cid",
+        clientSecret: "sec",
+      });
+
+      await mutator(
+        { method: "get", url: "/umbraco/management/api/v1/item" },
+        { returnFullResponse: true }
+      );
+
+      const [, apiOptions] = mockFetch.mock.calls[1];
+      expect(Object.keys((apiOptions as RequestInit).headers as Record<string, string>)).not.toContain(
+        "X-Umbraco-Mcp"
       );
     });
   });
