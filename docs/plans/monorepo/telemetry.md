@@ -41,7 +41,8 @@ Two consequences:
 1. **Start with the hosted Workers.** We own the runtime, the multi-tenant Worker at
    `cms.developer.17.mcp.umbraco.ai/at/<alias>/mcp` serves every Cloud project in a region, and no consent
    mechanism needs inventing. Highest signal per unit of work and per unit of risk.
-2. **Local stdio is a separate decision** with a genuine consent problem — see §4.
+2. **Local stdio ships later, not never.** The §4 decision (OTel only, no phone-home) removes the consent problem
+   that made this the hard case — what's left is a Node OTel adapter, pointed at a collector the customer owns.
 
 ## 3. How Umbraco does it — two precedents, and they disagree
 
@@ -142,48 +143,65 @@ Deliberately also worth doing, independent of any sink: **the SDK's fetch client
 `umbraco-mcp-dev/18.0.2 (+mcp)` makes MCP traffic attributable in *any* Umbraco or Cloud request log, with no new
 data collection, no consent question, and no new egress. Cheapest win available and a prerequisite for §5.
 
-### Layer 2 — sinks, one per deployment shape
+### Layer 2 — one sink: OpenTelemetry
 
-**(a) HQ-hosted Workers → Cloudflare Workers Analytics Engine.** Start here. Add an `ANALYTICS` binding to
-`HostedMcpEnv` (`packages/hosted-mcp/src/types/env.ts`), render it in the `umbraco-cloud-hosted-mcp` Terraform
-module alongside the existing `UMBRACO_CLOUD_ROUTING_ENABLED` var, and `writeDataPoint` from the sink. Limits fit
-comfortably: 20 blobs, 20 doubles, 1 index per call, 16 KB total blobs, 96 bytes per index, 250 data points per
-Worker invocation — one event per tool call is nowhere near any of those. Query via SQL API for dashboards.
+**Decision taken: OTel everywhere. No phone-home, in any product.** We do not report MCP usage back to HQ
+through the CMS telemetry pipeline, we do not add an `IDetailedTelemetryProvider`, and we do not read the
+connected instance's consent level in order to send anything. Spans go to a collector, and who owns that
+collector follows who owns the runtime:
 
-Tenant identity needs care: the Cloud project alias is in the URL (`/at/<alias>/mcp`) and is *not* anonymous —
-it's effectively a customer identifier. **Use a keyed hash of the alias as the index/sampling key**, keep the
-plaintext alias out of blobs, and treat the mapping as internal. That keeps per-tenant aggregation possible
-(useful for support) without building a per-customer activity log by accident.
+| Deployment | Collector owner | Consent needed |
+|---|---|---|
+| HQ-hosted Workers (`*.mcp.umbraco.ai`) | HQ — our runtime, our destination | None new (our service) |
+| Customer-hosted Workers | The customer | None (their data, their sink) |
+| Local stdio | The customer, opt-in | None (their data, their sink) |
 
-**(b) Customer-hosted Workers + local stdio → OTel exporter, opt-in, customer's own sink.** Exactly the
-Umbraco.AI contract: we ship instrumentation, they point it at their collector. Off by default, zero overhead
-when unset, no HQ egress, nothing to consent to. This is also what makes the feature *sellable* rather than
+This is the Umbraco.AI contract applied across the board: we ship instrumentation, the operator points it at a
+collector, and when none is configured there is zero overhead. It also makes the feature *sellable* rather than
 merely tolerated — an agency wants to see which tools their editors' AI is hammering.
 
-**(c) Local stdio → HQ.** The genuinely contentious one. Three options:
+The implementation plan for the HQ-hosted Workers is `docs/plans/hosted-mcp/otel-tracing.md`; the spike there
+confirms the mechanism works. Because Cloudflare's native tracing is what the hosted Workers use, the
+customer-hosted case comes free — same adapter, they just name their own destination.
 
-1. **Explicit opt-in on first run** (env var / config flag, default off). Honest and safe; realistically yields a
-   biased sample of enthusiasts.
-2. **Inherit the connected instance's CMS consent level.** The Management API exposes
-   `GET /umbraco/management/api/v1/telemetry/level` (`GetTelemetryController`), returning
-   `Minimal`/`Basic`/`Detailed`. So the MCP server *can* read the site's existing consent and respect it. Two
-   real caveats: the whole telemetry controller is `[Authorize(Policy = AuthorizationPolicies.SectionAccessSettings)]`,
-   so an MCP API user without Settings access gets a 403 — which must be treated as "do not send", never as
-   "assume the default". And **the anonymised site GUID is not exposed by the Management API at all**
-   (`ISiteIdentifierService` is internal; only `TelemetryService` and `NewsDashboardService` consume it), so we
-   cannot correlate with CMS telemetry without either minting our own local install ID or asking the CMS to
-   expose the identifier. There's also a fair argument that consent given for "CMS telemetry" doesn't extend to
-   a separate npm tool on a developer's machine phoning home — so this is a question for legal/DPO, not one to
-   settle in code.
-3. **Companion Umbraco package registering an `IDetailedTelemetryProvider`.** The most Umbraco-native answer, and
-   the one Commerce validates: MCP usage is counted *server-side* and shipped in the existing daily report, under
-   existing consent, visible in the existing dashboard, with zero new egress from anyone's laptop. It depends on
-   the CMS being able to attribute requests to an MCP — which is what the `User-Agent` change above enables — and
-   on somewhere to count them. That's a CMS-side change and therefore **an RFC through the normal contribution
-   process**, not something to land quietly.
+**What this decision costs, stated plainly:** if nothing phones home, **HQ gets no telemetry from local stdio
+installs at all.** Those are public npm packages (`@umbraco-cms/mcp-dev`, `umbraco-mcp-editor-cms`,
+`umbraco-forms-mcp-dev`) and may well be where most usage lives. Our adoption signal there reduces to npm
+download counts, plus whatever a customer volunteers. We will have good data about the hosted Workers and near
+none about the local ones. That's an acceptable trade if the alternative is a CLI tool on a developer's machine
+opening an outbound connection they didn't ask for — but it should be a known blind spot, not a surprise later
+when someone asks how many people use the dev MCP.
 
-My recommendation: **(a) now, (b) next, and put (c) up as a decision with option 3 as the preferred long-term
-shape and option 1 as the interim.** Don't ship (c) as a default-on phone-home from a CLI tool.
+**Consequence for reporting:** with the CMS pipeline out and Analytics Engine no longer in the plan, durable
+usage counts have to come from **span-derived metrics in the backend** (an OTel Collector's span metrics
+connector, or Grafana Cloud's Tempo metrics-generator). That makes the backend choice load-bearing: a tracing
+store with 7-day retention and no span→metrics capability will answer "why did this call fail" and *not* "which
+tools were used last quarter". See `otel-tracing.md` §12.
+
+### Rejected: the CMS telemetry pipeline
+
+Recorded because it was the obvious candidate and Commerce validates it, so it will be asked about again.
+
+Reporting through `ReportSiteJob` would have meant a companion Umbraco package registering an
+`IDetailedTelemetryProvider` — MCP usage counted server-side, shipped in the existing daily report, under
+existing consent, visible in the existing dashboard, with zero new egress from anyone's laptop. Genuinely the
+most Umbraco-native answer.
+
+Ruled out because it buys HQ data at a poor price:
+
+- It requires a CMS-side change and therefore an RFC through the normal contribution process, plus the CMS being
+  able to attribute inbound requests to an MCP at all.
+- The consent story is muddy: `GET /umbraco/management/api/v1/telemetry/level` exists
+  (`GetTelemetryController`) but is gated on `SectionAccessSettings`, so an MCP API user without Settings access
+  gets a 403; and the anonymised site GUID is not exposed by the Management API at all
+  (`ISiteIdentifierService` is internal), so we couldn't correlate with CMS telemetry without minting our own
+  install ID or asking the CMS to expose the identifier.
+- It only ever served the phone-home use case. It does nothing for the customer, whereas OTel gives them
+  something they'd actually want.
+
+The `User-Agent` change above was partly motivated as a prerequisite for this route. **Keep it anyway** — making
+MCP traffic attributable in any Umbraco or Cloud request log is independently useful for support and debugging,
+and costs nothing.
 
 ## 5. What to collect — and what not to
 
@@ -206,19 +224,19 @@ feature.
 ## 6. Suggested sequence
 
 1. **`User-Agent` on the SDK fetch client.** Independently useful, no data collection. Days.
-2. **`McpToolEvent` + no-op sink + `withTelemetry` in `withStandardDecorators`.** Zero behaviour change until a
-   sink is registered; unit-testable; nothing shipped anywhere.
-3. **Analytics Engine sink in `@umbraco-cms/mcp-hosted` + binding in the Terraform module.** First real data, from
-   our own runtime. Answers the product questions for the hosted MCPs.
-4. **OTel exporter sink** (opt-in, customer's collector). Mirrors Umbraco.AI; becomes a feature, not overhead.
+2. **`TelemetryAdapter` + `withTelemetry` in `withStandardDecorators`.** Zero behaviour change until an adapter is
+   registered; unit-testable; nothing shipped anywhere.
+3. **Cloudflare tracing adapter in `@umbraco-cms/mcp-hosted`**, plus the destination and Wrangler template wiring.
+   First real data, from our own runtime — and the same adapter serves customer-hosted Workers. Detail in
+   `docs/plans/hosted-mcp/otel-tracing.md`.
+4. **Node OTel adapter for local stdio** (opt-in, customer's collector). Needs force-flush on process exit; see
+   `otel-tracing.md` §13.
 5. **Feed real tool-call sequences into the `discuss-mcp` trace-optimization loop.** The payoff for §1's third row.
-6. **Decide the local-stdio question** — legal/DPO input, then RFC if we go the `IDetailedTelemetryProvider` route.
+
+The local-stdio *consent* question is closed by the §4 decision: nothing is sent to HQ, so there is nothing to
+consent to. What remains is only the engineering in step 4.
 
 ## 7. Open questions
-
-- Is HQ willing to run a second telemetry sink (Analytics Engine in the umbraco.ai account), or must everything
-  funnel into `telemetry.umbraco.com`? Analytics Engine is per-event and cheap where the CMS endpoint is a daily
-  aggregate — they're not interchangeable.
 - Does the hosted MCP have a privacy notice / DPA position today? The multi-tenant Worker already sees Cloud
   project aliases and proxies backoffice API calls, so this may already be settled ground rather than new.
 - Do we want per-tenant visibility for support ("project X's MCP is erroring"), or strictly aggregate? That single

@@ -37,8 +37,9 @@ Keep `otel-cf-workers` as the documented fallback if the DO spike in §7 fails.
 Two constraints to design around, both from the native path:
 
 - **No OTel metrics.** Export covers traces and logs only. Counters and histograms must be derived from spans in
-  the backend. If we later want cheap high-cardinality counters, Analytics Engine stays complementary rather
-  than superseded.
+  the backend. Since the decision in `telemetry.md` §4 is OTel-only — Analytics Engine is *not* being built — this
+  is load-bearing rather than a footnote: the chosen backend has to do span→metrics, or we have no durable usage
+  counts at all. See §12.
 - **Custom span API gaps** (documented): no bulk `setAttributes()`, no `spanContext()` access, no
   `setOutcome()`. No `spanContext()` means **we cannot read the trace ID at runtime**, so the Umbraco.AI trick of
   stamping a `TraceId` onto an audit record to correlate later is not available to us. Don't design anything that
@@ -364,10 +365,12 @@ on `gen_ai.tool.name` × tenant × client name would multiply out fast. Recommen
 tool name + outcome only, and keep tenant/client/session on the **spans** where high cardinality is free. The span
 metrics connector has an `aggregation_cardinality_limit` circuit breaker as a backstop.
 
-This is also where the Analytics Engine option from `telemetry.md` §4(a) earns its place rather than being
-superseded: SQL-queryable, ~90-day retention, purpose-built for exactly these counters. Traces answer *why a call
-failed*; Analytics Engine or span-derived metrics answer *how often it happened*. Picking a tracing backend does
-not remove the need for the second thing.
+**This makes span→metrics a hard requirement on the backend, not a nice-to-have.** The decision in `telemetry.md`
+§4 is OTel-only, so there is no Analytics Engine fallback for counters. Traces answer *why a call failed*;
+span-derived metrics are now the *only* thing that will answer *how often it happened*. A backend that ingests
+OTLP traces but can't derive and retain metrics from them will satisfy the plan on paper and fail the actual
+question in §1 — treat "does it do span metrics, with what retention" as a gating criterion when choosing, not a
+comparison detail.
 
 **Reporting "which tools are never used" needs a denominator telemetry can't supply.** Absence of a span is not
 evidence a tool exists. Take the full tool list from the SDK's existing CLI introspection (`--list-tools` via
@@ -395,11 +398,13 @@ The Node adapter (`@opentelemetry/sdk-node` + an OTLP exporter, registered from 
 - **Flushing matters.** A stdio server is a short-lived process; spans buffered at exit are lost. The template
   already installs `SIGINT`/`SIGTERM` handlers for `mcpClientManager.disconnectAll()` — that's where a
   force-flush belongs.
-- **It sidesteps the consent question entirely.** `telemetry.md` §4(c) is about telemetry flowing to *HQ*. A
-  customer-attached OTel exporter sends data to the customer, which is precisely the Umbraco.AI contract
-  ("when OpenTelemetry is not configured, there is zero overhead") and needs no new consent from anyone. So local
-  *observability* can ship well before the local *phone-home* debate is settled — they're separable, and
-  conflating them would stall the easy half behind the hard half.
+- **There is no consent question left.** `telemetry.md` §4 records the decision: no phone-home in any product. A
+  customer-attached OTel exporter sends data to the customer, which is precisely the Umbraco.AI contract ("when
+  OpenTelemetry is not configured, there is zero overhead") and needs consent from nobody. The only thing standing
+  between local stdio and full observability is this adapter — no legal review, no RFC.
+- **HQ gets nothing from local installs, by design.** Follows directly from the same decision; `telemetry.md` §4
+  states the trade-off. Worth remembering before anyone reads a per-tool usage chart as covering all deployments —
+  it covers the hosted Workers only.
 
 ## Sources
 
