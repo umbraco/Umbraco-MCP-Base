@@ -71,6 +71,14 @@ export {
   type CloudflareTracingAdapterOptions,
 } from "./telemetry/cloudflare-tracing.js";
 
+export {
+  SERVER_INIT_SPAN,
+  AUTH_REFRESH_SPAN,
+  HostedTelemetryAttributes,
+  type ServerInitMode,
+  type AuthRefreshOutcome,
+} from "./telemetry/attributes.js";
+
 // ============================================================================
 // Auth
 // ============================================================================

@@ -5,9 +5,10 @@
  * Depends only on types/env.ts — no auth handler or consent dependencies.
  */
 
-import { normalizeBaseUrl } from "@umbraco-cms/mcp-server-sdk";
+import { normalizeBaseUrl, getTelemetryAdapter } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import { logAuth } from "./log.js";
+import { AUTH_REFRESH_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -273,28 +274,50 @@ export async function refreshUmbracoToken(
     `refreshUmbracoToken request key=${tokenKey} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!site}`
   );
 
-  const resp = await fetch(endpoints.token_endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
+  // Traced because this is the path that breaks in production, and a refresh
+  // appearing mid-request is also how a 401-then-retry shows up in a trace.
+  //
+  // The `logAuth` lines stay as they are: they carry the token key, the endpoint
+  // and (on failure) part of the response body, which are exactly what you want
+  // on `wrangler tail` while debugging and exactly what must not be exported to
+  // a third-party backend. The span gets the status code and nothing else
+  // identifying — no token key, no body.
+  return getTelemetryAdapter().startSpan(
+    AUTH_REFRESH_SPAN,
+    { [HostedTelemetryAttributes.AUTH_SITE_CONTEXT]: !!site },
+    async (span) => {
+      const resp = await fetch(endpoints.token_endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
 
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "<unreadable>");
-    logAuth(
-      env,
-      `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
-    );
-    return null;
-  }
+      span.setAttribute(HostedTelemetryAttributes.HTTP_STATUS, resp.status);
 
-  const tokens = (await resp.json()) as TokenResponse;
-  logAuth(
-    env,
-    `refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "<unreadable>");
+        logAuth(
+          env,
+          `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
+        );
+        span.setAttribute(HostedTelemetryAttributes.AUTH_OUTCOME, "failed");
+        return null;
+      }
+
+      const tokens = (await resp.json()) as TokenResponse;
+      logAuth(
+        env,
+        `refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
+      );
+      span.setAttribute(HostedTelemetryAttributes.AUTH_OUTCOME, "refreshed");
+      span.setAttribute(
+        HostedTelemetryAttributes.AUTH_ROTATED_REFRESH_TOKEN,
+        !!tokens.refresh_token
+      );
+      // Carry the site context forward so the next refresh round-trip also
+      // uses the per-tenant client_id.
+      await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, site, env);
+      return tokens.access_token;
+    }
   );
-  // Carry the site context forward so the next refresh round-trip also
-  // uses the per-tenant client_id.
-  await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, site, env);
-  return tokens.access_token;
 }
