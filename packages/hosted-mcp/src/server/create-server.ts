@@ -8,6 +8,10 @@
  */
 
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  createCloudflareTracingAdapter,
+  type CloudflareTracing,
+} from "../telemetry/cloudflare-tracing.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { z } from "zod";
 import {
@@ -20,6 +24,8 @@ import {
   checkUmbracoVersion,
   VersionCheckService,
   registerToolCollection,
+  setTelemetryAdapter,
+  TelemetryAttributes,
   SERVER_INFORMATION_PATH,
   type ToolCollectionExport,
   type ToolModeDefinition,
@@ -139,6 +145,28 @@ export interface CreateServerOptions {
    * When both `multiSite` and `resolveSite` are provided, `resolveSite` takes precedence.
    */
   resolveSite?: SiteResolver;
+  /**
+   * Opt into OpenTelemetry tracing for tool calls.
+   *
+   * Pass the `tracing` object from `cloudflare:workers` — this package can't
+   * import it directly (the specifier only resolves inside the Workers runtime),
+   * the same reason `McpAgent` and `OAuthProvider` come from the consumer:
+   *
+   * ```ts
+   * import { tracing } from "cloudflare:workers";
+   * // ...
+   * telemetry: { tracing }
+   * ```
+   *
+   * Omit it and tool calls run through the SDK's pass-through adapter, recording
+   * nothing. Spans only leave the Worker once `[observability.traces]` in the
+   * Wrangler config names an OTLP destination, so wiring this up is safe well
+   * before any exporter exists.
+   */
+  telemetry?: {
+    /** The `tracing` object from `cloudflare:workers`. */
+    tracing: CloudflareTracing;
+  };
 }
 
 /**
@@ -286,6 +314,29 @@ export async function createPerRequestServer(
   console.log(
     `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
   );
+
+  // Install the tracing adapter before any tool can run. Only static facts go
+  // on it — see `createCloudflareTracingAdapter` for why request-scoped values
+  // (tenant, client, site) must not be closed over in a module-scoped adapter.
+  // Re-registering on every DO start is harmless: the values are identical for
+  // every request this Worker serves.
+  if (options.telemetry?.tracing) {
+    const staticAttributes: Record<string, string> = {
+      [TelemetryAttributes.SERVER_NAME]: options.name,
+      [TelemetryAttributes.SERVER_VERSION]: options.version,
+    };
+    const expectedMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+    if (expectedMajor) {
+      staticAttributes[TelemetryAttributes.UMBRACO_MAJOR] = expectedMajor;
+    }
+
+    setTelemetryAdapter(
+      createCloudflareTracingAdapter({
+        tracing: options.telemetry.tracing,
+        attributes: staticAttributes,
+      })
+    );
+  }
 
   const baseInstructions =
     typeof options.instructions === "function"
