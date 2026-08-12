@@ -109,3 +109,24 @@ export {
 
 // URL helpers
 export { normalizeBaseUrl } from "./url.js";
+
+// Telemetry (the decorator lives in ../telemetry; re-exported here because
+// withStandardDecorators applies it and callers look for it alongside the other
+// decorators)
+export {
+  withTelemetry,
+  setTelemetryAdapter,
+  getTelemetryAdapter,
+  clearTelemetryAdapter,
+  passThroughAdapter,
+  registerToolCollection,
+  getToolCollection,
+  clearToolCollections,
+  TelemetryAttributes,
+  TOOLS_CALL_METHOD,
+  type TelemetryAdapter,
+  type TelemetrySpan,
+  type SpanAttributes,
+  type AttributeValue,
+  type ToolOutcome,
+} from "../telemetry/index.js";

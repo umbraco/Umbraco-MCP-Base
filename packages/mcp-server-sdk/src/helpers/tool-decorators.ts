@@ -14,6 +14,7 @@ import { ToolValidationError } from "./tool-validation-error.js";
 import { withInputSanitization } from "./input-sanitizer.js";
 import { withDryRun } from "./dry-run.js";
 import { withCursorPagination, type CursorPaginatedArgs } from "./cursor-pagination.js";
+import { withTelemetry } from "../telemetry/with-telemetry.js";
 
 // Re-export everything from split modules for convenience
 export {
@@ -212,7 +213,7 @@ export function createToolAnnotations(tool: ToolDefinition<any, any>): ToolAnnot
 
 /**
  * Standard decorator composition for all tools.
- * Applies: withErrorHandling → withCursorPagination → withInputSanitization → withDryRun → withPreExecutionCheck → handler
+ * Applies: withErrorHandling → withTelemetry → withCursorPagination → withInputSanitization → withDryRun → withPreExecutionCheck → handler
  *
  * Cursor pagination is applied after the inner decorators but before error handling,
  * so cursor decode errors are caught. Only affects tools with skip/take in their
@@ -227,13 +228,21 @@ export function createToolAnnotations(tool: ToolDefinition<any, any>): ToolAnnot
 export function withStandardDecorators<Args extends undefined | ZodRawShape, OutputArgs extends undefined | ZodRawShape | ZodType = undefined>(
   tool: ToolDefinition<Args, OutputArgs>
 ): ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs> {
-  // Applied in three steps rather than a single compose() because
+  // Applied in steps rather than a single compose() because
   // withCursorPagination changes the type signature (skip/take → cursor),
   // which compose() can't express since it requires uniform types throughout.
   //
   // Execution order (innermost → outermost):
-  //   1. preExecutionCheck → 2. dryRun → 3. inputSanitization → 4. cursorPagination → 5. errorHandling
+  //   1. preExecutionCheck → 2. dryRun → 3. inputSanitization → 4. cursorPagination
+  //   → 5. telemetry → 6. errorHandling
+  //
+  // Telemetry sits directly inside error handling on purpose: withErrorHandling
+  // converts thrown errors into tool results, so telemetry placed outside it
+  // would record every failure as a success. Inside, failures arrive as
+  // exceptions and get classified. It also stays outside withDryRun, so a
+  // dry-run call is still counted — tagged as one rather than dropped.
   const decorated = compose<Args, OutputArgs>(withInputSanitization, withDryRun, withPreExecutionCheck)(tool);
   const paginated = withCursorPagination(decorated);
-  return withErrorHandling(paginated);
+  const instrumented = withTelemetry(paginated);
+  return withErrorHandling(instrumented);
 }

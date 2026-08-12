@@ -19,6 +19,7 @@ import {
   expandModesToCollections,
   checkUmbracoVersion,
   VersionCheckService,
+  registerToolCollection,
   SERVER_INFORMATION_PATH,
   type ToolCollectionExport,
   type ToolModeDefinition,
@@ -474,6 +475,12 @@ export function registerCollectionTools<TUser>(
       }
 
       const annotations = createToolAnnotations(tool);
+
+      // Record the owning collection for telemetry. This loop is the only place
+      // that knows both — `withStandardDecorators` runs in the tool's own file,
+      // before collections are assembled. Static config, so sharing it across
+      // requests in the isolate is correct.
+      registerToolCollection(tool.name, collectionName);
 
       server.registerTool(
         tool.name,

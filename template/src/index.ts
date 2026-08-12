@@ -23,6 +23,7 @@ import {
   checkUmbracoVersion,
   configureVersionCheckHook,
   getVersionCheckMessage,
+  registerToolCollection,
   UmbracoManagementClient,
   CAPTURE_RAW_HTTP_RESPONSE,
   SERVER_INFORMATION_PATH,
@@ -199,6 +200,11 @@ for (const collection of collections) {
 
     // Build annotations from tool definition
     const annotations = createToolAnnotations(tool);
+
+    // Record the owning collection so telemetry spans can be grouped by it.
+    // Only this loop knows both the tool and its collection — the decorators
+    // are applied in each tool's own file, before collections are assembled.
+    registerToolCollection(tool.name, collectionName);
 
     // Register tool with MCP server using registerTool API
     server.registerTool(tool.name, {
