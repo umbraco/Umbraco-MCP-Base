@@ -922,6 +922,40 @@ describe("createCallbackHandler", () => {
       );
     });
 
+    it("sends the firewall-allowlist header on the token exchange when configured", async () => {
+      const env = createMockEnv({ UMBRACO_MCP_HEADER_VALUE: "secret-value" });
+      mockConsumeOAuthState.mockResolvedValue(makeStoredState());
+      mockFetch.mockResolvedValue(
+        createJsonResponse(200, { access_token: "tok", token_type: "Bearer" })
+      );
+
+      const handler = createCallbackHandler(env);
+      await handler(
+        new Request("https://worker.example.com/callback?code=my-code&state=my-state")
+      );
+
+      const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(opts.headers).toEqual(
+        expect.objectContaining({ "X-Umbraco-Mcp": "secret-value" })
+      );
+    });
+
+    it("sends no extra header on the token exchange when not configured", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(makeStoredState());
+      mockFetch.mockResolvedValue(
+        createJsonResponse(200, { access_token: "tok", token_type: "Bearer" })
+      );
+
+      const handler = createCallbackHandler(env);
+      await handler(
+        new Request("https://worker.example.com/callback?code=my-code&state=my-state")
+      );
+
+      const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(Object.keys(opts.headers as Record<string, string>)).not.toContain("X-Umbraco-Mcp");
+    });
+
     it("stores tokens in KV with storeUmbracoToken", async () => {
       const env = createMockEnv();
       mockConsumeOAuthState.mockResolvedValue(makeStoredState());

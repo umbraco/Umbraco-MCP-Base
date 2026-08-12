@@ -8,6 +8,7 @@
 import { normalizeBaseUrl } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import { logAuth } from "./log.js";
+import { buildFirewallHeader } from "../http/firewall-header.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -275,7 +276,10 @@ export async function refreshUmbracoToken(
 
   const resp = await fetch(endpoints.token_endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...buildFirewallHeader(env),
+    },
     body: params.toString(),
   });
 

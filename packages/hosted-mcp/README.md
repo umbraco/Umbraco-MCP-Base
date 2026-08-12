@@ -126,6 +126,9 @@ wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 
 # Always required
 wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
+
+# Optional: only if Umbraco sits behind an IP allow-list firewall
+wrangler secret put UMBRACO_MCP_HEADER_VALUE
 ```
 
 ### 5. Create KV namespace

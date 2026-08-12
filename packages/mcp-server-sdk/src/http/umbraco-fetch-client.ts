@@ -37,6 +37,15 @@ export interface UmbracoFetchAuthConfig {
   clientId: string;
   /** OAuth client secret */
   clientSecret?: string;
+  /**
+   * Name of an extra header sent on every request to Umbraco (Management API
+   * calls plus the OAuth token request/refresh), so operators behind an IP
+   * allow-list firewall can mark MCP traffic and let it through. Defaults to
+   * `X-Umbraco-Mcp` when `headerValue` is set and this is left unset.
+   */
+  headerName?: string;
+  /** Value for the firewall-allowlist header. Unset = feature off (no header sent). */
+  headerValue?: string;
 }
 
 /**
@@ -70,6 +79,37 @@ if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
+
+/** Default name for the firewall-allowlist header when `headerValue` is set but `headerName` isn't. */
+export const DEFAULT_UMBRACO_MCP_HEADER_NAME = "X-Umbraco-Mcp";
+
+// Control characters (CR/LF in particular) make `fetch` throw when building
+// the Headers object. Rejecting them here means a misconfigured value fails
+// loudly with a clear, actionable message pointing at the two config fields —
+// rather than as an opaque `TypeError` from deep inside `fetch` on the first
+// live request, or (worse, in callers with a broad try/catch around the
+// request) as a silently swallowed failure with no trace of the real cause.
+const INVALID_HEADER_CHARS = /[\x00-\x1F\x7F]/;
+
+/**
+ * Builds the firewall-allowlist header, or `{}` when no value is configured
+ * (the feature is opt-in) or the configured name/value is unsafe to send as
+ * an HTTP header (logged instead of thrown — see `INVALID_HEADER_CHARS`).
+ */
+function buildFirewallHeader(
+  headerName: string | undefined,
+  headerValue: string | undefined
+): Record<string, string> {
+  if (!headerValue) return {};
+  const name = headerName || DEFAULT_UMBRACO_MCP_HEADER_NAME;
+  if (INVALID_HEADER_CHARS.test(name) || INVALID_HEADER_CHARS.test(headerValue)) {
+    console.error(
+      "[umbraco-mcp] headerName/headerValue (or UMBRACO_MCP_HEADER_NAME/UMBRACO_MCP_HEADER_VALUE) contains a control character — e.g. a stray newline from a copy/paste — and will be omitted from requests to Umbraco."
+    );
+    return {};
+  }
+  return { [name]: headerValue };
+}
 
 let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
@@ -119,6 +159,8 @@ export const requestClientCredentialsToken = async (config: {
   clientId: string;
   clientSecret?: string;
   tokenPath?: string;
+  headerName?: string;
+  headerValue?: string;
   /** Forwarded to `fetch`, so callers can impose their own deadline. */
   signal?: AbortSignal;
 }): Promise<{ accessToken: string; expiresIn: number }> => {
@@ -127,6 +169,8 @@ export const requestClientCredentialsToken = async (config: {
     clientId,
     clientSecret,
     tokenPath = DEFAULT_TOKEN_PATH,
+    headerName,
+    headerValue,
     signal,
   } = config;
 
@@ -134,6 +178,7 @@ export const requestClientCredentialsToken = async (config: {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      ...buildFirewallHeader(headerName, headerValue),
     },
     body: new URLSearchParams({
       client_id: clientId,
@@ -298,6 +343,7 @@ async function doFetch<T>(
     Authorization: `Bearer ${token}`,
     ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
     Accept: "application/json",
+    ...buildFirewallHeader(authConfig.headerName, authConfig.headerValue),
     ...config.headers,
     ...options?.headers,
   };
@@ -514,6 +560,7 @@ export function createUmbracoFetchClient(
       Authorization: `Bearer ${token}`,
       ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
+      ...buildFirewallHeader(instanceAuthConfig.headerName, instanceAuthConfig.headerValue),
       ...config.headers,
     };
 

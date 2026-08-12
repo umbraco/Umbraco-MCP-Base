@@ -297,6 +297,8 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
+  // Firewall-allowlist header default
+  DEFAULT_UMBRACO_MCP_HEADER_NAME,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,

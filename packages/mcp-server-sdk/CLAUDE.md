@@ -69,7 +69,7 @@ src/
 - `configureApiClient` - Set up the API client provider
 
 **HTTP Client:**
-- `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
+- `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret, and optional `headerName`/`headerValue` — a fixed header sent on every request (Management API + OAuth token request/refresh) so operators behind an IP allow-list firewall can mark MCP traffic. Unset `headerValue` = off (default)
 - `UmbracoManagementClient` - Orval mutator for generated API clients
 - `createUmbracoFetchClient` - Factory for custom client instances (advanced)
 

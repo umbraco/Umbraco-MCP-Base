@@ -386,6 +386,173 @@ describe("createUmbracoFetchClient", () => {
       });
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
+
+    it("sends the firewall-allowlist header on the refresh request when configured", async () => {
+      const mockKV = {
+        get: jest.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+        put: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+        delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+      };
+
+      mockFetch
+        .mockResolvedValueOnce(createJsonResponse(401, { error: "unauthorized" }))
+        .mockResolvedValueOnce(
+          createJsonResponse(200, {
+            access_token: "new-access-token",
+            refresh_token: "new-refresh-token",
+            expires_in: 3600,
+          })
+        )
+        .mockResolvedValueOnce(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient({
+        ...baseConfig,
+        refreshContext: {
+          env: {
+            UMBRACO_BASE_URL: "https://umbraco.example.com",
+            UMBRACO_OAUTH_CLIENT_ID: "client-id",
+            UMBRACO_OAUTH_CLIENT_SECRET: "client-secret",
+            UMBRACO_MCP_HEADER_VALUE: "secret-value",
+            COOKIE_ENCRYPTION_KEY: "key",
+            OAUTH_KV: mockKV as any,
+            MCP_AGENT: {} as any,
+            OAUTH_PROVIDER: {} as any,
+          },
+          tokenKey: "test-key",
+          refreshToken: "old-refresh-token",
+        },
+      });
+
+      await client({ method: "get", url: "/api/items/1" }, CAPTURE_RAW_HTTP_RESPONSE);
+
+      const [, refreshOptions] = mockFetch.mock.calls[1] as [string, RequestInit];
+      expect(refreshOptions.headers).toEqual(
+        expect.objectContaining({ "X-Umbraco-Mcp": "secret-value" })
+      );
+    });
+
+    // `createFetchClientFromKV` (the only production caller of
+    // createUmbracoFetchClient) always sets headerName/headerValue on the
+    // top-level config AND refreshContext.env from the same env object, so
+    // in real usage the header must survive on all three fetch calls: the
+    // original request, the refresh, and the retry with the new token.
+    it("sends the firewall-allowlist header on the original, refresh, AND retried requests", async () => {
+      const mockKV = {
+        get: jest.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+        put: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+        delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
+      };
+
+      mockFetch
+        .mockResolvedValueOnce(createJsonResponse(401, { error: "unauthorized" }))
+        .mockResolvedValueOnce(
+          createJsonResponse(200, {
+            access_token: "new-access-token",
+            refresh_token: "new-refresh-token",
+            expires_in: 3600,
+          })
+        )
+        .mockResolvedValueOnce(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient({
+        ...baseConfig,
+        headerValue: "secret-value",
+        refreshContext: {
+          env: {
+            UMBRACO_BASE_URL: "https://umbraco.example.com",
+            UMBRACO_OAUTH_CLIENT_ID: "client-id",
+            UMBRACO_OAUTH_CLIENT_SECRET: "client-secret",
+            UMBRACO_MCP_HEADER_VALUE: "secret-value",
+            COOKIE_ENCRYPTION_KEY: "key",
+            OAUTH_KV: mockKV as any,
+            MCP_AGENT: {} as any,
+            OAUTH_PROVIDER: {} as any,
+          },
+          tokenKey: "test-key",
+          refreshToken: "old-refresh-token",
+        },
+      });
+
+      await client({ method: "get", url: "/api/items/1" }, CAPTURE_RAW_HTTP_RESPONSE);
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      for (const call of mockFetch.mock.calls) {
+        const [, options] = call as [string, RequestInit];
+        expect(options.headers).toEqual(
+          expect.objectContaining({ "X-Umbraco-Mcp": "secret-value" })
+        );
+      }
+    });
+  });
+
+  describe("firewall-allowlist header on Management API calls", () => {
+    it("sends the configured header", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient({
+        ...baseConfig,
+        headerValue: "secret-value",
+      });
+      await client({ method: "get", url: "/api/items/1" }, CAPTURE_RAW_HTTP_RESPONSE);
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).headers).toEqual(
+        expect.objectContaining({ "X-Umbraco-Mcp": "secret-value" })
+      );
+    });
+
+    it("uses a custom header name when provided", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient({
+        ...baseConfig,
+        headerName: "X-Custom-Header",
+        headerValue: "secret-value",
+      });
+      await client({ method: "get", url: "/api/items/1" }, CAPTURE_RAW_HTTP_RESPONSE);
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).headers).toEqual(
+        expect.objectContaining({ "X-Custom-Header": "secret-value" })
+      );
+    });
+
+    it("sends no extra header when not configured", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient(baseConfig);
+      await client({ method: "get", url: "/api/items/1" }, CAPTURE_RAW_HTTP_RESPONSE);
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(
+        Object.keys((options as RequestInit).headers as Record<string, string>)
+      ).not.toContain("X-Umbraco-Mcp");
+    });
+
+    it("coexists with caller-supplied headers of a different name", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(200, { id: "1" }));
+
+      const client = createUmbracoFetchClient({
+        ...baseConfig,
+        headerValue: "secret-value",
+      });
+      await client(
+        {
+          method: "get",
+          url: "/api/items/1",
+          headers: { "X-Request-Id": "abc-123" },
+        },
+        CAPTURE_RAW_HTTP_RESPONSE
+      );
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).headers).toEqual(
+        expect.objectContaining({
+          "X-Umbraco-Mcp": "secret-value",
+          "X-Request-Id": "abc-123",
+        })
+      );
+    });
   });
 });
 

@@ -76,6 +76,8 @@ tests/
 | `UMBRACO_READONLY` | `--umbraco-readonly` | Block write operations |
 | `DISABLE_MCP_CHAINING` | `--disable-mcp-chaining` | Disable MCP server chaining |
 | `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated target major (`UMBRACO_TARGET_MAJOR` in `config/umbraco-target.generated.ts`) for the version-mismatch check/block — set only when deliberately targeting a different Umbraco major |
+| `UMBRACO_MCP_HEADER_NAME` | — | Name of a fixed header sent on every request to Umbraco (defaults to `X-Umbraco-Mcp` if `UMBRACO_MCP_HEADER_VALUE` is set and this is left unset). For operators behind an IP allow-list firewall |
+| `UMBRACO_MCP_HEADER_VALUE` | — | Value for that header. Treat as sensitive (a firewall bypass token). Unset = feature off, no header sent (default) |
 
 Custom fields defined in `config/server-config.ts`.
 
