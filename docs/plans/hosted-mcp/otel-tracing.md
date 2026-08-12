@@ -93,13 +93,27 @@ status because `setOutcome()` isn't available yet.
 reaching the live `Server` from inside a tool handler. "Which MCP clients are people actually using us from" is
 one of the most valuable product questions available and it costs one call.
 
-### 3b. `mcp.server.init` — replaces existing ad-hoc logging
+### 3b. `mcp.server.init` — alongside the existing logging, not instead of it
 
-`createPerRequestServer` already hand-rolls this: a `Math.random()` correlation id, `initStartedAt` timing, and
-`:start` / `:done` log lines carrying `mode=full|degraded-auth-expired`, `tools=<n>`, `site=<id>`, `elapsedMs`
-(`packages/hosted-mcp/src/server/create-server.ts:283`, `:447`). That exists specifically to make
-cold-start-vs-hibernation-wake visible (Umbraco-MCP-Base#132). Convert it to a span with those values as
-attributes and **delete the ad-hoc id** — don't run two correlation schemes.
+`createPerRequestServer` already hand-rolls something span-shaped: a `Math.random()` correlation id,
+`initStartedAt` timing, and `:start` / `:done` log lines carrying `mode=full|degraded-auth-expired`,
+`tools=<n>`, `site=<id>`, `elapsedMs`. That exists specifically to make cold-start-vs-hibernation-wake visible
+(Umbraco-MCP-Base#132). Add a span carrying the same values as attributes.
+
+**Keep the log lines, and keep the correlation id.** An earlier draft of this plan said to delete them, which
+contradicts §7: Cloudflare's span API exposes no `spanContext()`, so **we cannot read the trace id at runtime**
+and therefore cannot put it in a log line. Removing the hand-rolled id would leave `wrangler tail` output with
+no way to tie `:start` to `:done`, with nothing to replace it — strictly worse for the person debugging a live
+Worker at 2am.
+
+The two aren't redundant, they serve different readers: spans for backend analysis after the fact, plain log
+lines for someone tailing a Worker during an incident. Cloudflare correlates exported OTLP logs with traces at
+the backend anyway, so carrying both costs nothing.
+
+Note these are `console.log` in a Worker, which is fine — output goes to Workers Logs / `wrangler tail`. Don't
+generalise this to the stdio entry points: there, stdout is the JSON-RPC channel, so all diagnostics must stay
+on `console.error` (which is why `template/src/index.ts` uses it for its startup progress lines). Nothing in
+this plan touches those.
 
 ### 3c. `mcp.auth.refresh` — the 401/retry path
 
@@ -309,7 +323,7 @@ becomes a problem, tail sampling via Tail Workers is the documented answer.
 | 2 | ~~Spike: does the API work in a DO~~ **done, §7 — it does** | `umbraco-mcp-base` | — |
 | 3 | `TelemetryAdapter` + `withTelemetry` in `withStandardDecorators` | `umbraco-mcp-base` (SDK) | — |
 | 4 | Cloudflare adapter + `tools/call` span, wired in `createPerRequestServer` | `umbraco-mcp-base` (hosted-mcp) | 3 |
-| 5 | Convert `createPerRequestServer` logs → `mcp.server.init` span; `mcp.auth.refresh` span | `umbraco-mcp-base` | 4 |
+| 5 | Add `mcp.server.init` + `mcp.auth.refresh` spans alongside the existing logs (§3b — the logs stay) | `umbraco-mcp-base` | 4 |
 | 6 | Destination created; Wrangler template + module var; compat-date decision | `umbraco-cloud-hosted-mcp` | 1 |
 | 7 | Deploy dev, verify trace tree end to end | both | 4, 6 |
 | 8 | Dep bump in the two product repos, deploy prod | `Umbraco-CMS-MCP-Dev`, `-Editor` | 7 |
