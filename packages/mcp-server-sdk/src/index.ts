@@ -127,6 +127,33 @@ export {
 // URL helpers
 export { normalizeBaseUrl } from "./helpers/url.js";
 
+// ============================================================================
+// Telemetry
+// ============================================================================
+//
+// `withTelemetry` is already applied by `withStandardDecorators`, so tools need
+// nothing. Hosts register an adapter to decide where spans go — the SDK ships
+// no tracing implementation, because the hosted Workers use `cloudflare:workers`
+// (see `telemetry/adapter.ts`). Without an adapter, every tool call runs through
+// a pass-through that records nothing.
+export {
+  setTelemetryAdapter,
+  getTelemetryAdapter,
+  clearTelemetryAdapter,
+  passThroughAdapter,
+  registerToolCollection,
+  getToolCollection,
+  clearToolCollections,
+  withTelemetry,
+  TelemetryAttributes,
+  TOOLS_CALL_METHOD,
+  type TelemetryAdapter,
+  type TelemetrySpan,
+  type SpanAttributes,
+  type AttributeValue,
+  type ToolOutcome,
+} from "./telemetry/index.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,

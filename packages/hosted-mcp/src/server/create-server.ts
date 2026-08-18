@@ -8,6 +8,11 @@
  */
 
 import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  createCloudflareTracingAdapter,
+  type CloudflareTracing,
+} from "../telemetry/cloudflare-tracing.js";
+import { SERVER_INIT_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { z } from "zod";
 import {
@@ -19,7 +24,12 @@ import {
   expandModesToCollections,
   checkUmbracoVersion,
   VersionCheckService,
+  registerToolCollection,
+  setTelemetryAdapter,
+  getTelemetryAdapter,
+  TelemetryAttributes,
   SERVER_INFORMATION_PATH,
+  type TelemetrySpan,
   type ToolCollectionExport,
   type ToolModeDefinition,
   type CollectionConfiguration,
@@ -138,6 +148,28 @@ export interface CreateServerOptions {
    * When both `multiSite` and `resolveSite` are provided, `resolveSite` takes precedence.
    */
   resolveSite?: SiteResolver;
+  /**
+   * Opt into OpenTelemetry tracing for tool calls.
+   *
+   * Pass the `tracing` object from `cloudflare:workers` — this package can't
+   * import it directly (the specifier only resolves inside the Workers runtime),
+   * the same reason `McpAgent` and `OAuthProvider` come from the consumer:
+   *
+   * ```ts
+   * import { tracing } from "cloudflare:workers";
+   * // ...
+   * telemetry: { tracing }
+   * ```
+   *
+   * Omit it and tool calls run through the SDK's pass-through adapter, recording
+   * nothing. Spans only leave the Worker once `[observability.traces]` in the
+   * Wrangler config names an OTLP destination, so wiring this up is safe well
+   * before any exporter exists.
+   */
+  telemetry?: {
+    /** The `tracing` object from `cloudflare:workers`. */
+    tracing: CloudflareTracing;
+  };
 }
 
 /**
@@ -270,6 +302,50 @@ export async function createPerRequestServer(
   env: HostedMcpEnv,
   props: AuthProps
 ): Promise<McpServer> {
+  // Install the tracing adapter first: it has to be in place before the init
+  // span below is opened, let alone before any tool can run. Only static facts
+  // go on it — see `createCloudflareTracingAdapter` for why request-scoped
+  // values (tenant, client, site) must not be closed over in a module-scoped
+  // adapter. Re-registering on every DO start is harmless: the values are
+  // identical for every request this Worker serves.
+  if (options.telemetry?.tracing) {
+    const staticAttributes: Record<string, string> = {
+      [TelemetryAttributes.SERVER_NAME]: options.name,
+      [TelemetryAttributes.SERVER_VERSION]: options.version,
+    };
+    const expectedMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+    if (expectedMajor) {
+      staticAttributes[TelemetryAttributes.UMBRACO_MAJOR] = expectedMajor;
+    }
+
+    setTelemetryAdapter(
+      createCloudflareTracingAdapter({
+        tracing: options.telemetry.tracing,
+        attributes: staticAttributes,
+      })
+    );
+  }
+
+  // The span duration is the answer to "cold start or hibernation wake?" — the
+  // question the log lines below were added for (Umbraco-MCP-Base#132). Those
+  // logs stay: the trace id can't be read at runtime (Cloudflare's span exposes
+  // no `spanContext()`), so deleting the hand-rolled correlation id would leave
+  // `wrangler tail` with nothing to tie `:start` to `:done`.
+  return getTelemetryAdapter().startSpan(SERVER_INIT_SPAN, {}, (span) =>
+    initPerRequestServer(options, env, props, span)
+  );
+}
+
+/**
+ * The body of `createPerRequestServer`, split out so the whole initialisation
+ * sits inside one span. `initSpan` collects the outcome attributes at each exit.
+ */
+async function initPerRequestServer(
+  options: CreateServerOptions,
+  env: HostedMcpEnv,
+  props: AuthProps,
+  initSpan: TelemetrySpan
+): Promise<McpServer> {
   // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
   // agents-mcp runtime is supposed to run `init()` (and therefore this
   // function) on every Durable Object start, but it's easy to lose track
@@ -343,6 +419,8 @@ export async function createPerRequestServer(
     console.log(
       `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired tools=1 elapsedMs=${Date.now() - initStartedAt}`
     );
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "degraded-auth-expired");
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 1);
     return server;
   }
 
@@ -447,6 +525,12 @@ export async function createPerRequestServer(
   console.log(
     `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${site?.id ?? "<single>"} elapsedMs=${Date.now() - initStartedAt}`
   );
+  initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "full");
+  initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, registeredCount);
+  // Whether a site was resolved, not which one — the alias is a customer
+  // identifier and the log line above is Worker-local, whereas spans are
+  // exported to a third party.
+  initSpan.setAttribute(HostedTelemetryAttributes.INIT_SITE_RESOLVED, site !== null);
   return server;
 }
 
@@ -474,6 +558,12 @@ export function registerCollectionTools<TUser>(
       }
 
       const annotations = createToolAnnotations(tool);
+
+      // Record the owning collection for telemetry. This loop is the only place
+      // that knows both — `withStandardDecorators` runs in the tool's own file,
+      // before collections are assembled. Static config, so sharing it across
+      // requests in the isolate is correct.
+      registerToolCollection(tool.name, collectionName);
 
       server.registerTool(
         tool.name,
