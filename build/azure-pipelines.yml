@@ -2,6 +2,7 @@ trigger:
   branches:
     include:
     - main
+    - dev
     - feature/*
     - release/*
 
@@ -17,6 +18,17 @@ variables:
     value: 'packages/hosted-mcp'
   - name: cliPackagePath
     value: 'packages/create-mcp-server'
+  # MyGet feeds for pre-public builds, with their npm-type ADO service
+  # connections holding each feed's API key. Same feeds Umbraco's other MCP
+  # repos publish to (see Umbraco-CMS-MCP-Editor).
+  - name: nightlyRegistry
+    value: 'https://www.myget.org/F/umbraconightly/npm/'
+  - name: nightlyServiceConnection
+    value: 'NPM MyGet Nightly Feed'
+  - name: prereleaseRegistry
+    value: 'https://www.myget.org/F/umbracoprereleases/npm/'
+  - name: prereleaseServiceConnection
+    value: 'NPM MyGet Prereleases Feed'
 
 stages:
 - stage: BuildAndTest
@@ -326,3 +338,143 @@ stages:
 # .github/workflows/release-tag.yml GitHub Actions workflow, which triggers on
 # push to main (i.e. when this release merge lands). It is independent of this
 # npm publish — see CLAUDE.md "Post-release: tag the release (automated)".
+
+# Pre-public builds. Publishes the same artifacts BuildAndTest already produced
+# to Umbraco's MyGet feeds, so a change can be installed and tested without
+# waiting for a release. main is deliberately excluded — Deploy_Npm owns real
+# releases on the public npm registry.
+#
+#   dev       -> umbraconightly feed,     version suffixed, dist-tag "nightly"
+#   release/* -> umbracoprereleases feed, version as committed, tag alpha/beta/rc
+- stage: Deploy_Nightly
+  displayName: 'MyGet nightly (dev)'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+  dependsOn:
+    - BuildAndTest
+  jobs:
+    - job: Publish
+      displayName: Push nightly to MyGet
+      strategy:
+        matrix:
+          sdk:
+            artifactName: 'sdk-package'
+          hosted:
+            artifactName: 'hosted-package'
+          cli:
+            artifactName: 'cli-package'
+      steps:
+        - checkout: none
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: $(artifactName)
+        - bash: echo "registry=$(nightlyRegistry)" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/$(artifactName)
+          displayName: Point .npmrc at MyGet nightly feed
+        - task: npmAuthenticate@0
+          displayName: Authenticate with MyGet
+          inputs:
+            workingFile: $(Pipeline.Workspace)/$(artifactName)/.npmrc
+            customEndpoint: '$(nightlyServiceConnection)'
+        - script: |
+            set -e
+            # Temp npm project so npm picks up defaults from the local .npmrc.
+            npm init -y >/dev/null
+            files=( ./*.tgz )
+            tar -xzf "${files[0]}"   # npm tarballs always extract to ./package
+
+            # dev's package.json version is only bumped when a release is cut, so
+            # publishing it raw would collide on every push. Build.BuildId is
+            # unique per run and identical across these matrix legs.
+            base=$(node -p "require('./package/package.json').version")
+            name=$(node -p "require('./package/package.json').name")
+            version="${base}-nightly.$(Build.BuildId)"
+
+            # mcp-hosted depends on mcp-server-sdk. All packages are versioned in
+            # lockstep and share this run's BuildId, so the sibling's nightly is
+            # this same string — point at it rather than the last released version.
+            sdk="@umbraco-cms/mcp-server-sdk"
+            hasSdk=$(node -p "!!(require('./package/package.json').dependencies||{})['${sdk}']")
+            if [[ "$hasSdk" == "true" ]]; then
+              (cd package && npm pkg set "dependencies.${sdk}=${version}")
+            fi
+
+            # `npm version` validates the semver before writing it. The committed
+            # package.json is never touched — only this extracted copy.
+            (cd package && npm version --no-git-tag-version --ignore-scripts "$version" >/dev/null)
+            tar -czf nightly.tgz package
+
+            # Re-running the same build produces the same version; skip rather
+            # than fail on an immutable feed (as Deploy_Npm does).
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "##[warning]Skipping ${name}@${version} — already on the feed"
+              exit 0
+            fi
+
+            echo "Publishing ${name}@${version} to $(nightlyRegistry) with tag nightly"
+            npm publish nightly.tgz --tag nightly
+          displayName: Publish nightly to MyGet
+          workingDirectory: $(Pipeline.Workspace)/$(artifactName)
+
+- stage: Deploy_Prerelease
+  displayName: 'MyGet prerelease (release/*)'
+  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+  dependsOn:
+    - BuildAndTest
+  jobs:
+    - job: Publish
+      displayName: Push prerelease to MyGet
+      strategy:
+        matrix:
+          sdk:
+            artifactName: 'sdk-package'
+          hosted:
+            artifactName: 'hosted-package'
+          cli:
+            artifactName: 'cli-package'
+      steps:
+        - checkout: none
+        - task: NodeTool@0
+          displayName: 'Use Node.js $(nodeVersion)'
+          inputs:
+            versionSpec: '$(nodeVersion)'
+        - download: current
+          artifact: $(artifactName)
+        - bash: echo "registry=$(prereleaseRegistry)" >> .npmrc
+          workingDirectory: $(Pipeline.Workspace)/$(artifactName)
+          displayName: Point .npmrc at MyGet prerelease feed
+        - task: npmAuthenticate@0
+          displayName: Authenticate with MyGet
+          inputs:
+            workingFile: $(Pipeline.Workspace)/$(artifactName)/.npmrc
+            customEndpoint: '$(prereleaseServiceConnection)'
+        - script: |
+            set -e
+            # A release branch already carries the real version it is releasing,
+            # so the artifact is published untouched — including mcp-hosted's SDK
+            # dependency, which prepack already pinned to that same version and
+            # which this run publishes to this feed.
+            npm init -y >/dev/null
+            files=( ./*.tgz )
+            tar -xf "${files[0]}" --strip-components=1 package/package.json
+            name=$(node -p "require('./package.json').name")
+            version=$(node -p "require('./package.json').version")
+
+            # Re-pushes to the release branch re-run this with the same version.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "##[warning]Skipping ${name}@${version} — already on the feed"
+              exit 0
+            fi
+
+            if [[ "$version" == *"alpha"* ]]; then tag="alpha"
+            elif [[ "$version" == *"beta"* ]]; then tag="beta"
+            elif [[ "$version" == *"rc"* ]]; then tag="rc"
+            else tag="latest"
+            fi
+
+            echo "Publishing ${name}@${version} to $(prereleaseRegistry) with tag ${tag}"
+            npm publish "${files[0]}" --tag "$tag"
+          displayName: Publish prerelease to MyGet
+          workingDirectory: $(Pipeline.Workspace)/$(artifactName)

@@ -57,6 +57,29 @@ export {
 } from "./server/register-chained-tools.js";
 
 // ============================================================================
+// Telemetry
+// ============================================================================
+//
+// Pass `telemetry: { tracing }` to `createPerRequestServer` and tool calls are
+// traced. The factory is exported for consumers that build the adapter
+// themselves (a chained-tool wrapper, say) rather than letting
+// `createPerRequestServer` do it.
+export {
+  createCloudflareTracingAdapter,
+  type CloudflareTracing,
+  type CloudflareSpan,
+  type CloudflareTracingAdapterOptions,
+} from "./telemetry/cloudflare-tracing.js";
+
+export {
+  SERVER_INIT_SPAN,
+  AUTH_REFRESH_SPAN,
+  HostedTelemetryAttributes,
+  type ServerInitMode,
+  type AuthRefreshOutcome,
+} from "./telemetry/attributes.js";
+
+// ============================================================================
 // Auth
 // ============================================================================
 

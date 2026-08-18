@@ -174,6 +174,25 @@ The full workflow lives in the **`release-and-branching` skill** (`.claude/skill
 8. GitHub Release tagged `v<version>` is created **automatically** (see below)
 9. Merge `main` back into `dev` — **automated** (see below)
 
+### Nightly / pre-release builds (MyGet)
+
+Releases go to public npm, but you don't have to wait for one to test a change. `build/azure-pipelines.yml` has two extra deploy stages that reuse the artifacts `BuildAndTest` already produced (nothing is rebuilt) and push all three packages to Umbraco's MyGet feeds. `main` is excluded from both — that's `Deploy_Npm`'s job.
+
+| Stage | Trigger | Feed | Version | Dist-tag |
+|-------|---------|------|---------|----------|
+| `Deploy_Nightly` | push to `dev` | `umbraconightly` | `<version in package.json>-nightly.<Build.BuildId>` | `nightly` |
+| `Deploy_Prerelease` | push to `release/*` | `umbracoprereleases` | as committed | `alpha` / `beta` / `rc` |
+
+Install with `npm i @umbraco-cms/mcp-server-sdk@nightly --registry https://www.myget.org/F/umbraconightly/npm/`, or scope `@umbraco-cms` to the feed in your `.npmrc`.
+
+Notes:
+
+- `dev`'s `package.json` version is only bumped when a release is cut, so nightlies need the `Build.BuildId` suffix to avoid colliding on the feed. Release branches already carry a real version, so their artifact is published untouched.
+- Committed `package.json` files are never modified — the nightly job versions the extracted tarball copy and repacks it.
+- `mcp-hosted`'s dependency on `mcp-server-sdk` is repointed at the matching nightly (same `Build.BuildId`, and all packages are versioned in lockstep). On a release branch prepack has already pinned it to the version being released, which the same run publishes to the same feed.
+- Both stages skip rather than fail if the version is already on the feed, matching `Deploy_Npm`.
+- Each feed has its own npm-type Azure DevOps service connection holding its API key: `NPM MyGet Nightly Feed` and `NPM MyGet Prereleases Feed`. These are the same feeds and connections Umbraco's other MCP repos publish to.
+
 ### Post-release: tag the release (automated)
 
 When the release merge reaches `main`, **`.github/workflows/release-tag.yml`** creates the `v<version>` git tag and a GitHub Release:

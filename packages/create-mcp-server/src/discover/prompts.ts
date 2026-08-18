@@ -6,6 +6,59 @@ const onCancel = () => {
   process.exit(0);
 };
 
+export type ApiSourceChoice = "instance" | "url";
+
+export async function promptApiSourceMethod(): Promise<ApiSourceChoice> {
+  const { choice } = await prompts(
+    {
+      type: "select",
+      name: "choice",
+      message: "How do you want to specify the API?",
+      choices: [
+        {
+          title: "Discover from a running instance (Recommended)",
+          description:
+            "Point at a base URL and probe it for Swagger/OpenAPI endpoints",
+          value: "instance",
+        },
+        {
+          title: "Provide OpenAPI spec URL directly",
+          description:
+            "Skip discovery — point straight at a spec URL (e.g. an internal package not on the marketplace)",
+          value: "url",
+        },
+      ],
+    },
+    { onCancel }
+  );
+
+  return choice;
+}
+
+export async function promptOpenApiUrl(): Promise<string> {
+  const { url } = await prompts(
+    {
+      type: "text",
+      name: "url",
+      message: "OpenAPI/Swagger spec URL:",
+      validate: (value) => {
+        try {
+          const parsed = new URL(value);
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            return "URL must start with http:// or https://";
+          }
+          return true;
+        } catch {
+          return "Please enter a valid URL";
+        }
+      },
+    },
+    { onCancel }
+  );
+
+  return url;
+}
+
 export async function promptBaseUrl(defaultUrl?: string): Promise<string> {
   const { url } = await prompts(
     {

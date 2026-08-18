@@ -16,6 +16,7 @@
  */
 
 // Wrangler virtual modules (resolved at wrangler build time)
+import { tracing } from "cloudflare:workers";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
@@ -138,6 +139,22 @@ const options = {
   // `createPerRequestServer` in `@umbraco-cms/mcp-hosted` for why a global
   // block isn't safe here.
   expectedUmbracoMajor: UMBRACO_TARGET_MAJOR,
+
+  // ==========================================================================
+  // OpenTelemetry tracing for tool calls.
+  //
+  // `tracing` has to be handed over from here: `cloudflare:workers` only
+  // resolves inside the Workers runtime, so `@umbraco-cms/mcp-hosted` can't
+  // import it — the same reason `McpAgent` and `OAuthProvider` are wired up in
+  // this file rather than inside the library.
+  //
+  // Each tool call becomes a `tools/call {tool-name}` span nested inside
+  // Cloudflare's automatic instrumentation (handler, KV and Durable Object
+  // binding calls, outbound fetch to Umbraco). Nothing leaves the Worker until
+  // `[observability.traces]` in `wrangler.toml` names an OTLP destination, so
+  // this is inert until infrastructure opts in — remove the option entirely to
+  // disable instrumentation outright.
+  telemetry: { tracing },
 };
 
 const serverOptions = getServerOptions(options);

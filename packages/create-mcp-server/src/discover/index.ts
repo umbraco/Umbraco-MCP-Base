@@ -5,13 +5,16 @@ import { detectFeatures } from "../init/detect-features.js";
 import { configureOpenApi } from "../init/configure-openapi.js";
 import { checkHealth } from "./health-check.js";
 import { checkApiUser, printApiUserWarning } from "./check-api-user.js";
-import { discoverSwaggerEndpoints } from "./discover-swagger.js";
+import { discoverSwaggerEndpoints, type SwaggerEndpoint } from "./discover-swagger.js";
 import { generateClient } from "./generate-client.js";
 import { analyzeApi } from "./analyze-api.js";
 import { extractPermissions } from "./extract-permissions.js";
 import { suggestModesWithLlm, suggestFallbackModes, groupsToCollectionNames } from "./suggest-modes.js";
 import { updateModeRegistry, updateSliceRegistry } from "./update-registries.js";
+import { validateOpenApiUrl, toDirectSwaggerEndpoint } from "./direct-spec-url.js";
 import {
+  promptApiSourceMethod,
+  promptOpenApiUrl,
   promptBaseUrl,
   promptApiSelection,
   promptConfirmOrval,
@@ -48,79 +51,117 @@ export async function runDiscover(dir?: string): Promise<void> {
     pc.dim(`Project: ${detection.projectName} (${detection.projectDir})`)
   );
 
-  // Step 2: Get base URL (auto-detect from instance, .env, or orval config)
-  const detected = detectBaseUrl(projectDir);
-  if (detected.source) {
-    console.log(pc.dim(`Detected URL from ${detected.source}: ${detected.url}`));
-  }
-  const baseUrl = await promptBaseUrl(detected.url);
+  // Step 2: Choose how to specify the API
+  const sourceMethod = await promptApiSourceMethod();
 
-  // Step 3: Health check
-  // Allow self-signed certs for localhost
-  const isLocalhost =
-    baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
-  if (isLocalhost) {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  }
+  let selected: SwaggerEndpoint;
+  let baseUrl: string | undefined;
 
-  console.log(pc.dim(`\nChecking ${baseUrl}...`));
-  const health = await checkHealth(baseUrl);
+  if (sourceMethod === "url") {
+    // Direct spec URL — skip health check, API-user setup, and discovery
+    // entirely; there may be no running Umbraco instance behind this spec
+    // (e.g. an internal package not on the marketplace).
+    const specUrl = await promptOpenApiUrl();
 
-  if (!health.healthy) {
-    console.log(pc.red(`\nCould not reach Umbraco instance.`));
-    console.log(pc.red(`  ${health.error}`));
-    console.log(
-      pc.dim("\nMake sure the Umbraco instance is running and try again.")
-    );
-    process.exit(1);
-  }
+    console.log(pc.dim(`\nValidating ${specUrl}...`));
+    const validation = await validateOpenApiUrl(specUrl);
 
-  console.log(pc.green("  Instance is running"));
-
-  // Check API user exists, create if needed
-  console.log(pc.dim("Checking API user..."));
-  const apiUser = await checkApiUser(baseUrl);
-
-  if (apiUser.authenticated && apiUser.created) {
-    console.log(pc.green("  API user created and authenticated"));
-  } else if (apiUser.authenticated) {
-    console.log(pc.green("  API user authenticated"));
-  } else {
-    if (apiUser.error) {
-      console.log(pc.dim(`  ${apiUser.error}`));
+    if (validation.parseable) {
+      console.log(pc.green(`  Found ${validation.title ?? "OpenAPI"} spec`));
+    } else {
+      console.log(
+        pc.yellow(
+          `  Could not verify the spec (${validation.error ?? "unknown error"}) — continuing anyway. The URL may be behind authentication.`
+        )
+      );
     }
-    printApiUserWarning();
-  }
 
-  // Update .env with base URL
-  const envUpdated = updateEnvBaseUrl(projectDir, baseUrl);
-  if (envUpdated) {
-    console.log(pc.green(`  Updated .env → UMBRACO_BASE_URL=${baseUrl}`));
-  }
+    selected = toDirectSwaggerEndpoint(specUrl, validation.title);
 
-  // Step 4: Discover swagger endpoints
-  console.log(pc.dim("Discovering APIs..."));
-  const endpoints = await discoverSwaggerEndpoints(baseUrl);
+    try {
+      baseUrl = new URL(specUrl).origin;
+    } catch {
+      baseUrl = undefined;
+    }
 
-  if (endpoints.length === 0) {
     console.log(
-      pc.red("\nNo Swagger endpoints found at this instance.")
+      pc.dim("  Skipping health check and API-user setup — no running instance was discovered for this spec.")
     );
+  } else {
+    // Step 2b: Get base URL (auto-detect from instance, .env, or orval config)
+    const detected = detectBaseUrl(projectDir);
+    if (detected.source) {
+      console.log(pc.dim(`Detected URL from ${detected.source}: ${detected.url}`));
+    }
+    baseUrl = await promptBaseUrl(detected.url);
+
+    // Step 3: Health check
+    // Allow self-signed certs for localhost
+    const isLocalhost =
+      baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+    if (isLocalhost) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    }
+
+    console.log(pc.dim(`\nChecking ${baseUrl}...`));
+    const health = await checkHealth(baseUrl);
+
+    if (!health.healthy) {
+      console.log(pc.red(`\nCould not reach Umbraco instance.`));
+      console.log(pc.red(`  ${health.error}`));
+      console.log(
+        pc.dim("\nMake sure the Umbraco instance is running and try again.")
+      );
+      process.exit(1);
+    }
+
+    console.log(pc.green("  Instance is running"));
+
+    // Check API user exists, create if needed
+    console.log(pc.dim("Checking API user..."));
+    const apiUser = await checkApiUser(baseUrl);
+
+    if (apiUser.authenticated && apiUser.created) {
+      console.log(pc.green("  API user created and authenticated"));
+    } else if (apiUser.authenticated) {
+      console.log(pc.green("  API user authenticated"));
+    } else {
+      if (apiUser.error) {
+        console.log(pc.dim(`  ${apiUser.error}`));
+      }
+      printApiUserWarning();
+    }
+
+    // Update .env with base URL
+    const envUpdated = updateEnvBaseUrl(projectDir, baseUrl);
+    if (envUpdated) {
+      console.log(pc.green(`  Updated .env → UMBRACO_BASE_URL=${baseUrl}`));
+    }
+
+    // Step 4: Discover swagger endpoints
+    console.log(pc.dim("Discovering APIs..."));
+    const endpoints = await discoverSwaggerEndpoints(baseUrl);
+
+    if (endpoints.length === 0) {
+      console.log(
+        pc.red("\nNo Swagger endpoints found at this instance.")
+      );
+      console.log(
+        pc.dim("Make sure your package is installed and exposes a Swagger endpoint.")
+      );
+      process.exit(1);
+    }
+
     console.log(
-      pc.dim("Make sure your package is installed and exposes a Swagger endpoint.")
+      pc.green(
+        `  Found ${endpoints.length} API${endpoints.length > 1 ? "s" : ""}: ${endpoints.map((e) => e.name).join(", ")}`
+      )
     );
-    process.exit(1);
+
+    // Step 5: Select API
+    console.log();
+    selected = await promptApiSelection(endpoints);
   }
-
-  console.log(
-    pc.green(
-      `  Found ${endpoints.length} API${endpoints.length > 1 ? "s" : ""}: ${endpoints.map((e) => e.name).join(", ")}`
-    )
-  );
-
-  // Step 5: Select API
-  console.log();
-  const selected = await promptApiSelection(endpoints);
 
   // Step 6: Configure orval
   const shouldConfigureOrval = await promptConfirmOrval();

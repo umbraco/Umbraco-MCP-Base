@@ -116,28 +116,28 @@ describe("get-entity", () => {
 
 ### Paginated Tool Testing (Cursor Pagination)
 
-Tools with `skip`/`take` in their input schema use cursor-based pagination at runtime. Tests **must** use `withCursorPagination` to test what the LLM actually sees:
+Tools with `skip`/`take` in their input schema use cursor-based pagination at runtime. That conversion is already done: every tool file exports `withStandardDecorators(tool)`, which applies `withCursorPagination`. Test the imported tool directly — it is what the LLM sees.
 
 ```typescript
-import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
+import { encodeCursor } from "@umbraco-cms/mcp-server-sdk";
 import { validateToolResponse, type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
 it("should list entities", async () => {
-  const cursorTool = withCursorPagination(listEntitiesTool);
-  const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
-  const data = validateToolResponse(cursorTool, result) as CursorPaginatedResult;
+  const result = await listEntitiesTool.handler({}, createMockRequestHandlerExtra());
+  const data = validateToolResponse(listEntitiesTool, result) as CursorPaginatedResult;
   expect(data.items.length).toBeGreaterThan(0);
 });
 ```
 
 **Rules:**
-- **NEVER** pass `skip` or `take` to handlers
-- Wrap with `withCursorPagination(tool)` before calling handler
-- Pass `{}` for first page (no cursor = default page size)
-- Use `{ ...tool, pageSize: N }` to override page size
+- **NEVER** pass `skip` or `take` to handlers — the decorated schema doesn't accept them
+- **Don't** wrap an imported tool in `withCursorPagination` — it only transforms tools whose schema still has `skip`/`take`, so on a decorated tool it returns it unchanged and any `{ ...tool, pageSize: N }` override is silently dropped
+- Pass `{}` for the first page (no cursor = default page size)
+- Force a small page with `encodeCursor({ s: 0, t: N })` (`s` = skip, `t` = take)
 - Cast `validateToolResponse` results to `CursorPaginatedResult` from `@umbraco-cms/mcp-server-sdk/testing`
-- For cursor pagination test: use `nextCursor` from response to fetch page 2
+- For a cursor pagination test: use `nextCursor` from the response to fetch page 2
+- `nextCursor` is only computed when the response carries a numeric `total` beside `items`. Check the tool's `outputSchema` first — no `total` means no `nextCursor`, so assert on the first page only
 
 ## Sequential Workflow
 
