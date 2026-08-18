@@ -147,11 +147,20 @@ imported:
    the error handler classified, and **outside** `withDryRun` so dry-run calls are still visible as such.
 
 2. **`packages/hosted-mcp`** — `createCloudflareTracingAdapter()` wrapping `tracing.enterSpan`, registered from
-   `createPerRequestServer`. This is the only file that imports `cloudflare:workers`.
+   `createPerRequestServer`.
+
+   As built, `tracing` is **injected, not imported**: `cloudflare:workers` only resolves inside the Workers
+   runtime, so a static import would break this package's Node unit tests and force the specifier into tsup's
+   externals — the same reason `McpAgent` and `OAuthProvider` already come from the consumer.
 
 3. **Product repos** (`Umbraco-CMS-MCP-Dev`, `Umbraco-CMS-MCP-Editor`) — bump the `@umbraco-cms/mcp-hosted`
-   dependency. No source change if the adapter is registered inside `createPerRequestServer`; that's the design
-   goal, since those repos each own their own `worker.ts`.
+   dependency **and add two lines to each `worker.ts`**: `import { tracing } from "cloudflare:workers"` and
+   `telemetry: { tracing }` in the options object.
+
+   An earlier draft claimed no source change was needed, on the assumption the adapter would be built entirely
+   inside `createPerRequestServer`. The injection design above makes that impossible — the consumer is the only
+   place that can resolve the specifier — and opt-in is the better default anyway: a repo that omits the option
+   gets no instrumentation rather than silently starting to trace.
 
 4. **`umbraco-cloud-hosted-mcp`** — Wrangler template + destination wiring (§6).
 
@@ -200,16 +209,27 @@ Two things that are *not* Terraform-shaped and need calling out:
 - **The OTLP auth header lives in Cloudflare's destination config**, not in `kv-dev-global-ai-mcp`. That deviates
   from the repo's "secrets in Key Vault" pattern. Flag it rather than quietly breaking the convention.
 
-Two known landmines in that repo:
+Two things that looked like landmines, both now resolved:
 
-- **`versions.tf` pins `cloudflare ~> 5.19.0`** precisely because "from 5.20+ the provider sends
-  `observability.traces.propagation_policy = "authenticated"` by default, which the account rejects (API 100342:
-  *requires the trace propagation feature to be enabled*)". That is a trace-propagation feature gate on the
-  Umbraco Cloudflare account, and it is very likely the same capability cross-DO span nesting depends on.
-  **Getting that feature enabled on the account is a prerequisite, not a detail** — and it may also unblock
-  raising the provider pin. Note this sits at the Terraform/API layer, *not* the Wrangler layer: the spike (§7)
-  confirmed `propagation_policy` isn't a Wrangler config key at all, so the template change below is unaffected by
-  the pin.
+- **The `cloudflare ~> 5.19.0` provider pin — raise it to `~> 5.21.1`.** The pin exists because "from 5.20+ the
+  provider sends `observability.traces.propagation_policy = "authenticated"` by default, which the account rejects
+  (API 100342: *requires the trace propagation feature to be enabled*)".
+
+  An earlier draft of this plan read that error as an **account-level feature gate** and made "get it enabled" the
+  first prerequisite. **That was wrong.** It is a provider bug —
+  [terraform-provider-cloudflare#7192](https://github.com/cloudflare/terraform-provider-cloudflare/issues/7192):
+  v5.20.0 serialised `propagation_policy` unconditionally, *including when `traces.enabled = false`*, so the API
+  refused a field the config never asked for. Closed and fixed by
+  [#7205](https://github.com/cloudflare/terraform-provider-cloudflare/pull/7205) (merged 23-06-2026), released in
+  **v5.21.1**, which marks the field unknown on create and stops serialising it when unset. Umbraco's SRE team
+  confirmed independently (17-08-2026) that no global account setting for worker trace logs exists to be turned
+  on.
+
+  The bump is **required, not merely tidy-up**, because the same release fixes
+  [#7197](https://github.com/cloudflare/terraform-provider-cloudflare/issues/7197): `observability.logs.destinations`
+  and `observability.traces.destinations` produced Terraform "inconsistent result" errors on first apply. That is
+  precisely the field §6 adds, so on 5.19.x we would clear the propagation error and hit a second wall immediately.
+
 - ~~**`compatibility_date` defaults to `2025-04-01`**, so a bump is probably required.~~ **Resolved by the spike
   (§7): not required.** The tracing API is gated on runtime version, not compat date, and behaves identically on
   `2025-04-01`. Leave the compat date alone.
@@ -267,37 +287,52 @@ attribute value).
 trace-collection implementation at all. So local dev creates spans that go nowhere. Two consequences:
 
 - **Neither export nor span *nesting* can be verified locally or in CI.** The spike proves the API is callable and
-  safe in our topology; it cannot prove a `tools/call` span lands in the backend correctly parented under the
-  automatic DO binding span. That needs a deployed Worker with a real destination. The beta announcement lists
-  trace-context propagation as still landing, and the `versions.tf` note records that this account currently
-  *rejects* `propagation_policy = "authenticated"` (API 100342) — so nesting across the DO boundary remains the
-  open risk, and the account feature is likely its prerequisite.
+  safe in our topology; it cannot prove a `tools/call` span comes out correctly parented under the automatic DO
+  binding span. That needs a deployed Worker. The beta announcement lists trace-context propagation as still
+  landing, so nesting across the DO boundary remains the open risk.
 - **`isTraced` must not be used as a feature flag in tests.** It is `false` locally regardless of config, so any
   code branching on it is effectively dead in the unit/integration suites.
 
 Still open, and answerable only on a deployed dev Worker:
 
-1. Do custom spans reach the destination, and do they nest under the automatic handler/DO/fetch spans?
-2. Is the account-level trace-propagation feature required for (1), and does enabling it also unblock raising the
-   `cloudflare` provider pin past 5.19.x?
-3. What does the automatic handler span record for the request URL — i.e. does it capture the Cloud project alias?
+1. Do custom spans appear, and do they nest under the automatic handler/DO/fetch spans?
+2. What does the automatic handler span record for the request URL — i.e. does it capture the Cloud project alias?
    Decides the §5 redaction question.
+
+**A destination is not needed to answer either.** `destinations` is optional and `persist` defaults to on, so
+`[observability.traces] enabled = true` alone stores traces in Cloudflare's own dashboard — viewable, free during
+the beta, and with no backend, no export and no data-processing question. Use that for verification; add a
+destination once the backend is chosen. (§6's `persist: false` is the steady-state setting, for avoiding
+dashboard billing once traces are being exported somewhere.)
+
+Question 2 can be answered **immediately**, before any of our code ships, since it only involves Cloudflare's own
+automatic spans. Question 1 needs this branch merged, released, and the product repos updated and deployed.
 
 Reproduction: `scratchpad/otel-spike/` (throwaway; ~60 lines of Worker + a `wrangler.toml`).
 
 ## 8. Cost
 
-Export is on Workers Paid and includes 10M events/month per type, with $0.05/million beyond that from
-**1 October 2026**; dashboard storage is billed separately ($0.60/million, 7-day retention on Paid) which
-`persist: false` avoids. **Free beta ends 30 September 2026** — roughly two months out, so build and evaluate
-during the free window but budget before it closes.
+**Each span is one observability event, sharing the same monthly quota and pricing as Workers Logs** — not a
+separate traces allowance. On Paid that's 20M events/month included, then $0.60/million, with 7-day retention.
+Billing starts **1 October 2026**; it is free during the beta until 30 September. Umbraco's SRE team confirmed
+(17-08-2026) the account is on Workers Paid ("Workers Paid for Enterprise"), so the plan requirement is met.
 
-Sizing: one tool call produces our custom span plus a handful of automatic ones. Assume ~6–10 spans per tool
-call. 10M events/month therefore lands somewhere around 1–1.5M tool calls/month across all four Workers — likely
-generous for now, but it is the number that will move as adoption grows. Start `head_sampling_rate = 1` in dev
-for signal; consider lowering in prod once volume is known. Sampling is per-request at the head, so a lowered
-rate drops whole traces, not individual spans — good for cost, and it means rare errors can be missed. If that
-becomes a problem, tail sampling via Tail Workers is the documented answer.
+The shared quota is the part that matters here: the MCP Workers' generated config **already** carries
+`[observability] enabled = true, head_sampling_rate = 1`, so they are consuming that allowance for logs today.
+Traces add to the same bucket rather than drawing on a fresh one.
+
+Sizing: one tool call produces our custom span plus a handful of automatic ones — assume ~6–10 events per call. So
+20M/month is order-of-magnitude 2–3M tool calls across all four Workers, before existing log volume is subtracted.
+Generous at current adoption, and the number to revisit before October rather than after. Start
+`head_sampling_rate = 1` in dev for signal and lower it in prod once real volume is known; SRE suggested trialling
+with alerts, which is the right shape given nobody can predict the denominator yet.
+
+Sampling is per-request at the head, so a lowered rate drops whole traces rather than individual spans — good for
+cost, and it means rare errors can be missed entirely. Note this also **scales any count derived from spans**, per
+§12. If missed errors become a problem, tail sampling via Tail Workers is the documented answer.
+
+`persist: false` avoids dashboard storage once traces are being exported. Leave it on (the default) while
+verifying — see §7.
 
 ## 9. Verification
 
@@ -319,32 +354,43 @@ becomes a problem, tail sampling via Tail Workers is the documented answer.
 
 | # | Change | Repo | Depends on |
 |---|---|---|---|
-| 1 | Trace-propagation feature enabled on the Umbraco CF account | (account/support) | — |
+| 1 | ~~Trace-propagation feature enabled on the account~~ **not a thing — see §6.** Raise the provider pin to `~> 5.21.1` instead | `umbraco-cloud-hosted-mcp` | — |
 | 2 | ~~Spike: does the API work in a DO~~ **done, §7 — it does** | `umbraco-mcp-base` | — |
 | 3 | `TelemetryAdapter` + `withTelemetry` in `withStandardDecorators` | `umbraco-mcp-base` (SDK) | — |
 | 4 | Cloudflare adapter + `tools/call` span, wired in `createPerRequestServer` | `umbraco-mcp-base` (hosted-mcp) | 3 |
 | 5 | Add `mcp.server.init` + `mcp.auth.refresh` spans alongside the existing logs (§3b — the logs stay) | `umbraco-mcp-base` | 4 |
-| 6 | Destination created; Wrangler template + module var; compat-date decision | `umbraco-cloud-hosted-mcp` | 1 |
-| 7 | Deploy dev, verify trace tree end to end | both | 4, 6 |
-| 8 | Dep bump in the two product repos, deploy prod | `Umbraco-CMS-MCP-Dev`, `-Editor` | 7 |
-| 9 | Feed real `tools/call` sequences into the `discuss-mcp` trace-optimization loop | `umbraco-mcp-base` | 8 |
+| 5b | Enable traces on one dev Worker, dashboard-only, and answer §7 question 2 | `umbraco-cloud-hosted-mcp` | 1 |
+| 6 | Destination created; Wrangler template + module var | `umbraco-cloud-hosted-mcp` | 1, backend chosen (§11) |
+| 7 | Release the SDK + hosted packages so the product repos can consume them | `umbraco-mcp-base` | 3–5 |
+| 8 | Per product repo: bump `@umbraco-cms/mcp-hosted` **and add `telemetry: { tracing }` to its own `worker.ts`** (§4) | `Umbraco-CMS-MCP-Dev`, `-Editor` | 7 |
+| 9 | Deploy dev, verify the trace tree — §7 question 1 | both | 5b, 8 |
+| 10 | Feed real `tools/call` sequences into the `discuss-mcp` trace-optimization loop | `umbraco-mcp-base` | 9 |
 
-Steps 3–5 are behaviour-neutral until a destination exists, so they can land on `dev` behind nothing more than
-the pass-through default — and since the gating spike passed, **they no longer wait on step 1**. Step 1 blocks
-only step 7's nesting verification. That means the library work and the account/infra work can proceed in
-parallel, which they couldn't under the original plan.
+Steps 3–5 are behaviour-neutral until an adapter is wired up, so they land on `dev` behind nothing more than the
+pass-through default, and nothing in them waits on infrastructure. Steps 1/5b (infra) and 3–5 (library) are fully
+parallel.
 
-Step 9 is the actual payoff — everything before it is plumbing.
+Step 10 is the actual payoff — everything before it is plumbing.
 
 ## 11. Decisions needed
 
 - **Which OTLP backend?** Cloudflare exports to any OTLP endpoint (Honeycomb, Grafana Cloud, Axiom, Sentry are
-  the documented ones). This is a data-processing decision as much as a technical one: spans will carry Cloud
-  project identifiers, so **where the backend stores data and under what terms needs checking against current
-  DPA terms before anything is exported** — I'm not in a position to assert a residency position here. Azure
-  Monitor is worth a look given the rest of the estate, but its documented OTLP ingestion paths go via the OTel
-  Collector or Azure Monitor Agent rather than a bare endpoint you can paste into Cloudflare, so it likely needs
-  a collector hop — verify before assuming it's the easy option.
+  the documented ones).
+
+  **Grafana Cloud is the front-runner, on two independent grounds.** Umbraco's SRE team reports (17-08-2026) that
+  no Cloudflare Worker currently has a destination configured, that there's no house preference, and that Grafana
+  is already in use for the Business Portal — so something may be reusable. Separately, §12 needs the backend to
+  derive metrics from spans, and Grafana Cloud's Tempo metrics-generator does exactly that with no collector to
+  operate. The convenient answer and the technically-required one coincide, which is rare enough to take.
+
+  Still a data-processing decision: spans will carry Cloud project identifiers, so **where the backend stores data
+  and under what terms needs checking against current DPA terms before anything is exported** — I'm not in a
+  position to assert a residency position here. Azure Monitor is worth a look given the rest of the estate, but
+  its documented OTLP ingestion paths go via the OTel Collector or Azure Monitor Agent rather than a bare endpoint
+  you can paste into Cloudflare, so it likely needs a collector hop — verify before assuming it's the easy option.
+
+  Note the verification work (step 5b) needs **no** backend at all — see §7 — so this decision doesn't block
+  finding out whether the trace tree assembles correctly.
 - **Per-tenant visibility, or strictly aggregate?** Decides whether `umbraco.mcp.tenant` exists at all. Note the
   automatic handler span may force the issue via the URL regardless (spike 3).
 - **Editor vs developer MCP.** Editor sessions are non-technical end users; developer sessions are staff. Same
@@ -399,12 +445,13 @@ The `TelemetryAdapter` seam in §4 is deliberately generic, but it does not foll
 | Deployment | Adapter | Works today after this plan? |
 |---|---|---|
 | HQ-hosted Workers | `createCloudflareTracingAdapter()` | Yes — that's this plan |
-| **Customer self-hosted Workers** (consumers of `@umbraco-cms/mcp-hosted`) | **same Cloudflare adapter, no code change** | **Yes** — they add `[observability.traces] destinations = […]` pointing at a destination in *their* dashboard. Requires Workers Paid |
+| **Customer self-hosted Workers** (consumers of `@umbraco-cms/mcp-hosted`) | **same Cloudflare adapter, two lines in their `worker.ts`** | **Yes** — `import { tracing } from "cloudflare:workers"` plus `telemetry: { tracing }`, then `[observability.traces] destinations = […]` naming a destination in *their* dashboard. Requires Workers Paid |
 | **Local stdio** (`@umbraco-cms/mcp-dev`, editor, forms, scaffolded servers) | **needs a Node adapter — not written** | No. The seam accepts it; the implementation is additional work |
 
 The self-hosted case is the strong one: because instrumentation lives in `createPerRequestServer` and the spans go
 wherever that Worker's own destination points, a customer running their own hosted MCP gets full tracing into
-their own stack for the cost of a config block. Nothing routes to HQ.
+their own stack for two lines of wiring and a config block. Nothing routes to HQ, and the opt-in is explicit —
+upgrading the package doesn't start tracing anyone by surprise.
 
 The Node adapter (`@opentelemetry/sdk-node` + an OTLP exporter, registered from `index.ts` next to the existing
 `setServerRef()` call) is a small, separate piece of work. Two notes for whoever picks it up:
