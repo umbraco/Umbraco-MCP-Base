@@ -431,43 +431,53 @@ expect(createSnapshotResult(result, builder.getId())).toMatchSnapshot();
 
 #### Cursor pagination in tests
 
-Paginated tools (those with `skip`/`take` in their input schema) use cursor-based pagination at runtime via `withCursorPagination`. Tests for these tools **must** use the cursor wrapper:
+Paginated tools (those with `skip`/`take` in their input schema) are converted to cursor pagination by `withCursorPagination`, which `withStandardDecorators` **already applies** — and every tool file exports `withStandardDecorators(tool)`. So an imported tool's handler already accepts `cursor` and no longer accepts `skip`/`take`.
+
+**Do not wrap an imported tool again.** `withCursorPagination` only transforms a tool whose `inputSchema` still has both `skip` and `take`; given an already-decorated tool it returns it unchanged. That makes `withCursorPagination({ ...tool, pageSize: N })` a no-op on imported tools — the page-size override is silently ignored, and a "second page" test then passes or fails depending on whether live data happens to exceed the baked-in default page size.
+
+Control the page size through the cursor instead. `encodeCursor({ s, t })` takes `s` (skip) and `t` (take):
 
 ```typescript
-import { withCursorPagination } from "@umbraco-cms/mcp-server-sdk";
-import { type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
+import { encodeCursor } from "@umbraco-cms/mcp-server-sdk";
+import { validateToolResponse, type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
 it("should list entities", async () => {
-  const cursorTool = withCursorPagination(listEntitiesTool);
-  const result = await cursorTool.handler({}, createMockRequestHandlerExtra());
+  const result = await listEntitiesTool.handler({}, createMockRequestHandlerExtra());
 
   // Cast to CursorPaginatedResult for nextCursor access
-  const data = validateToolResponse(cursorTool, result) as CursorPaginatedResult;
+  const data = validateToolResponse(listEntitiesTool, result) as CursorPaginatedResult;
   expect(data.items.length).toBeGreaterThan(0);
 });
 
-it("should paginate with cursor", async () => {
-  // Use a small pageSize to force multiple pages
-  const cursorTool = withCursorPagination({ ...listEntitiesTool, pageSize: 1 });
+it("should paginate with cursor to a second page", async () => {
+  const context = createMockRequestHandlerExtra();
 
-  const page1 = await cursorTool.handler({}, createMockRequestHandlerExtra());
-  const data1 = validateToolResponse(cursorTool, page1) as CursorPaginatedResult;
+  // Two per page from offset 0 — forces a nextCursor whatever the data volume.
+  const page1 = await listEntitiesTool.handler(
+    { cursor: encodeCursor({ s: 0, t: 2 }) },
+    context
+  );
+  const data1 = validateToolResponse(listEntitiesTool, page1) as CursorPaginatedResult;
   expect(data1.nextCursor).toBeDefined();
 
-  const page2 = await cursorTool.handler(
-    { cursor: data1.nextCursor },
-    createMockRequestHandlerExtra()
-  );
-  const data2 = validateToolResponse(cursorTool, page2) as CursorPaginatedResult;
+  const page2 = await listEntitiesTool.handler({ cursor: data1.nextCursor }, context);
+  const data2 = validateToolResponse(listEntitiesTool, page2) as CursorPaginatedResult;
   expect(data2.items[0]).not.toEqual(data1.items[0]);
 });
 ```
 
+This works for read-only collections too (cultures, languages, server info), where `beforeEach` can't seed rows — you set the page size rather than relying on how much data exists.
+
+**`nextCursor` requires a `total` in the response.** The decorator only computes it when `structuredContent` carries a numeric `total` alongside `items` — Umbraco's paged Management API endpoints do. If a tool's response has no `total`, `nextCursor` is always `undefined`, so don't write a second-page test for it: assert on the first page instead. Check the tool's `outputSchema` before assuming pagination is testable.
+
 **Key rules:**
-- **NEVER** pass `skip` or `take` to handlers — use `withCursorPagination()` and the `cursor` param
-- Pass `{}` for first page (no cursor = first page with default page size)
-- Use `{ ...tool, pageSize: N }` to override page size for pagination tests
+- **NEVER** pass `skip` or `take` to handlers — the decorated schema doesn't accept them
+- Pass `{}` for the first page at the tool's default page size
+- Force a small page with `encodeCursor({ s: 0, t: N })` — **not** `{ ...tool, pageSize: N }`, which does nothing to an imported tool
+- Only call `withCursorPagination(tool)` yourself on a **raw** tool definition that hasn't been through `withStandardDecorators`. Tool files export the decorated form, so tests almost never need it
+- For a `toBe(N)` assertion on page size, seed at least N+1 rows in `beforeEach`
+- No `total` in the response means no `nextCursor` — skip the second-page test rather than asserting a value that can never appear
 - Cast `validateToolResponse` results to `CursorPaginatedResult` from `@umbraco-cms/mcp-server-sdk/testing`
 - For edge cases (skip past end), use `encodeCursor({ s: 10000, t: 10 })` as cursor value
 
