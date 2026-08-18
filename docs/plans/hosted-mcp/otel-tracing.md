@@ -34,6 +34,13 @@ path it has documented Durable Object support via `instrumentDO`. Reasons to pre
 
 Keep `otel-cf-workers` as the documented fallback if the DO spike in §7 fails.
 
+**One thing this comparison got wrong, on the evidence in §5:** `otel-cf-workers` has a `PostProcessor` hook that
+can filter or rewrite spans before export, and native tracing has no equivalent. Since Cloudflare's automatic spans
+turn out to carry caller geolocation, ASN and the Cloud project alias, the ability to strip attributes in-Worker is
+worth more than it appeared. It doesn't overturn the decision — a collector in front of the backend achieves the
+same thing without putting third-party code next to OAuth tokens — but "native gives us platform spans for free"
+should be read as "free, and unfiltered".
+
 Two constraints to design around, both from the native path:
 
 - **No OTel metrics.** Export covers traces and logs only. Counters and histograms must be derived from spans in
@@ -171,12 +178,47 @@ Per `telemetry.md` §5, and it needs restating because spans are easy to over-fi
 - **No tool arguments or results.** Argument values are customer content.
 - **No raw error messages.** `withErrorHandling` forwards `error.message` and ProblemDetails `detail` verbatim
   into tool results; those routinely carry paths, IDs and API payloads. Spans get the **category** only.
-- **No plaintext Cloud alias.** It's a customer identifier and it's in the URL. Use a keyed hash for
-  `umbraco.mcp.tenant`; keep the mapping internal. Note the automatic handler span will contain the request URL —
-  **including the alias** — so this is a redaction question for the *automatic* spans too, not just ours. Check
-  what the handler span records before enabling export, and factor it into the backend choice.
+- **No plaintext Cloud alias.** It's a customer identifier. Use a keyed hash for `umbraco.mcp.tenant` and keep the
+  mapping internal.
 - **No user identity.** `props` carries the authenticated backoffice user; no user id, name or email on spans.
 - **No tokens**, obviously — including in `mcp.auth.*` attributes.
+
+### The automatic spans carry more than we do — measured, 18-08-2026
+
+Traces were enabled on `umbraco-cms-developer-mcp-17-dev` and a probe request sent to
+`/at/trace-probe-alias/mcp?probe=otel-verify-2`. The platform's own handler span contains, among ~45 attributes:
+
+| Attribute | Value observed | Concern |
+|---|---|---|
+| `url.full`, `url.path` | `…/at/trace-probe-alias/mcp` | **The Cloud project alias, in full** |
+| `url.query` | `probe=otel-verify-2` | Query strings are recorded verbatim |
+| `geo.locality.name` / `.region` | `Salford` / `England` | **City-level location of the calling user** |
+| `geo.country.code`, `geo.continent.code`, `geo.timezone` | `GB`, `EU`, `Europe/London` | — |
+| `cloudflare.asn` | `206067` | Caller's network |
+| `user_agent.original` | `node` | Would be the MCP client's UA in real use |
+
+No client IP is present (`client.address` / `network.peer.address` are absent), which helps. But **city + ASN +
+which Cloud project + a timestamp**, per request, is a materially different proposition from "we record a tool name
+and an outcome". For the editor MCP the caller is an individual editor at a customer organisation.
+
+Three consequences, and they matter more than anything in the list above:
+
+1. **Our redaction discipline does not control this.** Hashing `umbraco.mcp.tenant` stops *us* adding a second copy
+   of the alias; it does nothing about `url.path`. Head sampling doesn't help either — it drops whole traces, it
+   doesn't thin attributes.
+2. **Native Cloudflare tracing offers no redaction hook.** There is no equivalent of `otel-cf-workers`'
+   `PostProcessor` (a function that can filter or rewrite spans before export). So if these attributes must not
+   reach a third party, the options are: put an **OTel Collector / Grafana Alloy in the path** and drop
+   `geo.*` / `cloudflare.asn` / rewrite `url.path` there; or revisit §1 and use `otel-cf-workers`, whose
+   PostProcessor can do it in-Worker. That is the one argument for the library that the original comparison
+   missed.
+3. **This is a DPO question before it is a technical one**, and it needs answering before a destination is
+   configured rather than after. I'm not in a position to judge whether this crosses into personal data under
+   GDPR — city-level geolocation plus network plus the project being accessed is at least arguable, and the
+   answer decides whether option (1) above is required or merely tidy.
+
+None of this blocks the verification work: dashboard-only traces stay inside Cloudflare, which is already a
+processor for this traffic. It blocks **export**.
 
 ## 6. Infrastructure changes (`umbraco-cloud-hosted-mcp`)
 
@@ -296,8 +338,18 @@ trace-collection implementation at all. So local dev creates spans that go nowhe
 Still open, and answerable only on a deployed dev Worker:
 
 1. Do custom spans appear, and do they nest under the automatic handler/DO/fetch spans?
-2. What does the automatic handler span record for the request URL — i.e. does it capture the Cloud project alias?
-   Decides the §5 redaction question.
+2. ~~What does the automatic handler span record for the request URL?~~ **Answered 18-08-2026 — see §5.** Yes: the
+   full path including the Cloud project alias, plus the query string, plus city-level caller geolocation and ASN.
+   The finding is larger than the question was, and it moves the export decision from "check the DPA" to "get a
+   DPO view, and probably put a collector in the path".
+
+Also learned from that first trace, worth knowing before reading any duration:
+
+- `durationMS` (696 on the probe) is the real wall clock; **`wall_time_ms` and `cpu_time_ms` both reported `1`**.
+  Workerd's timers only advance on I/O, so those two fields are not usable as latency measures — use the span's own
+  duration.
+- The top-level span reports `cloudflare.execution_model: "stateless"`. When checking question 1, that's the field
+  that should distinguish the Worker span from the Durable Object's.
 
 **A destination is not needed to answer either.** `destinations` is optional and `persist` defaults to on, so
 `[observability.traces] enabled = true` alone stores traces in Cloudflare's own dashboard — viewable, free during
@@ -383,9 +435,11 @@ Step 10 is the actual payoff — everything before it is plumbing.
   derive metrics from spans, and Grafana Cloud's Tempo metrics-generator does exactly that with no collector to
   operate. The convenient answer and the technically-required one coincide, which is rare enough to take.
 
-  Still a data-processing decision: spans will carry Cloud project identifiers, so **where the backend stores data
-  and under what terms needs checking against current DPA terms before anything is exported** — I'm not in a
-  position to assert a residency position here. Azure Monitor is worth a look given the rest of the estate, but
+  Still a data-processing decision, and a bigger one than first written: per §5, spans carry the Cloud project
+  alias **and** city-level caller geolocation and ASN, none of which we add or can strip in-Worker. So the
+  question is no longer just "which vendor" but **"does anything sit between Cloudflare and the vendor to drop
+  those fields"** — a Collector or Grafana Alloy hop. That needs a DPO view before export is switched on; I'm not
+  in a position to assert a residency or personal-data position here. Azure Monitor is worth a look given the rest of the estate, but
   its documented OTLP ingestion paths go via the OTel Collector or Azure Monitor Agent rather than a bare endpoint
   you can paste into Cloudflare, so it likely needs a collector hop — verify before assuming it's the easy option.
 
