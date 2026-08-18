@@ -94,7 +94,7 @@ Create `src/umbraco-api/tools/{collection}/__tests__/{action}-{entity}.test.ts`:
 - Use assertion testing for error cases (`expect(result.isError).toBe(true)`)
 - 1 happy path test + 1 error test (2-3 tests maximum)
 - Clean up created data in `afterEach`
-- **Paginated tools (with skip/take):** Wrap with `withCursorPagination()` from `@umbraco-cms/mcp-server-sdk`. Pass `{}` for first page, use `cursor` from response for next pages. Use `validateToolResponse(cursorTool, result)` with the wrapped tool. See `/build-tools-tests` SKILL.md for full cursor pagination examples.
+- **Paginated tools (with skip/take):** Don't wrap — `withStandardDecorators` already applied `withCursorPagination`, so the imported tool's handler takes `cursor` and wrapping again is a no-op. Pass `{}` for the first page, `encodeCursor({ s: 0, t: N })` from `@umbraco-cms/mcp-server-sdk` to force a small page, then the response's `nextCursor` for page two. See `/build-tools-tests` SKILL.md for full cursor pagination examples.
 
 **After creating:**
 
