@@ -8,6 +8,11 @@ Spans land in an OTLP backend of HQ's choosing. This gives us the tool-design si
 `telemetry.md` §1 (call sequences, retries, latency, error categories) plus real production debugging for the
 OAuth/token paths, without asking any customer to consent to anything new — it's our runtime.
 
+**Status (19-08-2026): the technical build is done and verified in production.** Spans exist, and nest correctly
+across the Durable Object boundary — confirmed live on `umbraco-cms-developer-mcp-17-dev`, see §7. What's left is
+rolling the same two-line wiring out to the other product lines (§10 step 8), and the export/DPO decision (§11),
+which is a data-processing question rather than an engineering one.
+
 ## 1. Approach: Cloudflare-native tracing, not a third-party library
 
 Cloudflare shipped this in the window since the last time this would have been evaluated, and it removes most of
@@ -335,13 +340,50 @@ trace-collection implementation at all. So local dev creates spans that go nowhe
 - **`isTraced` must not be used as a feature flag in tests.** It is `false` locally regardless of config, so any
   code branching on it is effectively dead in the unit/integration suites.
 
-Still open, and answerable only on a deployed dev Worker:
+Both questions are now answered:
 
-1. Do custom spans appear, and do they nest under the automatic handler/DO/fetch spans?
+1. ~~Do custom spans appear, and do they nest under the automatic handler/DO/fetch spans?~~ **Answered
+   19-08-2026 — yes, on both counts.** Confirmed live on `umbraco-cms-developer-mcp-17-dev`
+   (`Umbraco-CMS-MCP-Dev` v17 line, after wiring `telemetry: { tracing }` into its `worker.ts` in #402): a
+   `tools/call get-document-configuration` span carried a real `parentSpanId`, and the full tree was
+
+   ```
+   POST /at/{alias}/mcp                        automatic — handler span
+   └─ durable_object_subrequest                automatic — DO boundary
+      └─ GET …                                 automatic
+         ├─ do sql exec SELECT state FROM …    automatic — agents-library state read
+         └─ tools/call get-document-configuration   OURS — 136ms
+            └─ fetch /umbraco/management/api/v1/document/…   automatic, nested under OUR span
+   ```
+
+   That is exactly the tree predicted in §2, including our span correctly parenting the Umbraco API call — the
+   thing a flat trace could not have shown. No trace-propagation account feature was needed (consistent with §6:
+   there wasn't one to enable), and no fallback to `otel-cf-workers` is required.
+
+   **This surfaced a real bug, since fixed.** `getServerOptions()` in `@umbraco-cms/mcp-hosted` builds
+   `CreateServerOptions` as an explicit field-by-field whitelist rather than a spread, and `telemetry` was missing
+   from it — so `telemetry: { tracing }` set the way the template demonstrated was **silently discarded**, and the
+   Worker deployed, served, and recorded nothing, with no error anywhere. `Umbraco-CMS-MCP-Dev`'s v17 line
+   worked around it by attaching telemetry *after* the call (`{ ...getServerOptions(options), telemetry: { tracing } }`)
+   before the root cause was understood; that workaround remains valid. Fixed properly in
+   `umbraco-mcp-base#279`, which also adds a regression test verified to fail without the fix — the gap existed
+   because unit tests exercised `createPerRequestServer` directly and never went through `getServerOptions`, the
+   path every real consumer uses. Any consumer wiring telemetry between #271/beta.36 shipping and #279 landing
+   should double-check it against the fixed version.
+
 2. ~~What does the automatic handler span record for the request URL?~~ **Answered 18-08-2026 — see §5.** Yes: the
    full path including the Cloud project alias, plus the query string, plus city-level caller geolocation and ASN.
    The finding is larger than the question was, and it moves the export decision from "check the DPA" to "get a
    DPO view, and probably put a collector in the path".
+
+**A second duration trap, distinct from the `wall_time_ms`/`cpu_time_ms` one below.** On the live trace, the
+top-level `POST /at/{alias}/mcp` handler span reported **13.64s**, and the `durable_object_subrequest` beneath it
+**13.6s** — almost the same number, and almost entirely session-hold time. Streamable HTTP keeps that connection
+open; the span duration includes waiting, not work. The `tools/call` span itself read **136ms**, and its child
+`fetch` to the Umbraco API was also 136ms — i.e. essentially the whole cost of the call was the one outbound
+request, correctly isolated by nesting. **Any dashboard or alert built on trace duration will report the
+connection lifetime, not tool latency.** §12's metrics should be built from the `tools/call` span's own duration,
+never the root span's.
 
 Also learned from that first trace, worth knowing before reading any duration:
 
@@ -351,14 +393,11 @@ Also learned from that first trace, worth knowing before reading any duration:
 - The top-level span reports `cloudflare.execution_model: "stateless"`. When checking question 1, that's the field
   that should distinguish the Worker span from the Durable Object's.
 
-**A destination is not needed to answer either.** `destinations` is optional and `persist` defaults to on, so
-`[observability.traces] enabled = true` alone stores traces in Cloudflare's own dashboard — viewable, free during
-the beta, and with no backend, no export and no data-processing question. Use that for verification; add a
-destination once the backend is chosen. (§6's `persist: false` is the steady-state setting, for avoiding
-dashboard billing once traces are being exported somewhere.)
-
-Question 2 can be answered **immediately**, before any of our code ships, since it only involves Cloudflare's own
-automatic spans. Question 1 needs this branch merged, released, and the product repos updated and deployed.
+**Neither answer needed a destination.** `destinations` is optional and `persist` defaults to on, so
+`[observability.traces] enabled = true` alone stored traces in Cloudflare's own dashboard — viewable, free during
+the beta, with no backend, no export and no data-processing question raised. That's how both were verified. A
+destination is now only needed for **export**, which is still gated on the DPO/collector question in §5, not on
+anything technical.
 
 Reproduction: `scratchpad/otel-spike/` (throwaway; ~60 lines of Worker + a `wrangler.toml`).
 
@@ -404,25 +443,26 @@ verifying — see §7.
 
 ## 10. Sequencing
 
-| # | Change | Repo | Depends on |
+| # | Change | Repo | Status |
 |---|---|---|---|
-| 1 | ~~Trace-propagation feature enabled on the account~~ **not a thing — see §6.** Raise the provider pin to `~> 5.21.1` instead | `umbraco-cloud-hosted-mcp` | — |
-| 2 | ~~Spike: does the API work in a DO~~ **done, §7 — it does** | `umbraco-mcp-base` | — |
-| 3 | `TelemetryAdapter` + `withTelemetry` in `withStandardDecorators` | `umbraco-mcp-base` (SDK) | — |
-| 4 | Cloudflare adapter + `tools/call` span, wired in `createPerRequestServer` | `umbraco-mcp-base` (hosted-mcp) | 3 |
-| 5 | Add `mcp.server.init` + `mcp.auth.refresh` spans alongside the existing logs (§3b — the logs stay) | `umbraco-mcp-base` | 4 |
-| 5b | Enable traces on one dev Worker, dashboard-only, and answer §7 question 2 | `umbraco-cloud-hosted-mcp` | 1 |
-| 6 | Destination created; Wrangler template + module var | `umbraco-cloud-hosted-mcp` | 1, backend chosen (§11) |
-| 7 | Release the SDK + hosted packages so the product repos can consume them | `umbraco-mcp-base` | 3–5 |
-| 8 | Per product repo: bump `@umbraco-cms/mcp-hosted` **and add `telemetry: { tracing }` to its own `worker.ts`** (§4) | `Umbraco-CMS-MCP-Dev`, `-Editor` | 7 |
-| 9 | Deploy dev, verify the trace tree — §7 question 1 | both | 5b, 8 |
-| 10 | Feed real `tools/call` sequences into the `discuss-mcp` trace-optimization loop | `umbraco-mcp-base` | 9 |
+| 1 | ~~Trace-propagation feature enabled on the account~~ **not a thing — see §6.** Raised the provider pin to `~> 5.21.1` instead | `umbraco-cloud-hosted-mcp` | done — #23 |
+| 2 | Spike: does the API work in a DO | `umbraco-mcp-base` | done — §7 |
+| 3 | `TelemetryAdapter` + `withTelemetry` in `withStandardDecorators` | `umbraco-mcp-base` (SDK) | done — #271 |
+| 4 | Cloudflare adapter + `tools/call` span, wired in `createPerRequestServer` | `umbraco-mcp-base` (hosted-mcp) | done — #271 |
+| 5 | Add `mcp.server.init` + `mcp.auth.refresh` spans alongside the existing logs (§3b — the logs stay) | `umbraco-mcp-base` | done — #271 |
+| 5b | Enable traces on one dev Worker, dashboard-only, and answer §7 question 2 | `umbraco-cloud-hosted-mcp` | done — #24, 18-08-2026 |
+| 6a | Fix `getServerOptions()` silently dropping `telemetry` (found via 5c below) | `umbraco-mcp-base` (hosted-mcp) | done — #279 |
+| 5c/9 | Wire `telemetry: { tracing }` into a product repo's `worker.ts`, deploy, verify the trace tree — §7 question 1 | `Umbraco-CMS-MCP-Dev` (v17 line) | **done, 19-08-2026** — nested correctly; see §7 |
+| 8 | Same wiring for every other product line (v18, `-Editor`), once each is on `@umbraco-cms/mcp-hosted` ≥ the version carrying #279 | `Umbraco-CMS-MCP-Dev` (main/v18), `Umbraco-CMS-MCP-Editor` | **open** |
+| 6b | Destination created; Wrangler template + module var | `umbraco-cloud-hosted-mcp` | blocked on backend + DPO decision (§5, §11) |
+| 10 | Feed real `tools/call` sequences into the `discuss-mcp` trace-optimization loop | `umbraco-mcp-base` | open, unblocked now that §9 has real spans to feed it |
 
-Steps 3–5 are behaviour-neutral until an adapter is wired up, so they land on `dev` behind nothing more than the
-pass-through default, and nothing in them waits on infrastructure. Steps 1/5b (infra) and 3–5 (library) are fully
-parallel.
+Steps 3–6a landed as designed. Step 9 (renumbered 5c above once it turned out to need a library fix first) is what
+proved the whole chain end to end. What remains is **breadth, not risk**: repeating the two-line `worker.ts` wiring
+on every other product line (step 8), and the export decision (step 6b), which was always going to be the slower
+of the two regardless of technical readiness.
 
-Step 10 is the actual payoff — everything before it is plumbing.
+Step 10 is the actual payoff — everything before it was plumbing, and the plumbing now holds water.
 
 ## 11. Decisions needed
 
@@ -443,10 +483,12 @@ Step 10 is the actual payoff — everything before it is plumbing.
   its documented OTLP ingestion paths go via the OTel Collector or Azure Monitor Agent rather than a bare endpoint
   you can paste into Cloudflare, so it likely needs a collector hop — verify before assuming it's the easy option.
 
-  Note the verification work (step 5b) needs **no** backend at all — see §7 — so this decision doesn't block
-  finding out whether the trace tree assembles correctly.
-- **Per-tenant visibility, or strictly aggregate?** Decides whether `umbraco.mcp.tenant` exists at all. Note the
-  automatic handler span may force the issue via the URL regardless (spike 3).
+  The verification work never needed a backend — see §7, both open questions there are now answered on
+  dashboard-only traces — so this decision was never blocking technical readiness. It blocks export, and only
+  export.
+- **Per-tenant visibility, or strictly aggregate?** Decides whether `umbraco.mcp.tenant` exists at all. Moot for
+  Cloudflare's own automatic spans regardless — §5 already found the alias in `url.path` on every request, ours
+  or not.
 - **Editor vs developer MCP.** Editor sessions are non-technical end users; developer sessions are staff. Same
   instrumentation, but possibly different sampling or a different destination.
 - **Sampling rate for prod**, and whether Tail Workers for guaranteed error capture is in scope now or later.
