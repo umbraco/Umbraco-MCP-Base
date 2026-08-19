@@ -107,9 +107,9 @@ describe("mcp.server.init span", () => {
 
     await createPerRequestServer(baseOptions, degradedEnv, props);
 
-    const lines = logSpy.mock.calls.map((args) => String(args[0]));
-    const start = lines.find((l) => l.includes("createPerRequestServer:start"));
-    const done = lines.find((l) => l.includes("createPerRequestServer:done"));
+    const lines = logSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    const start = lines.find((l: string) => l.includes("createPerRequestServer:start"));
+    const done = lines.find((l: string) => l.includes("createPerRequestServer:done"));
 
     expect(start).toBeDefined();
     expect(done).toBeDefined();

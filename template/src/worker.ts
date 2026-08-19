@@ -154,6 +154,10 @@ const options = {
   // `[observability.traces]` in `wrangler.toml` names an OTLP destination, so
   // this is inert until infrastructure opts in — remove the option entirely to
   // disable instrumentation outright.
+  //
+  // Reaches `createPerRequestServer` via `getServerOptions()` below, which
+  // copies options across by name rather than spreading — so if you add an
+  // option of your own here, check it is forwarded there too.
   telemetry: { tracing },
 };
 

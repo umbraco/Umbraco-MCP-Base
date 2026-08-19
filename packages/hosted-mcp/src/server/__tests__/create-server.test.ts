@@ -516,6 +516,66 @@ describe("buildConsentToolConfig", () => {
   });
 });
 
+describe("getServerOptions forwarding", () => {
+  // getServerOptions is an explicit whitelist, so a newly added option is
+  // silently dropped until someone copies it across. That is exactly how
+  // `telemetry` shipped inert in 1.0.0-beta.36: the template set it, this
+  // function discarded it, the object still type-checked and no test looked.
+  // These assertions are the guard for that whole class of bug.
+  const base = (): HostedMcpServerOptions => ({
+    name: "test-server",
+    version: "2.0.0",
+    collections: [createMockCollection("test-col", [createMockTool("test-tool", ["read"])])],
+    modeRegistry: [{ name: "m", displayName: "M", description: "d", collections: ["test-col"] }],
+    allModeNames: ["m"],
+    allSliceNames: ["read"],
+  });
+
+  it("forwards telemetry through to CreateServerOptions", () => {
+    const tracing = { enterSpan: (_n: string, cb: (s: unknown) => unknown) => cb({ setAttribute() {} }) };
+
+    const result = getServerOptions({ ...base(), telemetry: { tracing } as never });
+
+    // Dropping this silently means a Worker that deploys, serves, and records
+    // nothing — with no error anywhere.
+    expect(result.telemetry).toBeDefined();
+    expect(result.telemetry?.tracing).toBe(tracing);
+  });
+
+  it("leaves telemetry undefined when the consumer doesn't opt in", () => {
+    expect(getServerOptions(base()).telemetry).toBeUndefined();
+  });
+
+  it("forwards every option a consumer can set", () => {
+    const opts: HostedMcpServerOptions = {
+      ...base(),
+      instructions: "guidance",
+      expectedUmbracoMajor: "17",
+      clientFactory: () => ({}),
+      telemetry: {
+        tracing: {
+          enterSpan: (_n: string, cb: (s: unknown) => unknown) => cb({ setAttribute() {} }),
+        },
+      } as never,
+    };
+
+    const result = getServerOptions(opts);
+
+    // Named individually rather than looped, so adding a field to the type
+    // without adding it here is a visible omission in this list.
+    expect(result.name).toBe(opts.name);
+    expect(result.version).toBe(opts.version);
+    expect(result.collections).toBe(opts.collections);
+    expect(result.modeRegistry).toBe(opts.modeRegistry);
+    expect(result.allModeNames).toBe(opts.allModeNames);
+    expect(result.allSliceNames).toBe(opts.allSliceNames);
+    expect(result.instructions).toBe(opts.instructions);
+    expect(result.expectedUmbracoMajor).toBe(opts.expectedUmbracoMajor);
+    expect(result.clientFactory).toBe(opts.clientFactory);
+    expect(result.telemetry).toBe(opts.telemetry);
+  });
+});
+
 describe("getServerOptions with resolveSite", () => {
   it("passes resolveSite through to CreateServerOptions", () => {
     const resolver: SiteResolver = (siteId) => ({
