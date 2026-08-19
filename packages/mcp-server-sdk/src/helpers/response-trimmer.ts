@@ -105,8 +105,9 @@ export function estimateTokenSize(data: unknown): number {
 /**
  * Pick only specified top-level keys from a response object.
  *
- * Note: for a paginated tool, dropping `total` here silently disables cursor
- * pagination (see cursor-pagination.ts) — keep `total` in `fields` alongside `items`.
+ * Note: for a paginated tool, dropping `total` here drops `nextCursor` and logs
+ * a `[cursor-pagination]` warning to stderr (see cursor-pagination.ts) — keep
+ * `total` in `fields` alongside `items`.
  *
  * @param data - The response object
  * @param fields - Keys to include
@@ -129,7 +130,8 @@ export function pickFields<T extends Record<string, unknown>>(
  * Omit specified top-level keys from a response object.
  *
  * Note: never include `total` in `fields` for a paginated tool's response —
- * doing so silently disables cursor pagination (see cursor-pagination.ts).
+ * doing so drops `nextCursor` and logs a `[cursor-pagination]` warning to
+ * stderr (see cursor-pagination.ts).
  *
  * @param data - The response object
  * @param fields - Keys to exclude

@@ -408,6 +408,71 @@ describe("withCursorPagination", () => {
       expect(errorSpy).not.toHaveBeenCalled();
     });
 
+    it("does not warn at registration time when total is a wrapped z.int() (orval-style)", () => {
+      const tool = createMockTool({
+        name: "reg-ok-int-tool",
+        outputSchema: {
+          total: z.int().describe("Total number of items"),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when total is optional/nullish-wrapped", () => {
+      const optionalTool = createMockTool({
+        name: "reg-ok-optional-tool",
+        outputSchema: {
+          total: z.number().optional(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+      withCursorPagination(optionalTool);
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      const nullishTool = createMockTool({
+        name: "reg-ok-nullish-tool",
+        outputSchema: {
+          total: z.number().nullish(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+      withCursorPagination(nullishTool);
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when outputSchema is correct but the live response is later trimmed (registration/call-time decoupling)", async () => {
+      const tool = createMockTool({
+        name: "reg-ok-call-warn-tool",
+        outputSchema: {
+          total: z.number(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ items: [{ id: "1" }] }) }],
+          structuredContent: { items: [{ id: "1" }] },
+        }),
+      });
+
+      const result = withCursorPagination(tool);
+      // Registration should NOT warn — the outputSchema correctly declares `total`.
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      const response = await result.handler({}, {} as any);
+
+      // But the live response (e.g. trimmed by pickFields/omitFields) is
+      // missing `total` — this must warn at call time and omit nextCursor.
+      expect(response.structuredContent?.nextCursor).toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(
+        expect.stringContaining("reg-ok-call-warn-tool")
+      );
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining("total"));
+    });
+
     it("warns at call time when the response has items but no total, and omits nextCursor", async () => {
       const tool = createMockTool({
         name: "call-warn-tool",
