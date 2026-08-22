@@ -96,7 +96,7 @@ describe("createSiteRouter", () => {
   it("calls renderNotFound when provided", async () => {
     const captured = { request: null as Request | null };
     const renderNotFound = jest.fn(
-      (siteId: string) =>
+      (siteId: string, _request: Request) =>
         new Response(`<html>not found: ${siteId}</html>`, {
           status: 404,
           headers: { "Content-Type": "text/html" },
