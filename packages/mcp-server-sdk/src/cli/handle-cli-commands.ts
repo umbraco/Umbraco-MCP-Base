@@ -25,7 +25,6 @@
  * ```
  */
 
-import { readFileSync } from "fs";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -177,10 +176,18 @@ export async function handleCliCommands(
         if (cliFlags.callToolArgs && cliFlags.callToolArgsFile) {
           console.error("Cannot use --call-args and --call-args-file together. Choose one.");
           process.exit(1);
-        } else if (cliFlags.callToolArgsFile) {
+          return; // unreachable but satisfies TS
+        } else if (cliFlags.callToolArgsFile !== undefined) {
+          if (cliFlags.callToolArgsFile === "") {
+            console.error("--call-args-file was provided but is empty. Pass a file path.");
+            process.exit(1);
+            return; // unreachable but satisfies TS
+          }
           let fileContents: string;
           try {
-            fileContents = readFileSync(cliFlags.callToolArgsFile, "utf-8");
+            const { readFileSync } = await import("node:fs");
+            const raw = readFileSync(cliFlags.callToolArgsFile, "utf-8");
+            fileContents = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
           } catch (error: any) {
             console.error(`Could not read --call-args-file '${cliFlags.callToolArgsFile}': ${error.message}`);
             process.exit(1);
@@ -188,9 +195,10 @@ export async function handleCliCommands(
           }
           try {
             args = JSON.parse(fileContents);
-          } catch {
-            console.error(`Invalid JSON for --call-args-file: ${cliFlags.callToolArgsFile}`);
+          } catch (error: any) {
+            console.error(`Invalid JSON in --call-args-file '${cliFlags.callToolArgsFile}': ${error.message}`);
             process.exit(1);
+            return; // unreachable but satisfies TS
           }
         } else if (cliFlags.callToolArgs) {
           try {

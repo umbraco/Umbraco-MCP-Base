@@ -511,6 +511,78 @@ describe("handleCliCommands", () => {
       expect(consoleErrorOutput).toContain("Invalid JSON");
       expect(consoleErrorOutput).toContain("--call-args-file");
     });
+
+    it("exits 1 when --call-args-file is given but empty, instead of silently defaulting to {}", async () => {
+      let handlerCalled = false;
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async () => {
+          handlerCalled = true;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: "" },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("--call-args-file");
+      expect(handlerCalled).toBe(false);
+    });
+
+    it("reads a large, multiline, non-ASCII payload from a file byte-for-byte", async () => {
+      let receivedArgs: any;
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async (args: any) => {
+          receivedArgs = args;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+
+      // Windows argv is limited to ~32KB and mangles non-ASCII/multiline content —
+      // this is the exact scenario --call-args-file exists to fix (issue #287).
+      const largeDescription = "line one\nline two, æøå ÆØÅ, emoji 🎉\n".repeat(500);
+      const payload = { id: "from-file", description: largeDescription, nested: { count: 12345 } };
+      const filePath = writeTempJsonFile(JSON.stringify(payload));
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: filePath },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      expect(receivedArgs).toEqual(payload);
+      expect(receivedArgs.description.length).toBeGreaterThan(10000);
+    });
+
+    it("strips a leading UTF-8 BOM before parsing (common with Windows editors/Out-File)", async () => {
+      let receivedArgs: any;
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async (args: any) => {
+          receivedArgs = args;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+      const filePath = writeTempJsonFile("﻿" + JSON.stringify({ id: "from-file" }));
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: filePath },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      expect(receivedArgs).toEqual({ id: "from-file" });
+    });
   });
 });
 
