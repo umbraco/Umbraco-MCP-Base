@@ -186,6 +186,7 @@ interface CliArgs {
   "debug-config"?: boolean;
   "call"?: string;
   "call-args"?: string;
+  "call-args-file"?: string;
   env?: string;
 }
 
@@ -278,6 +279,10 @@ async function getCliArgs(allFields: ConfigFieldDefinition[]): Promise<CliArgs> 
           type: "string",
           description: "JSON arguments for --call (default: {})",
         },
+        "call-args-file": {
+          type: "string",
+          description: "Path to a file containing JSON arguments for --call (use instead of --call-args for large/complex payloads)",
+        },
       };
 
       for (const field of fields) {
@@ -323,6 +328,7 @@ export interface GetServerConfigResult {
     debugConfig: boolean;
     callTool?: string;
     callToolArgs?: string;
+    callToolArgsFile?: string;
   };
 }
 
@@ -457,6 +463,7 @@ export async function getServerConfig(
       debugConfig: !!(argv["debug-config"]),
       callTool: argv["call"],
       callToolArgs: argv["call-args"],
+      callToolArgsFile: argv["call-args-file"],
     },
   };
 }

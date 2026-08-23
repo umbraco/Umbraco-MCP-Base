@@ -25,6 +25,7 @@
  * ```
  */
 
+import { readFileSync } from "fs";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -173,7 +174,25 @@ export async function handleCliCommands(
 
         // Parse arguments
         let args: Record<string, unknown> = {};
-        if (cliFlags.callToolArgs) {
+        if (cliFlags.callToolArgs && cliFlags.callToolArgsFile) {
+          console.error("Cannot use --call-args and --call-args-file together. Choose one.");
+          process.exit(1);
+        } else if (cliFlags.callToolArgsFile) {
+          let fileContents: string;
+          try {
+            fileContents = readFileSync(cliFlags.callToolArgsFile, "utf-8");
+          } catch (error: any) {
+            console.error(`Could not read --call-args-file '${cliFlags.callToolArgsFile}': ${error.message}`);
+            process.exit(1);
+            return; // unreachable but satisfies TS
+          }
+          try {
+            args = JSON.parse(fileContents);
+          } catch {
+            console.error(`Invalid JSON for --call-args-file: ${cliFlags.callToolArgsFile}`);
+            process.exit(1);
+          }
+        } else if (cliFlags.callToolArgs) {
           try {
             args = JSON.parse(cliFlags.callToolArgs);
           } catch {

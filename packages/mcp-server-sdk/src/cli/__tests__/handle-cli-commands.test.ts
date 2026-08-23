@@ -1,4 +1,7 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+import { writeFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { ToolCollectionExport } from "../../types/tool-collection.js";
 import type { ToolDefinition } from "../../types/tool-definition.js";
 import type { CollectionConfiguration } from "../../types/collection-configuration.js";
@@ -412,6 +415,101 @@ describe("handleCliCommands", () => {
       ).rejects.toThrow("process.exit(0)");
 
       expect(receivedArgs).toEqual({});
+    });
+  });
+
+  describe("--call-args-file", () => {
+    const writtenFiles: string[] = [];
+
+    function writeTempJsonFile(contents: string): string {
+      const filePath = join(tmpdir(), `call-args-file-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+      writeFileSync(filePath, contents, "utf-8");
+      writtenFiles.push(filePath);
+      return filePath;
+    }
+
+    afterEach(() => {
+      while (writtenFiles.length > 0) {
+        const filePath = writtenFiles.pop();
+        if (filePath) {
+          try {
+            unlinkSync(filePath);
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+      }
+    });
+
+    it("reads args from a file", async () => {
+      let receivedArgs: any;
+      const callableTool = makeTool({
+        name: "get-item",
+        handler: async (args: any) => {
+          receivedArgs = args;
+          return { content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, name: "Test" }) }] };
+        },
+      });
+      const cols = [makeCollection("items", [callableTool])];
+      const filePath = writeTempJsonFile(JSON.stringify({ id: "from-file" }));
+
+      await expect(
+        handleCliCommands(cols, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: filePath },
+        }),
+      ).rejects.toThrow("process.exit(0)");
+
+      expect(exitCode).toBe(0);
+      expect(receivedArgs).toEqual({ id: "from-file" });
+    });
+
+    it("exits 1 when both --call-args and --call-args-file are given", async () => {
+      const filePath = writeTempJsonFile(JSON.stringify({ id: "from-file" }));
+
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: {
+            listTools: false,
+            generateContext: false,
+            debugConfig: false,
+            callTool: "get-item",
+            callToolArgs: '{"id":"abc"}',
+            callToolArgsFile: filePath,
+          },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("--call-args");
+      expect(consoleErrorOutput).toContain("--call-args-file");
+    });
+
+    it("exits 1 when the file does not exist", async () => {
+      const missingPath = join(tmpdir(), `call-args-file-test-missing-${Date.now()}.json`);
+
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: missingPath },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("--call-args-file");
+      expect(consoleErrorOutput).toContain(missingPath);
+    });
+
+    it("exits 1 when the file contains invalid JSON", async () => {
+      const filePath = writeTempJsonFile("not-json");
+
+      await expect(
+        handleCliCommands(collections, {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: "get-item", callToolArgsFile: filePath },
+        }),
+      ).rejects.toThrow("process.exit(1)");
+
+      expect(exitCode).toBe(1);
+      expect(consoleErrorOutput).toContain("Invalid JSON");
+      expect(consoleErrorOutput).toContain("--call-args-file");
     });
   });
 });
