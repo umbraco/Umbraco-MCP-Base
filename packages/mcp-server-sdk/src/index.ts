@@ -239,10 +239,13 @@ export {
   parseProxiedToolName,
   createProxyHandler,
   proxiedToolsToDefinitions,
+  jsonSchemaToZod,
+  jsonSchemaObjectToZodObject,
   type McpServerConfig,
   type McpClientOptions,
   type FilterConfig,
   type ProxiedTool,
+  type JsonSchema,
 } from "./mcp-client/index.js";
 
 // ============================================================================

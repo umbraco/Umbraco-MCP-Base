@@ -15,7 +15,7 @@ import { test, expect } from "@playwright/test";
 import { startWorker, stopWorker } from "./helpers/worker-setup.js";
 import {
   startInspector, connectInspector, handleOAuthFlow,
-  getToolNames, callTool, type InspectorHandle,
+  getToolNames, callTool, callToolWithArgs, type InspectorHandle,
 } from "@umbraco-cms/mcp-hosted/testing";
 
 // ============================================================================
@@ -291,6 +291,30 @@ test.describe("Chained MCP Inspector E2E", () => {
     const result = await callTool(page, "demo--list-notifications", "Welcome");
     expect(result).toContain("Welcome");
     expect(result).toContain("Update Available");
+  });
+
+  test("call demo--get-notification passes its required argument through", async ({ page }) => {
+    // Regression test: proxied tools used to be registered with an empty
+    // input schema (z.object({}).passthrough()), so the Inspector had no
+    // property to render a field for and "id" was never sent — the tool
+    // silently ran with no arguments instead of failing loudly.
+    test.setTimeout(120000);
+
+    const oauthPage = await connectInspector(page, workerUrl, inspector.url);
+    await handleOAuthFlow(page, oauthPage, {
+      checkModes: ["demo:alerts"],
+    });
+
+    const tools = await getToolNames(page, ALL_TOOLS);
+    expect(tools).toContain("demo--get-notification");
+
+    const result = await callToolWithArgs(
+      page,
+      "demo--get-notification",
+      { id: "notif-e2e-123" },
+      "notif-e2e-123",
+    );
+    expect(result).toContain("notif-e2e-123");
   });
 
   test("call demo--get-server-version returns real Umbraco version via fetch", async ({ page }) => {
