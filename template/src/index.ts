@@ -27,6 +27,7 @@ import {
   UmbracoManagementClient,
   CAPTURE_RAW_HTTP_RESPONSE,
   SERVER_INFORMATION_PATH,
+  useDraft202012ToolSchemas,
   type CollectionConfiguration,
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -253,6 +254,12 @@ async function main() {
       // Continue without proxied tools - local tools still work
     }
   }
+
+  // Called once, after every registerTool call above (main collections at
+  // module load, chained tools just above) has completed — McpServer only
+  // advertises the "tools" capability required to override ListTools at
+  // all once at least one tool has actually been registered.
+  useDraft202012ToolSchemas(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

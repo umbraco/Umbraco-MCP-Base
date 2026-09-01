@@ -15,6 +15,7 @@ import {
   discoverProxiedTools,
   createProxyHandler,
   expandModesToCollections,
+  useDraft202012ToolSchemas,
 } from "@umbraco-cms/mcp-server-sdk";
 
 import type { HostedMcpEnv } from "../types/env.js";
@@ -165,6 +166,13 @@ export async function registerChainedTools(
         handler as any,
       );
     }
+
+    // Belt-and-suspenders alongside the call in createPerRequestServer:
+    // covers the case where main-collection filtering left zero tools
+    // registered (so that call was a no-op — the "tools" capability
+    // didn't exist yet), but chained tools registered here bring the
+    // total above zero. Safe to call more than once on the same server.
+    useDraft202012ToolSchemas(server);
 
     return proxiedTools.length;
   } catch (error) {
