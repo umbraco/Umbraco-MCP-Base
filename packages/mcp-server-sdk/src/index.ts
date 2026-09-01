@@ -239,7 +239,6 @@ export {
   parseProxiedToolName,
   createProxyHandler,
   proxiedToolsToDefinitions,
-  jsonSchemaToZod,
   jsonSchemaObjectToZodObject,
   type McpServerConfig,
   type McpClientOptions,

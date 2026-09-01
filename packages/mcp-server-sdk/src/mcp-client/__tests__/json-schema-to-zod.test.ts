@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { jsonSchemaToZod, jsonSchemaObjectToZodObject } from "../json-schema-to-zod.js";
+import { jsonSchemaObjectToZodObject } from "../json-schema-to-zod.js";
 
 describe("jsonSchemaObjectToZodObject", () => {
   it("converts a flat object schema with required and optional string properties", () => {
@@ -31,9 +31,7 @@ describe("jsonSchemaObjectToZodObject", () => {
     };
 
     const zodSchema = jsonSchemaObjectToZodObject(schema);
-    const shape = zodSchema.shape;
-
-    expect(Object.keys(shape)).toEqual(["id"]);
+    expect(Object.keys((zodSchema as { shape: Record<string, unknown> }).shape)).toEqual(["id"]);
     expect(() => zodSchema.parse({})).toThrow();
   });
 
@@ -44,6 +42,8 @@ describe("jsonSchemaObjectToZodObject", () => {
   });
 
   it("falls back to an empty object schema for undefined input", () => {
+    // z.fromJSONSchema() throws on undefined — this is the one case our
+    // wrapper has to handle itself rather than delegate.
     const zodSchema = jsonSchemaObjectToZodObject(undefined);
     expect(zodSchema.parse({})).toEqual({});
   });
@@ -80,48 +80,16 @@ describe("jsonSchemaObjectToZodObject", () => {
       author: { name: "Jane" },
     });
   });
-});
 
-describe("jsonSchemaToZod", () => {
-  it.each([
-    ["string", { type: "string" }, "hello"],
-    ["number", { type: "number" }, 3.14],
-    ["integer", { type: "integer" }, 42],
-    ["boolean", { type: "boolean" }, true],
-  ])("converts a %s schema", (_label, schema, value) => {
-    expect(jsonSchemaToZod(schema).parse(value)).toBe(value);
-  });
+  it("converts an enum property", () => {
+    const schema = {
+      type: "object",
+      properties: { status: { enum: ["open", "closed"] } },
+      required: ["status"],
+    };
 
-  it("converts an enum into a literal union", () => {
-    const zodSchema = jsonSchemaToZod({ enum: ["a", "b", "c"] });
-    expect(zodSchema.parse("b")).toBe("b");
-    expect(() => zodSchema.parse("d")).toThrow();
-  });
-
-  it("converts a single-value enum into a literal", () => {
-    const zodSchema = jsonSchemaToZod({ enum: ["only"] });
-    expect(zodSchema.parse("only")).toBe("only");
-    expect(() => zodSchema.parse("other")).toThrow();
-  });
-
-  it("converts oneOf into a union", () => {
-    const zodSchema = jsonSchemaToZod({ oneOf: [{ type: "string" }, { type: "number" }] });
-    expect(zodSchema.parse("x")).toBe("x");
-    expect(zodSchema.parse(1)).toBe(1);
-  });
-
-  it("converts a nullable type array", () => {
-    const zodSchema = jsonSchemaToZod({ type: ["string", "null"] });
-    expect(zodSchema.parse("x")).toBe("x");
-    expect(zodSchema.parse(null)).toBeNull();
-  });
-
-  it("falls back to unknown for unrecognized schemas", () => {
-    const zodSchema = jsonSchemaToZod({ not: { type: "string" } });
-    expect(zodSchema.parse({ anything: 1 })).toEqual({ anything: 1 });
-  });
-
-  it("falls back to unknown for non-object input", () => {
-    expect(jsonSchemaToZod(null).parse("anything")).toBe("anything");
+    const zodSchema = jsonSchemaObjectToZodObject(schema);
+    expect(zodSchema.parse({ status: "open" })).toEqual({ status: "open" });
+    expect(() => zodSchema.parse({ status: "archived" })).toThrow();
   });
 });
