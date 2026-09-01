@@ -31,7 +31,7 @@ describe("jsonSchemaObjectToZodObject", () => {
     };
 
     const zodSchema = jsonSchemaObjectToZodObject(schema);
-    expect(Object.keys((zodSchema as { shape: Record<string, unknown> }).shape)).toEqual(["id"]);
+    expect(Object.keys((zodSchema as unknown as { shape: Record<string, unknown> }).shape)).toEqual(["id"]);
     expect(() => zodSchema.parse({})).toThrow();
   });
 
