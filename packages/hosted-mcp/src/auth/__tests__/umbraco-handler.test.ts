@@ -1315,7 +1315,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
 
   const siteRouting = {
     pathPrefix: "/at/:siteId",
-    resolveSite: jest.fn<(siteId: string) => SiteConfig | null>(),
+    resolveSite: jest.fn<(siteId: string, env: HostedMcpEnv) => SiteConfig | null>(),
   };
 
   beforeEach(() => {

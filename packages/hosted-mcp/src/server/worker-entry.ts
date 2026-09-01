@@ -105,6 +105,17 @@ export interface HostedMcpServerOptions {
   chainedServers?: ChainedServerConsentConfig[];
   /** Umbraco major this server's tools target (see CreateServerOptions.expectedUmbracoMajor) */
   expectedUmbracoMajor?: string;
+  /**
+   * Opt into OpenTelemetry tracing for tool calls — see
+   * `CreateServerOptions.telemetry`. Pass the `tracing` object from
+   * `cloudflare:workers`, which only the consumer can import.
+   *
+   * ```ts
+   * import { tracing } from "cloudflare:workers";
+   * const options: HostedMcpServerOptions = { name, version, collections, telemetry: { tracing } };
+   * ```
+   */
+  telemetry?: CreateServerOptions["telemetry"];
 }
 
 /**
@@ -112,6 +123,14 @@ export interface HostedMcpServerOptions {
  * Used internally to pass to createPerRequestServer.
  *
  * Throws when mutually-exclusive site configurations are combined.
+ *
+ * **This is an explicit whitelist, not a spread.** Every field a consumer can
+ * set has to be copied across by name, so a new option added to
+ * `CreateServerOptions` is silently dropped here until it is added below. That
+ * is how `telemetry` shipped inert in 1.0.0-beta.36 — the template set it on
+ * `options`, this function discarded it, and nothing failed: the object still
+ * type-checked and no test covered the path. If you add an option, add it here
+ * and assert it in `worker-entry.test.ts`.
  */
 export function getServerOptions(
   options: HostedMcpServerOptions
@@ -134,6 +153,7 @@ export function getServerOptions(
     resolveSite: options.siteRouting?.resolveSite ?? options.resolveSite,
     instructions: options.instructions,
     expectedUmbracoMajor: options.expectedUmbracoMajor,
+    telemetry: options.telemetry,
   };
 }
 

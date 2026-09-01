@@ -64,3 +64,40 @@ export async function callTool(
 
   return (await page.locator("body").textContent()) ?? "";
 }
+
+/**
+ * Click a tool in the list, fill in its declared parameter fields, run it,
+ * and return the result text.
+ *
+ * Fails fast if a param isn't rendered as an input field — the Inspector
+ * only renders a field per property declared in the tool's advertised
+ * inputSchema, so a schema with no declared properties (e.g. a proxied
+ * tool that lost its real schema) leaves nothing to fill in.
+ *
+ * @param page - The Inspector page
+ * @param toolName - Name of the tool to click
+ * @param args - Parameter name -> value to type into each field
+ * @param resultMarker - Text to wait for in the result
+ */
+export async function callToolWithArgs(
+  page: Page,
+  toolName: string,
+  args: Record<string, string>,
+  resultMarker: string,
+): Promise<string> {
+  await page.getByText(toolName, { exact: true }).first().click();
+
+  for (const [paramName, value] of Object.entries(args)) {
+    const field = page.locator(`[name="${paramName}"]`);
+    await field.waitFor({ state: "visible", timeout: 5000 });
+    await field.fill(value);
+  }
+
+  const runButton = page.getByRole("button", { name: /Run|Execute/i });
+  await runButton.waitFor({ timeout: 5000 });
+  await runButton.click();
+
+  await page.getByText(resultMarker).first().waitFor({ state: "visible", timeout: 10000 });
+
+  return (await page.locator("body").textContent()) ?? "";
+}

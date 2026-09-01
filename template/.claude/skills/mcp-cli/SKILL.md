@@ -19,6 +19,9 @@ node dist/index.js --describe-tool <tool-name>
 # Call a tool directly (requires auth via .env)
 node dist/index.js --call <tool-name> --call-args '{"key":"value"}'
 
+# Call a tool with a large/complex payload from a file (avoids shell/argv size limits)
+node dist/index.js --call <tool-name> --call-args-file ./payload.json
+
 # Generate context documentation
 node dist/index.js --generate-context > CONTEXT.md
 
@@ -116,6 +119,7 @@ These print output and exit immediately — they do not start the MCP server.
 | `--debug-config` | Print resolved config (secrets masked) |
 | `--call <name>` | Call a tool directly, print JSON result |
 | `--call-args <json>` | JSON arguments for `--call` (default: `{}`) |
+| `--call-args-file <path>` | Path to a file with JSON arguments for `--call` — use instead of `--call-args` for large/complex payloads (no shell size limits, safe for multiline JSON and non-ASCII). Cannot be combined with `--call-args`. |
 
 Introspection respects all filtering. `--list-tools` with `UMBRACO_READONLY=true` shows exactly what the LLM would see.
 

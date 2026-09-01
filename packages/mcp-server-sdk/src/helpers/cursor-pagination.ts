@@ -30,6 +30,114 @@ interface CursorState {
 const DEFAULT_PAGE_SIZE = 50;
 
 // ============================================================================
+// Missing-`total` Warnings
+// ============================================================================
+//
+// `computeNextCursor` needs a numeric `total` to know whether another page
+// exists. When a tool's response has `items` but no `total` (e.g. because
+// `pickFields`/`omitFields` trimmed it out at runtime, or a non-CMS API never
+// had one), pagination silently stops working — no error, no nextCursor,
+// nothing an LLM client can act on. These warnings turn that into something
+// visible:
+//
+// - The registration-time check only catches a genuinely misdeclared
+//   `outputSchema` — e.g. a hand-shaped schema that never included `total`,
+//   or one narrowed to match output that's already trimmed elsewhere. It
+//   never sees `pickFields`/`omitFields`, which run at call time inside
+//   `executeGetApiCall` and never touch `tool.outputSchema`.
+// - The call-time check is what actually catches the trimming case: it
+//   inspects the live response, so a schema that correctly declares `total`
+//   but has it stripped by `pickFields`/`omitFields` at runtime is caught here.
+//
+// Both are deduped per tool name so a hot tool doesn't spam the log on every
+// request.
+
+/** Tool names already warned about a missing `total` in their outputSchema. */
+const registrationWarned = new Set<string>();
+/** Tool names already warned about a missing `total` in a live response. */
+const callWarned = new Set<string>();
+
+/**
+ * Unwraps optional/nullable/default wrappers to find the innermost Zod type,
+ * then checks whether it matches the given zod v4 `_def.type` discriminator.
+ */
+function isZodTypeOf(schema: unknown, typeName: string): boolean {
+  let def = (schema as any)?._def;
+  while (def) {
+    if (def.type === typeName) return true;
+    if (!def.innerType) return false;
+    def = (def.innerType as any)?._def;
+  }
+  return false;
+}
+
+/** Extracts the raw field shape from an outputSchema, whether it's a ZodObject or a plain ZodRawShape. */
+function extractOutputShape(
+  outputSchema: ZodRawShape | ZodType | undefined
+): ZodRawShape | undefined {
+  if (!outputSchema || typeof outputSchema !== "object") return undefined;
+  if ("_def" in outputSchema) {
+    const zodObj = outputSchema as z.ZodObject<any>;
+    return typeof zodObj.shape === "object" ? zodObj.shape : undefined;
+  }
+  return outputSchema as ZodRawShape;
+}
+
+/**
+ * Warns once per tool name when a paginated tool's outputSchema declares an
+ * `items` array but no numeric `total` — i.e. the schema itself is genuinely
+ * misdeclared (hand-shaped and never included `total`, or narrowed to match
+ * output that's already trimmed elsewhere). This does NOT catch
+ * `pickFields`/`omitFields` trimming — that happens at runtime and never
+ * touches `tool.outputSchema`; it's caught by `warnIfResponseMissingTotal`
+ * (the call-time check) instead.
+ *
+ * Wrapped in try/catch because this walks undocumented zod internals
+ * (`_def.type`, `_def.innerType`, `.shape`) that could shift under a minor
+ * zod bump — a diagnostic-only check must never be able to crash tool
+ * registration.
+ */
+function warnIfOutputSchemaMissingTotal(
+  toolName: string,
+  outputSchema: ZodRawShape | ZodType | undefined
+): void {
+  try {
+    const shape = extractOutputShape(outputSchema);
+    if (!shape) return;
+
+    const hasItemsArray = isZodTypeOf(shape.items, "array");
+    const hasTotalNumber = isZodTypeOf(shape.total, "number");
+
+    if (hasItemsArray && !hasTotalNumber) {
+      if (registrationWarned.has(toolName)) return;
+      registrationWarned.add(toolName);
+      console.error(
+        `[cursor-pagination] Tool "${toolName}" declares an "items" array in its outputSchema but no numeric "total" field. ` +
+          `Cursor pagination relies on "total" to compute nextCursor — without it, this tool will never advertise a next page.`
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[cursor-pagination] introspection failed for tool "${toolName}": ${err}`
+    );
+  }
+}
+
+/**
+ * Warns once per tool name when a paginated tool's live response has `items`
+ * but no numeric `total` on structuredContent — pagination is silently
+ * disabled for this call (no nextCursor is produced).
+ */
+function warnIfResponseMissingTotal(toolName: string): void {
+  if (callWarned.has(toolName)) return;
+  callWarned.add(toolName);
+  console.error(
+    `[cursor-pagination] Tool "${toolName}" returned "items" without a numeric "total" in structuredContent. ` +
+      `Pagination is silently disabled for this tool — no nextCursor will be produced, even though its outputSchema advertises one.`
+  );
+}
+
+// ============================================================================
 // Cursor Encoding/Decoding
 // ============================================================================
 
@@ -165,6 +273,12 @@ export function withCursorPagination<
     return tool as ToolDefinition<CursorPaginatedArgs<Args>, OutputArgs>;
   }
 
+  // Registration-time check: catches a genuinely misdeclared outputSchema
+  // (never had `total`, or narrowed to already-trimmed output) before any
+  // request is ever made. Response trimming itself (pickFields/omitFields)
+  // is a runtime concern caught by the call-time check further down.
+  warnIfOutputSchemaMissingTotal(tool.name, tool.outputSchema);
+
   const defaultPageSize = options?.defaultPageSize ?? DEFAULT_PAGE_SIZE;
 
   // Read the tool's explicit pageSize or extract from zod schema or fall back to default
@@ -249,17 +363,23 @@ export function withCursorPagination<
         const sc = result.structuredContent as Record<string, unknown>;
         const total = sc.total;
         const items = sc.items;
-        if (typeof total === "number" && Array.isArray(items)) {
-          const nextCursor = computeNextCursor(
-            skipVal,
-            takeVal,
-            total,
-            items.length
-          );
-          result.structuredContent = {
-            ...sc,
-            nextCursor: nextCursor ?? undefined,
-          };
+        if (Array.isArray(items)) {
+          if (typeof total === "number") {
+            const nextCursor = computeNextCursor(
+              skipVal,
+              takeVal,
+              total,
+              items.length
+            );
+            result.structuredContent = {
+              ...sc,
+              nextCursor: nextCursor ?? undefined,
+            };
+          } else {
+            // No numeric `total` to compute a next page from — warn instead of
+            // silently leaving nextCursor unset.
+            warnIfResponseMissingTotal(tool.name);
+          }
         }
       }
 

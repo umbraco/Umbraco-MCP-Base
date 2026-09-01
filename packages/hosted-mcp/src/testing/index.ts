@@ -16,4 +16,5 @@ export {
 export {
   getToolNames,
   callTool,
+  callToolWithArgs,
 } from "./tools.js";

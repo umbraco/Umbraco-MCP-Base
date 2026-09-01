@@ -9,12 +9,13 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import {
   createMcpClientManager,
   discoverProxiedTools,
   createProxyHandler,
   expandModesToCollections,
+  useDraft202012ToolSchemas,
+  jsonSchemaObjectToZodObject,
 } from "@umbraco-cms/mcp-server-sdk";
 
 import type { HostedMcpEnv } from "../types/env.js";
@@ -55,7 +56,9 @@ export interface RegisterChainedToolsOptions {
  * 3. Expand consent mode selections to collections
  * 4. Handle `["__none__"]` sentinel when no chained modes selected
  * 5. Create `McpClientManager` and register in-process server
- * 6. Discover and register each proxied tool with `z.object({}).passthrough()`
+ * 6. Discover and register each proxied tool, converting its real JSON
+ *    Schema parameters into a Zod schema so the calling client knows what
+ *    arguments it can send
  *
  * Wrapped in try/catch — logs errors but doesn't crash the main server.
  *
@@ -156,7 +159,7 @@ export async function registerChainedTools(
         pt.prefixedName,
         {
           description: `[Proxied from ${pt.serverName}] ${pt.originalTool.description || "No description"}`,
-          inputSchema: z.object({}).passthrough(),
+          inputSchema: jsonSchemaObjectToZodObject(pt.originalTool.inputSchema),
           // Note: outputSchema from chained tools is raw JSON Schema (not Zod),
           // which registerTool doesn't accept. Structured content passthrough
           // requires the MCP SDK to support raw JSON Schema for outputSchema,
@@ -165,6 +168,13 @@ export async function registerChainedTools(
         handler as any,
       );
     }
+
+    // Belt-and-suspenders alongside the call in createPerRequestServer:
+    // covers the case where main-collection filtering left zero tools
+    // registered (so that call was a no-op — the "tools" capability
+    // didn't exist yet), but chained tools registered here bring the
+    // total above zero. Safe to call more than once on the same server.
+    useDraft202012ToolSchemas(server);
 
     return proxiedTools.length;
   } catch (error) {

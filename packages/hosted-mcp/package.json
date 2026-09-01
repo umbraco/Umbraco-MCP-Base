@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-hosted",
-  "version": "1.0.0-beta.36",
+  "version": "1.0.0-beta.37",
   "description": "Hosted MCP server infrastructure for Umbraco on Cloudflare Workers",
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsup && node -e \"const fs=require('fs');fs.copyFileSync('agents-mcp.d.ts','dist/agents-mcp.d.ts');const d=fs.readFileSync('dist/index.d.ts','utf8');fs.writeFileSync('dist/index.d.ts','/// <reference path=\\\"agents-mcp.d.ts\\\" />\\n'+d)\"",
-    "compile": "tsc --noEmit",
+    "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.testing.json",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:integration": "npm run test:integration --prefix ../..",
@@ -46,6 +46,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260625.1",
     "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.2",
     "jest": "^30.4.2",
     "jest-junit": "^17.0.0",
     "ts-jest": "^29.4.11",

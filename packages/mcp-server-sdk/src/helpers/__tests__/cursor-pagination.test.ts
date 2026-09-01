@@ -2,7 +2,7 @@
  * Cursor Pagination Tests
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { z } from "zod";
 import {
   encodeCursor,
@@ -339,6 +339,204 @@ describe("withCursorPagination", () => {
       expect(result.description).toBe("A test tool");
       expect(result.slices).toEqual(["list"]);
       expect(result.annotations).toEqual({ readOnlyHint: true, openWorldHint: true });
+    });
+  });
+
+  // ============================================================================
+  // Missing `total` warnings (issue #278)
+  // ============================================================================
+  describe("missing total warnings", () => {
+    let errorSpy: ReturnType<typeof jest.spyOn>;
+
+    beforeEach(() => {
+      errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    it("warns at registration time when outputSchema has items but no total (raw shape)", () => {
+      const tool = createMockTool({
+        name: "reg-warn-raw-shape-tool",
+        outputSchema: {
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(
+        expect.stringContaining("reg-warn-raw-shape-tool")
+      );
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining("total"));
+    });
+
+    it("warns at registration time when outputSchema has items but no total (ZodObject)", () => {
+      const tool = createMockTool({
+        name: "reg-warn-zodobject-tool",
+        outputSchema: z.object({
+          items: z.array(z.object({ id: z.string() })),
+        }),
+      });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(
+        expect.stringContaining("reg-warn-zodobject-tool")
+      );
+    });
+
+    it("does not warn at registration time when total is present", () => {
+      const tool = createMockTool({ name: "reg-ok-tool" });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when there is no items field", () => {
+      const tool = createMockTool({
+        name: "reg-no-items-tool",
+        outputSchema: { total: z.number() },
+      });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when total is a wrapped z.int() (orval-style)", () => {
+      const tool = createMockTool({
+        name: "reg-ok-int-tool",
+        outputSchema: {
+          total: z.int().describe("Total number of items"),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+
+      withCursorPagination(tool);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when total is optional/nullish-wrapped", () => {
+      const optionalTool = createMockTool({
+        name: "reg-ok-optional-tool",
+        outputSchema: {
+          total: z.number().optional(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+      withCursorPagination(optionalTool);
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      const nullishTool = createMockTool({
+        name: "reg-ok-nullish-tool",
+        outputSchema: {
+          total: z.number().nullish(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+      });
+      withCursorPagination(nullishTool);
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not warn at registration time when outputSchema is correct but the live response is later trimmed (registration/call-time decoupling)", async () => {
+      const tool = createMockTool({
+        name: "reg-ok-call-warn-tool",
+        outputSchema: {
+          total: z.number(),
+          items: z.array(z.object({ id: z.string() })),
+        },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ items: [{ id: "1" }] }) }],
+          structuredContent: { items: [{ id: "1" }] },
+        }),
+      });
+
+      const result = withCursorPagination(tool);
+      // Registration should NOT warn — the outputSchema correctly declares `total`.
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      const response = await result.handler({}, {} as any);
+
+      // But the live response (e.g. trimmed by pickFields/omitFields) is
+      // missing `total` — this must warn at call time and omit nextCursor.
+      expect(response.structuredContent?.nextCursor).toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(
+        expect.stringContaining("reg-ok-call-warn-tool")
+      );
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining("total"));
+    });
+
+    it("warns at call time when the response has items but no total, and omits nextCursor", async () => {
+      const tool = createMockTool({
+        name: "call-warn-tool",
+        outputSchema: { items: z.array(z.object({ id: z.string() })) },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ items: [{ id: "1" }] }) }],
+          structuredContent: { items: [{ id: "1" }] },
+        }),
+      });
+
+      const result = withCursorPagination(tool);
+      // Clear the registration-time warning so we isolate the call-time one.
+      errorSpy.mockClear();
+
+      const response = await result.handler({}, {} as any);
+
+      expect(response.structuredContent?.nextCursor).toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining("call-warn-tool"));
+      expect(errorSpy.mock.calls[0]?.[0]).toEqual(expect.stringContaining("total"));
+    });
+
+    it("does not warn at call time when total is present and correct behavior is unaffected", async () => {
+      const tool = createMockTool({ name: "call-ok-tool" });
+      const result = withCursorPagination(tool);
+      errorSpy.mockClear();
+
+      const response = await result.handler({}, {} as any);
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(response.structuredContent?.nextCursor).toBeDefined();
+    });
+
+    it("only warns once per tool name across repeated calls (call-time dedup)", async () => {
+      const tool = createMockTool({
+        name: "call-dedup-tool",
+        outputSchema: { items: z.array(z.object({ id: z.string() })) },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: JSON.stringify({ items: [] }) }],
+          structuredContent: { items: [] },
+        }),
+      });
+
+      const result = withCursorPagination(tool);
+      errorSpy.mockClear();
+
+      await result.handler({}, {} as any);
+      await result.handler({}, {} as any);
+      await result.handler({}, {} as any);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("only warns once per tool name across repeated registrations (registration-time dedup)", () => {
+      const tool = createMockTool({
+        name: "reg-dedup-tool",
+        outputSchema: { items: z.array(z.object({ id: z.string() })) },
+      });
+
+      withCursorPagination(tool);
+      withCursorPagination(tool);
+      withCursorPagination(tool);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
