@@ -91,6 +91,10 @@ export {
   clearServerRef,
 } from "./helpers/server-ref.js";
 
+// Strict JSON Schema (draft 2020-12) tool schemas — works around an
+// upstream @modelcontextprotocol/sdk bug that always advertises draft-7
+export { useDraft202012ToolSchemas } from "./helpers/strict-json-schema-tools.js";
+
 // Elicitation Helpers
 export {
   confirmAction,

@@ -29,6 +29,7 @@ import {
   getTelemetryAdapter,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
+  useDraft202012ToolSchemas,
   type TelemetrySpan,
   type ToolCollectionExport,
   type ToolModeDefinition,
@@ -396,6 +397,7 @@ async function initPerRequestServer(
         instructions: baseInstructions,
       },
     );
+    useDraft202012ToolSchemas(server);
     server.registerTool(
       "authentication-expired",
       {
@@ -486,6 +488,7 @@ async function initPerRequestServer(
       instructions,
     },
   );
+  useDraft202012ToolSchemas(server);
 
   // Set the fetch client as the transport for UmbracoManagementClient.
   // This routes the Orval-generated API client (with named methods like

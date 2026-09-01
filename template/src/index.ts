@@ -27,6 +27,7 @@ import {
   UmbracoManagementClient,
   CAPTURE_RAW_HTTP_RESPONSE,
   SERVER_INFORMATION_PATH,
+  useDraft202012ToolSchemas,
   type CollectionConfiguration,
   type HttpResponse,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -179,6 +180,7 @@ const server = new McpServer(
   { name: "my-umbraco-mcp", version: packageJson.version },
   versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
 );
+useDraft202012ToolSchemas(server);
 
 // ============================================================================
 // Register Tools with Filtering
