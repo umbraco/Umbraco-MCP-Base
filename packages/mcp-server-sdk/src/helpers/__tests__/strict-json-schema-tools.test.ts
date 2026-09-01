@@ -26,6 +26,8 @@ async function listToolsOverTheWire(configure: (server: McpServer) => void) {
   }
 }
 
+const noopHandler = async () => ({ content: [{ type: "text" as const, text: "ok" }] });
+
 describe("useDraft202012ToolSchemas", () => {
   it("documents the upstream bug: an unpatched McpServer emits draft-7", async () => {
     // @modelcontextprotocol/sdk's ListTools handler never passes a
@@ -36,7 +38,7 @@ describe("useDraft202012ToolSchemas", () => {
       server.registerTool(
         "get-notification",
         { description: "Get a notification by ID", inputSchema: { id: z.string() } },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        noopHandler,
       );
     });
 
@@ -46,7 +48,6 @@ describe("useDraft202012ToolSchemas", () => {
 
   it("advertises draft-2020-12 instead of the SDK's draft-7 default", async () => {
     const result = await listToolsOverTheWire((server) => {
-      useDraft202012ToolSchemas(server);
       server.registerTool(
         "get-notification",
         {
@@ -54,8 +55,12 @@ describe("useDraft202012ToolSchemas", () => {
           inputSchema: { id: z.string().describe("Notification ID") },
           outputSchema: { title: z.string() },
         },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        noopHandler,
       );
+      // Called after registration — McpServer only advertises the
+      // "tools" capability (required to override ListTools at all)
+      // once a tool has actually been registered.
+      useDraft202012ToolSchemas(server);
     });
 
     const tool = result.tools.find((t) => t.name === "get-notification");
@@ -66,15 +71,12 @@ describe("useDraft202012ToolSchemas", () => {
 
   it("preserves the real property shape from a raw ZodRawShape inputSchema", async () => {
     const result = await listToolsOverTheWire((server) => {
-      useDraft202012ToolSchemas(server);
       server.registerTool(
         "get-notification",
-        {
-          description: "Get a notification by ID",
-          inputSchema: { id: z.string() },
-        },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        { description: "Get a notification by ID", inputSchema: { id: z.string() } },
+        noopHandler,
       );
+      useDraft202012ToolSchemas(server);
     });
 
     const tool = result.tools.find((t) => t.name === "get-notification")!;
@@ -86,15 +88,12 @@ describe("useDraft202012ToolSchemas", () => {
     // register-chained-tools.ts passes a full z.ZodObject (not a raw
     // shape) for proxied tools — must be handled without double-wrapping.
     const result = await listToolsOverTheWire((server) => {
-      useDraft202012ToolSchemas(server);
       server.registerTool(
         "demo--get-notification",
-        {
-          description: "Proxied tool",
-          inputSchema: z.object({ id: z.string() }),
-        },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        { description: "Proxied tool", inputSchema: z.object({ id: z.string() }) },
+        noopHandler,
       );
+      useDraft202012ToolSchemas(server);
     });
 
     const tool = result.tools.find((t) => t.name === "demo--get-notification")!;
@@ -103,33 +102,57 @@ describe("useDraft202012ToolSchemas", () => {
 
   it("falls back to an empty object schema for a tool with no inputSchema", async () => {
     const result = await listToolsOverTheWire((server) => {
+      server.registerTool("no-args", { description: "Takes no arguments" }, noopHandler);
       useDraft202012ToolSchemas(server);
-      server.registerTool(
-        "no-args",
-        { description: "Takes no arguments" },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
-      );
     });
 
     const tool = result.tools.find((t) => t.name === "no-args")!;
     expect(tool.inputSchema).toEqual({ type: "object", properties: {} });
   });
 
-  it("keeps every tool registered from multiple registerTool calls in the list", async () => {
+  it("picks up tools registered after useDraft202012ToolSchemas was called", async () => {
+    // Proves the handler reads the live registry rather than a snapshot
+    // taken at patch time — e.g. chained tools registered by a separate,
+    // later call still get draft-2020-12 schemas.
     const result = await listToolsOverTheWire((server) => {
-      useDraft202012ToolSchemas(server);
       server.registerTool(
         "tool-a",
         { description: "A", inputSchema: { a: z.string() } },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        noopHandler,
       );
+      useDraft202012ToolSchemas(server);
       server.registerTool(
         "tool-b",
         { description: "B", inputSchema: { b: z.number() } },
-        async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+        noopHandler,
       );
     });
 
     expect(result.tools.map((t) => t.name).sort()).toEqual(["tool-a", "tool-b"]);
+    const toolB = result.tools.find((t) => t.name === "tool-b")!;
+    expect(toolB.inputSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+  });
+
+  it("omits a tool disabled after registration", async () => {
+    const result = await listToolsOverTheWire((server) => {
+      const registered = server.registerTool(
+        "tool-a",
+        { description: "A", inputSchema: { a: z.string() } },
+        noopHandler,
+      );
+      useDraft202012ToolSchemas(server);
+      registered.disable();
+    });
+
+    expect(result.tools.map((t) => t.name)).toEqual([]);
+  });
+
+  it("is a no-op when no tool was ever registered", () => {
+    // McpServer never advertises the "tools" capability if registerTool
+    // was never called, so there is nothing to override — must not throw,
+    // otherwise a server that ends up with zero tools (e.g. every tool
+    // filtered out by consent) would fail to start entirely.
+    const server = new McpServer({ name: "test-server", version: "1.0.0" });
+    expect(() => useDraft202012ToolSchemas(server)).not.toThrow();
   });
 });

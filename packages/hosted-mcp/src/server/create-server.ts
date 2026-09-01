@@ -397,7 +397,6 @@ async function initPerRequestServer(
         instructions: baseInstructions,
       },
     );
-    useDraft202012ToolSchemas(server);
     server.registerTool(
       "authentication-expired",
       {
@@ -418,6 +417,7 @@ async function initPerRequestServer(
         isError: true,
       })
     );
+    useDraft202012ToolSchemas(server);
     console.log(
       `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired tools=1 elapsedMs=${Date.now() - initStartedAt}`
     );
@@ -488,7 +488,6 @@ async function initPerRequestServer(
       instructions,
     },
   );
-  useDraft202012ToolSchemas(server);
 
   // Set the fetch client as the transport for UmbracoManagementClient.
   // This routes the Orval-generated API client (with named methods like
@@ -524,6 +523,13 @@ async function initPerRequestServer(
 
   // Register tools from all collections (with filtering)
   const registeredCount = registerCollectionTools(server, options.collections, currentUser, filterConfig);
+
+  // Covers the common case (chaining disabled, or a consumer that
+  // registers chained tools after this returns but at least one main
+  // tool already exists here). If filtering leaves zero main tools,
+  // this is a no-op — see registerChainedTools() for the other half of
+  // this guarantee.
+  useDraft202012ToolSchemas(server);
 
   console.log(
     `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${site?.id ?? "<single>"} elapsedMs=${Date.now() - initStartedAt}`

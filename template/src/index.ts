@@ -180,7 +180,6 @@ const server = new McpServer(
   { name: "my-umbraco-mcp", version: packageJson.version },
   versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
 );
-useDraft202012ToolSchemas(server);
 
 // ============================================================================
 // Register Tools with Filtering
@@ -255,6 +254,12 @@ async function main() {
       // Continue without proxied tools - local tools still work
     }
   }
+
+  // Called once, after every registerTool call above (main collections at
+  // module load, chained tools just above) has completed — McpServer only
+  // advertises the "tools" capability required to override ListTools at
+  // all once at least one tool has actually been registered.
+  useDraft202012ToolSchemas(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
