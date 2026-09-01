@@ -71,3 +71,10 @@ export {
   proxiedToolsToDefinitions,
   type ProxiedTool,
 } from "./proxy.js";
+
+// JSON Schema -> Zod conversion (for registering proxied tools with their
+// real parameter shape instead of an empty passthrough schema)
+export {
+  jsonSchemaObjectToZodObject,
+  type JsonSchema,
+} from "./json-schema-to-zod.js";

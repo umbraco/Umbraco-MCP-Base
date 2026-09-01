@@ -1,4 +1,5 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import { z } from "zod";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { AuthProps, ConsentChoices } from "../../types/auth.js";
@@ -22,22 +23,27 @@ jest.unstable_mockModule("../../config/worker-config.js", () => ({
 }));
 
 // Track registered tools on the mock server
-let registeredTools: Array<{ name: string; description: string }> = [];
+let registeredTools: Array<{ name: string; description: string; inputSchema: any }> = [];
 
 function createMockServer() {
   registeredTools = [];
   return {
     registerTool: jest.fn<any>().mockImplementation((name: string, config: any) => {
-      registeredTools.push({ name, description: config.description });
+      registeredTools.push({ name, description: config.description, inputSchema: config.inputSchema });
     }),
   };
 }
 
-function createMockTool(name: string, slices: string[] = ["read"]): ToolDefinition<any, any> {
+function createMockTool(
+  name: string,
+  slices: string[] = ["read"],
+  inputSchema: Record<string, unknown> = {},
+): ToolDefinition<any, any> {
   return {
     name,
     description: `Test tool: ${name}`,
     slices,
+    inputSchema,
     handler: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
   };
 }
@@ -124,6 +130,35 @@ describe("registerChainedTools", () => {
     expect(registeredTools.map((t) => t.name)).toEqual(
       expect.arrayContaining(["demo--get-notification", "demo--get-analytics-summary"]),
     );
+  });
+
+  it("registers a proxied tool with its real parameters, not an empty schema", async () => {
+    // Regression test: proxied tools used to be registered with
+    // z.object({}).passthrough() regardless of their real inputSchema, so
+    // the calling client saw zero declared parameters and never sent
+    // required arguments (see umbraco/Umbraco-MCP-Base chained-tool
+    // schema bug).
+    const toolWithArgs = createMockTool("get-notification", ["read"], {
+      id: z.string().describe("Notification ID"),
+    });
+    const server = createMockServer();
+
+    await registerChainedTools({
+      server: server as any,
+      env: createMockEnv(),
+      props: createMockProps(),
+      chainedServer: {
+        ...chainedServer,
+        collections: [createMockCollection("notification", [toolWithArgs])],
+      },
+      fetchUser: false,
+    });
+
+    const registered = registeredTools.find((t) => t.name === "demo--get-notification");
+    expect(registered).toBeDefined();
+    expect(Object.keys(registered!.inputSchema.shape)).toEqual(["id"]);
+    expect(() => registered!.inputSchema.parse({})).toThrow();
+    expect(registered!.inputSchema.parse({ id: "n-1" })).toEqual({ id: "n-1" });
   });
 
   it("filters by consent mode selections", async () => {
