@@ -42,6 +42,6 @@
   "license": "MIT",
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.22.0",
-    "wrangler": "^4.104.0"
+    "wrangler": "^4.124.0"
   }
 }
