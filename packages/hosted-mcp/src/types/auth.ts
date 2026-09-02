@@ -33,6 +33,14 @@ export interface ConsentChoices {
   readOnly?: boolean;
   /** The site ID for multi-site deployments */
   siteId?: string;
+  /**
+   * Path segment for the `/callback/<id>` redirect_uri, when it differs from
+   * `siteId` (see `SiteConfig.callbackId`). Carried separately so the token
+   * exchange step can reconstruct the exact redirect_uri sent during
+   * authorize, while `siteId` itself stays intact for re-resolving the site
+   * on subsequent requests.
+   */
+  callbackId?: string;
   /** Selected modes for chained servers, keyed by server name */
   chainedModeSelections?: Record<string, string[]>;
   /** Selected collections for chained servers, keyed by server name */
