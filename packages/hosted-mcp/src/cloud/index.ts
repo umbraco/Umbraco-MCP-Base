@@ -157,14 +157,13 @@ export function umbracoCloudSiteRouting(
     const validator = options.validateProject ?? defaultValidateProject;
 
     // `<alias>.<region>` embedded in siteId (Cloud's own hostname shape) is
-    // authoritative — validate that one URL directly, no region guessing.
-    // A bare alias falls back to the single default region.
-    const region = hasEmbeddedRegion(siteId)
-      ? undefined
-      : (options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION);
-    const candidateUrl = region
-      ? `https://${siteId}.${region}.umbraco.io`
-      : `https://${siteId}.umbraco.io`;
+    // authoritative — the host below already ends up region-qualified
+    // (e.g. siteId "abc.uksouth01" -> "abc.uksouth01.umbraco.io"), so no
+    // region needs appending and no guessing happens. A bare alias (no
+    // embedded region) gets the single default region appended instead.
+    const candidateUrl = hasEmbeddedRegion(siteId)
+      ? `https://${siteId}.umbraco.io`
+      : `https://${siteId}.${options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION}.umbraco.io`;
 
     const baseUrl = (await validator(siteId, candidateUrl, env))
       ? candidateUrl
