@@ -17,6 +17,19 @@ export interface SiteConfig {
   displayName: string;
   /** Base URL of the Umbraco instance */
   baseUrl: string;
+  /**
+   * Path segment used to build the `/callback/<id>` redirect_uri registered
+   * with Umbraco's identity provider. Defaults to `id` when unset.
+   *
+   * Only needed when `id` carries addressing metadata the identity provider
+   * itself doesn't know about — e.g. the Umbraco Cloud preset's
+   * `<alias>.<region>` `siteId` embeds a region for the Worker's own
+   * routing, but each Cloud project only ever registers redirect URIs under
+   * its bare alias (it doesn't know "region" as a concept about itself).
+   * Sending the full `id` as the callback path there would build a
+   * redirect_uri Umbraco never registered, breaking the OAuth exchange.
+   */
+  callbackId?: string;
   /** Optional server-side URL override (for local dev with HTTP proxy) */
   serverUrl?: string;
   /** OAuth client ID registered in this Umbraco instance */
