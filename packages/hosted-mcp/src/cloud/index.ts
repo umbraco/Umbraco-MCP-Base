@@ -9,6 +9,19 @@
  * Each Umbraco Cloud project is expected to register its own OAuth client with
  * the standardised `oauthClientId` (e.g. "mcp-cms-editor"). Public/PKCE clients
  * don't need a secret — for confidential clients, supply `resolveOauthClientSecret`.
+ *
+ * ### Region resolution
+ *
+ * One Worker serves every Cloud project for its product/type/major, and
+ * those projects can live in more than one Cloud region — the `siteId`
+ * extracted from `/at/:siteId` alone doesn't say which. Preferred: mint the
+ * connection URL with the region already embedded as `<alias>.<region>`
+ * (e.g. `/at/feature-sir-robert-mcalpine.uksouth01/mcp`), mirroring Cloud's
+ * own hostname convention — this resolves with a single validation call, no
+ * guessing. Whoever generates the URL for a customer project already knows
+ * its region (it's in the project's own host), so this is just carrying
+ * that value through. Legacy bare-alias URLs (`/at/<alias>/mcp`, no region)
+ * fall back to `region`/`regions` below.
  */
 
 import type { HostedMcpEnv } from "../types/env.js";
@@ -25,11 +38,23 @@ export interface UmbracoCloudRoutingOptions {
    */
   oauthClientId: string;
   /**
-   * Cloud region used to build the project URL (`{alias}.{region}.umbraco.io`).
-   * Defaults to `env.UMBRACO_CLOUD_REGION` at request time, or `"euwest01"`
-   * when neither option nor env var is set.
+   * Cloud region used to build the project URL (`{alias}.{region}.umbraco.io`)
+   * for a `siteId` with no region embedded. Defaults to
+   * `env.UMBRACO_CLOUD_REGION` at request time, or `"euwest01"` when neither
+   * option nor env var is set. Ignored when `regions` is set, and never
+   * consulted for a `siteId` that already carries `<alias>.<region>`.
    */
   region?: string;
+  /**
+   * Candidate Cloud regions to probe, in order, for a `siteId` with no
+   * region embedded. Only relevant for legacy bare-alias URLs
+   * (`/at/<alias>/mcp`) still in the wild; a `<alias>.<region>` `siteId`
+   * never probes. Each candidate is validated in order (via
+   * `validateProject`, or the default `/umbraco` probe) and the first that
+   * exists wins. Falls back to the single-region behaviour (`region` /
+   * `UMBRACO_CLOUD_REGION` / `"euwest01"`) when omitted.
+   */
+  regions?: string[] | ((env: HostedMcpEnv) => string[]);
   /**
    * Resolve a per-project OAuth client_secret. Omit for PKCE / public clients
    * (recommended). When provided, the returned string is used as the
@@ -40,9 +65,9 @@ export interface UmbracoCloudRoutingOptions {
     env: HostedMcpEnv
   ) => string | null | undefined | Promise<string | null | undefined>;
   /**
-   * Override the default validation. The default fetches
-   * `https://{alias}.{region}.umbraco.io/.well-known/oauth-authorization-server`
-   * and treats a 2xx response with a JSON body as "exists".
+   * Override the default validation. The default GETs
+   * `https://{alias}.{region}.umbraco.io/umbraco` and treats a response
+   * under 400 as "exists" (see `defaultValidateProject`).
    *
    * Return `true` to allow the project, `false` to reject (the router
    * surfaces this as 404). Throw to surface 502.
@@ -81,6 +106,15 @@ const DEFAULT_CACHE_TTL = { ok: 60_000, miss: 30_000, error: 10_000 };
 // entries and, if still over the cap, drop the oldest. Stops a stream of
 // unique aliases (typos, scans) from growing the Map without bound.
 const MAX_CACHE_ENTRIES = 1_000;
+// Matches the `.<region>` suffix of a `<alias>.<region>` siteId, e.g.
+// "uksouth01", "euwest01" — a lowercase-letter region name plus a 2-digit
+// instance number. Deliberately narrow so an alias that happens to contain
+// a dot isn't misread as carrying a region.
+const REGION_SUFFIX = /\.[a-z]+\d{2}$/;
+
+function hasEmbeddedRegion(siteId: string): boolean {
+  return REGION_SUFFIX.test(siteId);
+}
 
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }
@@ -128,13 +162,35 @@ export function umbracoCloudSiteRouting(
       return cached.kind === "ok" ? cached.site : null;
     }
 
-    const region = options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION;
-    const baseUrl = `https://${siteId}.${region}.umbraco.io`;
-
     const validator = options.validateProject ?? defaultValidateProject;
-    const exists = await validator(siteId, baseUrl, env);
 
-    if (!exists) {
+    let baseUrl: string | undefined;
+
+    // `<alias>.<region>` embedded in siteId (Cloud's own hostname shape) is
+    // authoritative — validate that one URL directly, no region guessing.
+    if (hasEmbeddedRegion(siteId)) {
+      const candidateUrl = `https://${siteId}.umbraco.io`;
+      if (await validator(siteId, candidateUrl, env)) {
+        baseUrl = candidateUrl;
+      }
+    } else {
+      const candidateRegions =
+        typeof options.regions === "function"
+          ? options.regions(env)
+          : options.regions ?? [
+              options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION,
+            ];
+
+      for (const region of candidateRegions) {
+        const candidateUrl = `https://${siteId}.${region}.umbraco.io`;
+        if (await validator(siteId, candidateUrl, env)) {
+          baseUrl = candidateUrl;
+          break;
+        }
+      }
+    }
+
+    if (!baseUrl) {
       setCache(siteId, { kind: "miss", expiresAt: now + ttl.miss });
       return null;
     }
