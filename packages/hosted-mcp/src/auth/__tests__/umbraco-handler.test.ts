@@ -1118,6 +1118,38 @@ describe("createCallbackHandler", () => {
         "https://worker.example.com/callback/staging"
       );
     });
+
+    it("uses callbackId over siteId in the reconstructed redirect_uri when consent choices carry one", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(
+        makeStoredState({
+          consentChoices: {
+            siteId: "my-project.uksouth01",
+            callbackId: "my-project",
+          } as ConsentChoices,
+        })
+      );
+      mockFetch.mockResolvedValue(
+        createJsonResponse(200, {
+          access_token: "tok",
+          token_type: "Bearer",
+        })
+      );
+
+      const handler = createCallbackHandler(env);
+      await handler(
+        new Request(
+          "https://worker.example.com/callback/my-project?code=c&state=s"
+        )
+      );
+
+      const body = (mockFetch.mock.calls[0] as [string, RequestInit])[1]
+        .body as string;
+      const params = new URLSearchParams(body);
+      expect(params.get("redirect_uri")).toBe(
+        "https://worker.example.com/callback/my-project"
+      );
+    });
   });
 
   describe("error paths", () => {
@@ -1501,6 +1533,78 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
 
       expect(response.status).toBe(404);
       expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST — approve with callbackId (Cloud region-qualified siteId)", () => {
+    const regionSite: SiteConfig = {
+      id: "my-project.uksouth01",
+      callbackId: "my-project",
+      displayName: "my-project.uksouth01",
+      baseUrl: "https://my-project.uksouth01.umbraco.io",
+      oauthClientId: "mcp-cms-editor",
+    };
+
+    const regionSiteRouting = {
+      pathPrefix: "/at/:siteId",
+      resolveSite: jest.fn<(siteId: string, env: HostedMcpEnv) => SiteConfig | null>(),
+    };
+
+    beforeEach(() => {
+      regionSiteRouting.resolveSite.mockReset();
+      regionSiteRouting.resolveSite.mockImplementation((siteId: string) =>
+        siteId === "my-project.uksouth01" ? regionSite : null
+      );
+    });
+
+    it("uses callbackId, not the region-qualified id, in the redirect_uri sent to Umbraco", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project.uksouth01");
+      const handler = createAuthorizeHandler(env, {
+        siteRouting: regionSiteRouting as any,
+      });
+
+      const response = await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project.uksouth01/",
+        })
+      );
+
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("redirect_uri")).toBe(
+        "https://worker.example.com/callback/my-project"
+      );
+    });
+
+    it("stores both siteId (full) and callbackId (bare) in consentChoices", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project.uksouth01");
+      const handler = createAuthorizeHandler(env, {
+        siteRouting: regionSiteRouting as any,
+      });
+
+      await handler(
+        new Request("https://worker.example.com/authorize", {
+          method: "POST",
+          body: createApproveFormBody(),
+        }),
+        createMockAuthRequest({
+          resource: "https://worker.example.com/at/my-project.uksouth01/",
+        })
+      );
+
+      const stateCall = mockStoreOAuthState.mock.calls[0] as [
+        unknown,
+        string,
+        Record<string, unknown>,
+      ];
+      const choices = stateCall[2].consentChoices as ConsentChoices;
+      expect(choices.siteId).toBe("my-project.uksouth01");
+      expect(choices.callbackId).toBe("my-project");
     });
   });
 

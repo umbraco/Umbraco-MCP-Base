@@ -108,6 +108,13 @@ function hasEmbeddedRegion(siteId: string): boolean {
   return REGION_SUFFIX.test(siteId);
 }
 
+// The alias portion of a `<alias>.<region>` siteId — what a Cloud project's
+// own OAuth client registration (which only knows its own bare alias, not
+// "region" as a concept) expects as the `/callback/<id>` path segment.
+function aliasOnly(siteId: string): string {
+  return siteId.replace(REGION_SUFFIX, "");
+}
+
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }
   | { kind: "miss"; expiresAt: number };
@@ -183,6 +190,11 @@ export function umbracoCloudSiteRouting(
       displayName: siteId,
       baseUrl,
       oauthClientId: options.oauthClientId,
+      // The Cloud project's own OAuth client registration only knows its
+      // bare alias (see `SiteConfig.callbackId` doc) — send that as the
+      // callback path even though `id` carries the region for our own
+      // routing/resolution purposes.
+      ...(hasEmbeddedRegion(siteId) ? { callbackId: aliasOnly(siteId) } : {}),
       ...(oauthClientSecret ? { oauthClientSecret } : {}),
     };
 

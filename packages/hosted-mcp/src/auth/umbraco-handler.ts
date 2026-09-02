@@ -389,7 +389,14 @@ export function createAuthorizeHandler(
         }
         // Carry siteId through consentChoices so the per-request server can
         // look up the site again with the same resolveSite callback.
-        consentChoices = { ...(consentChoices ?? {}), siteId: result.site.id };
+        // callbackId (when the site config sets one) rides along separately
+        // so the token exchange can reconstruct the identical redirect_uri
+        // without disturbing siteId's own round-trip through resolveSite.
+        consentChoices = {
+          ...(consentChoices ?? {}),
+          siteId: result.site.id,
+          callbackId: result.site.callbackId,
+        };
       } else {
         site = resolveSite(consentChoices?.siteId, options?.sites);
       }
@@ -419,8 +426,11 @@ export function createAuthorizeHandler(
       });
 
       // Build Umbraco authorization URL
-      // For multi-site, callback includes siteId so the Worker routes it correctly
-      const callbackPath = site ? `/callback/${site.id}` : "/callback";
+      // For multi-site, callback includes siteId so the Worker routes it correctly.
+      // callbackId overrides siteId when the site config carries addressing
+      // metadata (e.g. a region) that Umbraco's own OAuth client registration
+      // doesn't know about — see `SiteConfig.callbackId`.
+      const callbackPath = site ? `/callback/${site.callbackId ?? site.id}` : "/callback";
       const callbackUrl = new URL(callbackPath, url.origin).toString();
       const authUrl = new URL(endpoints.authorization_endpoint);
       authUrl.searchParams.set("response_type", "code");
@@ -594,8 +604,11 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Exchange authorization code for tokens
     const endpoints = getBackofficeEndpoints(effectiveBaseUrl, effectiveServerUrl);
 
-    // Callback URL must match what was sent to Umbraco during authorize
-    const callbackPath = consentChoices?.siteId ? `/callback/${consentChoices.siteId}` : "/callback";
+    // Callback URL must match what was sent to Umbraco during authorize —
+    // reconstruct with the same callbackId-over-siteId precedence.
+    const callbackPath = consentChoices?.siteId
+      ? `/callback/${consentChoices.callbackId ?? consentChoices.siteId}`
+      : "/callback";
     const callbackUrl = new URL(callbackPath, url.origin).toString();
 
     const tokenParams = new URLSearchParams({

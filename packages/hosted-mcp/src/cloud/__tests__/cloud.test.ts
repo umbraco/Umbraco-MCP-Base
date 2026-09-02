@@ -198,6 +198,18 @@ describe("umbracoCloudSiteRouting", () => {
       expect(site?.id).toBe("abc.uksouth01");
       expect(site?.displayName).toBe("abc.uksouth01");
     });
+
+    it("sets callbackId to the bare alias, since Umbraco's own OAuth client registration doesn't know about regions", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("abc.uksouth01", env);
+      expect(site?.callbackId).toBe("abc");
+    });
+
+    it("leaves callbackId unset for a bare alias (id already matches what Umbraco expects)", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("plain-alias", env);
+      expect(site?.callbackId).toBeUndefined();
+    });
   });
 
   describe("UMBRACO_CLOUD_ROUTING_ENABLED gate", () => {
