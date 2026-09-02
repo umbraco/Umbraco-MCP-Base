@@ -155,6 +155,51 @@ describe("umbracoCloudSiteRouting", () => {
     expect(config.pathPrefix).toBe("/p/:project");
   });
 
+  describe("embedded region (`<alias>.<region>` siteId)", () => {
+    it("resolves directly from the embedded region with a single validation call", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("example-project.uksouth01", env);
+      expect(site?.baseUrl).toBe(
+        "https://example-project.uksouth01.umbraco.io"
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://example-project.uksouth01.umbraco.io/umbraco",
+        expect.anything()
+      );
+    });
+
+    it("ignores the `region` option/env var when the siteId carries its own region", async () => {
+      const config = umbracoCloudSiteRouting({
+        oauthClientId: "mcp-cms-editor",
+        region: "useast01",
+      });
+      const site = await config.resolveSite("abc.uksouth01", env);
+      expect(site?.baseUrl).toBe("https://abc.uksouth01.umbraco.io");
+    });
+
+    it("returns null when the embedded region doesn't validate", async () => {
+      fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("abc.uksouth01", env);
+      expect(site).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats a bare alias with no region suffix via the `region` fallback", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("plain-alias", env);
+      expect(site?.baseUrl).toBe("https://plain-alias.euwest01.umbraco.io");
+    });
+
+    it("keeps the full `<alias>.<region>` string as the site id and display name", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("abc.uksouth01", env);
+      expect(site?.id).toBe("abc.uksouth01");
+      expect(site?.displayName).toBe("abc.uksouth01");
+    });
+  });
+
   describe("UMBRACO_CLOUD_ROUTING_ENABLED gate", () => {
     it("returns null without invoking the validator when the flag is absent", async () => {
       const validateProject = jest.fn<
