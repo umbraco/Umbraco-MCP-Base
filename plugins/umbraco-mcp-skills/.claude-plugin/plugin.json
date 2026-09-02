@@ -1,22 +1,56 @@
 {
-  "name": "umbraco-mcp-skills",
-  "version": "1.0.0-beta.38",
-  "description": "Skills for building Umbraco MCP servers - tool creation, testing, API patterns, and eval testing",
-  "author": {
-    "name": "Phil W",
-    "email": "pjw@umbraco.com",
-    "url": "https://github.com/hifi-phil"
+  "name": "umbraco-mcp-server-sdk-plugins",
+  "owner": {
+    "name": "Umbraco Community",
+    "email": "pjw@umbraco.com"
   },
-  "homepage": "https://github.com/umbraco/Umbraco-MCP-Base",
-  "license": "MIT",
-  "keywords": [
-    "mcp",
-    "umbraco",
-    "model-context-protocol",
-    "tool-creation",
-    "testing",
-    "eval-tests",
-    "integration-tests",
-    "api-patterns"
+  "metadata": {
+    "description": "Claude Code plugins for the Umbraco MCP Toolkit - professional skills for building MCP servers, testing, and API integration",
+    "version": "1.0.0-beta.39",
+    "homepage": "https://github.com/umbraco/Umbraco-MCP-Base"
+  },
+  "plugins": [
+    {
+      "name": "umbraco-mcp-skills",
+      "source": "./plugins/umbraco-mcp-skills",
+      "description": "Professional skills for building Umbraco MCP servers - tool creation, testing, API patterns, and eval testing",
+      "version": "1.0.0-beta.39",
+      "category": "development",
+      "author": {
+        "name": "Phil W",
+        "email": "pjw@umbraco.com",
+        "url": "https://github.com/hifi-phil"
+      },
+      "homepage": "https://github.com/umbraco/Umbraco-MCP-Base/tree/main/plugins/umbraco-mcp-skills",
+      "keywords": [
+        "mcp",
+        "umbraco",
+        "model-context-protocol",
+        "tool-creation",
+        "testing",
+        "eval-tests"
+      ]
+    },
+    {
+      "name": "umbraco-mcp-server",
+      "source": "./plugins-server/umbraco-mcp-server",
+      "description": "Skills for CLI operation of Umbraco MCP servers - CLI setup, tool filtering, introspection, and runtime modes",
+      "version": "1.0.0-beta.39",
+      "category": "operations",
+      "author": {
+        "name": "Phil W",
+        "email": "pjw@umbraco.com",
+        "url": "https://github.com/hifi-phil"
+      },
+      "homepage": "https://github.com/umbraco/Umbraco-MCP-Base/tree/main/plugins-server/umbraco-mcp-server",
+      "keywords": [
+        "mcp",
+        "umbraco",
+        "model-context-protocol",
+        "cli",
+        "configuration",
+        "operations"
+      ]
+    }
   ]
 }
