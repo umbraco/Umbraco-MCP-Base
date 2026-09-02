@@ -158,42 +158,35 @@ describe("umbracoCloudSiteRouting", () => {
   describe("embedded region (`<alias>.<region>` siteId)", () => {
     it("resolves directly from the embedded region with a single validation call", async () => {
       const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      const site = await config.resolveSite(
-        "feature-sir-robert-mcalpine.uksouth01",
-        env
-      );
+      const site = await config.resolveSite("example-project.uksouth01", env);
       expect(site?.baseUrl).toBe(
-        "https://feature-sir-robert-mcalpine.uksouth01.umbraco.io"
+        "https://example-project.uksouth01.umbraco.io"
       );
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(fetchSpy).toHaveBeenCalledWith(
-        "https://feature-sir-robert-mcalpine.uksouth01.umbraco.io/umbraco",
+        "https://example-project.uksouth01.umbraco.io/umbraco",
         expect.anything()
       );
     });
 
-    it("ignores `region`/`regions` options when the siteId carries its own region", async () => {
+    it("ignores the `region` option/env var when the siteId carries its own region", async () => {
       const config = umbracoCloudSiteRouting({
         oauthClientId: "mcp-cms-editor",
         region: "useast01",
-        regions: ["euwest01"],
       });
       const site = await config.resolveSite("abc.uksouth01", env);
       expect(site?.baseUrl).toBe("https://abc.uksouth01.umbraco.io");
     });
 
-    it("returns null without trying other regions when the embedded region doesn't validate", async () => {
+    it("returns null when the embedded region doesn't validate", async () => {
       fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        regions: ["euwest01", "uksouth01"],
-      });
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
       const site = await config.resolveSite("abc.uksouth01", env);
       expect(site).toBeNull();
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("treats a bare alias with no region suffix via the region/regions fallback", async () => {
+    it("treats a bare alias with no region suffix via the `region` fallback", async () => {
       const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
       const site = await config.resolveSite("plain-alias", env);
       expect(site?.baseUrl).toBe("https://plain-alias.euwest01.umbraco.io");
@@ -204,95 +197,6 @@ describe("umbracoCloudSiteRouting", () => {
       const site = await config.resolveSite("abc.uksouth01", env);
       expect(site?.id).toBe("abc.uksouth01");
       expect(site?.displayName).toBe("abc.uksouth01");
-    });
-  });
-
-  describe("regions (multi-region resolution)", () => {
-    it("tries candidates in order and uses the first that validates", async () => {
-      fetchSpy.mockImplementation((async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url.includes(".uksouth01.")) {
-          return new Response(
-            JSON.stringify({ issuer: "https://example.umbraco.io" }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        return new Response("nope", { status: 404 });
-      }) as typeof fetch);
-
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        regions: ["euwest01", "uksouth01"],
-      });
-      const site = await config.resolveSite(
-        "feature-sir-robert-mcalpine",
-        env
-      );
-      expect(site?.baseUrl).toBe(
-        "https://feature-sir-robert-mcalpine.uksouth01.umbraco.io"
-      );
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    });
-
-    it("returns null when no candidate region validates", async () => {
-      fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        regions: ["euwest01", "uksouth01"],
-      });
-      const site = await config.resolveSite("missing", env);
-      expect(site).toBeNull();
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    });
-
-    it("ignores `region`/`UMBRACO_CLOUD_REGION` when `regions` is set", async () => {
-      fetchSpy.mockImplementation((async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        return url.includes(".uksouth01.")
-          ? new Response(
-              JSON.stringify({ issuer: "https://example.umbraco.io" }),
-              { status: 200, headers: { "Content-Type": "application/json" } }
-            )
-          : new Response("nope", { status: 404 });
-      }) as typeof fetch);
-
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        region: "useast01",
-        regions: ["uksouth01"],
-      });
-      const site = await config.resolveSite("abc", env);
-      expect(site?.baseUrl).toBe("https://abc.uksouth01.umbraco.io");
-    });
-
-    it("supports a function returning candidate regions per env", async () => {
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        regions: (e) => [(e as { MY_REGION?: string }).MY_REGION ?? "euwest01"],
-      });
-      const site = await config.resolveSite("abc", {
-        ...env,
-        MY_REGION: "uksouth01",
-      } as HostedMcpEnv);
-      expect(site?.baseUrl).toBe("https://abc.uksouth01.umbraco.io");
-    });
-
-    it("stops probing and propagates a throw from validateProject", async () => {
-      const validateProject = jest
-        .fn<(siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean>()
-        .mockImplementationOnce(() => false)
-        .mockImplementationOnce(() => {
-          throw new Error("portal API down");
-        });
-      const config = umbracoCloudSiteRouting({
-        oauthClientId: "mcp-cms-editor",
-        regions: ["euwest01", "uksouth01", "useast01"],
-        validateProject,
-      });
-      await expect(config.resolveSite("abc", env)).rejects.toThrow(
-        /portal API down/
-      );
-      expect(validateProject).toHaveBeenCalledTimes(2);
     });
   });
 

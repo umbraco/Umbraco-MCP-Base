@@ -16,12 +16,14 @@
  * those projects can live in more than one Cloud region — the `siteId`
  * extracted from `/at/:siteId` alone doesn't say which. Preferred: mint the
  * connection URL with the region already embedded as `<alias>.<region>`
- * (e.g. `/at/feature-sir-robert-mcalpine.uksouth01/mcp`), mirroring Cloud's
- * own hostname convention — this resolves with a single validation call, no
- * guessing. Whoever generates the URL for a customer project already knows
- * its region (it's in the project's own host), so this is just carrying
- * that value through. Legacy bare-alias URLs (`/at/<alias>/mcp`, no region)
- * fall back to `region`/`regions` below.
+ * (e.g. `/at/example-project.uksouth01/mcp`), mirroring Cloud's own
+ * hostname convention — this resolves with a single validation call, no
+ * guessing required. Whoever generates the URL for a customer project
+ * already knows its region (it's in the project's own host), so this is
+ * just carrying that value through. Legacy bare-alias URLs (`/at/<alias>/mcp`,
+ * no region) fall back to the single `region` option below — the Worker
+ * does not need to know every possible Cloud region up front, only the one
+ * default region its bare-alias URLs target.
  */
 
 import type { HostedMcpEnv } from "../types/env.js";
@@ -39,22 +41,12 @@ export interface UmbracoCloudRoutingOptions {
   oauthClientId: string;
   /**
    * Cloud region used to build the project URL (`{alias}.{region}.umbraco.io`)
-   * for a `siteId` with no region embedded. Defaults to
-   * `env.UMBRACO_CLOUD_REGION` at request time, or `"euwest01"` when neither
-   * option nor env var is set. Ignored when `regions` is set, and never
-   * consulted for a `siteId` that already carries `<alias>.<region>`.
+   * for a `siteId` with no region embedded (legacy bare-alias URLs). Defaults
+   * to `env.UMBRACO_CLOUD_REGION` at request time, or `"euwest01"` when
+   * neither option nor env var is set. Never consulted for a `siteId` that
+   * already carries `<alias>.<region>` — that resolves directly instead.
    */
   region?: string;
-  /**
-   * Candidate Cloud regions to probe, in order, for a `siteId` with no
-   * region embedded. Only relevant for legacy bare-alias URLs
-   * (`/at/<alias>/mcp`) still in the wild; a `<alias>.<region>` `siteId`
-   * never probes. Each candidate is validated in order (via
-   * `validateProject`, or the default `/umbraco` probe) and the first that
-   * exists wins. Falls back to the single-region behaviour (`region` /
-   * `UMBRACO_CLOUD_REGION` / `"euwest01"`) when omitted.
-   */
-  regions?: string[] | ((env: HostedMcpEnv) => string[]);
   /**
    * Resolve a per-project OAuth client_secret. Omit for PKCE / public clients
    * (recommended). When provided, the returned string is used as the
@@ -164,31 +156,19 @@ export function umbracoCloudSiteRouting(
 
     const validator = options.validateProject ?? defaultValidateProject;
 
-    let baseUrl: string | undefined;
-
     // `<alias>.<region>` embedded in siteId (Cloud's own hostname shape) is
     // authoritative — validate that one URL directly, no region guessing.
-    if (hasEmbeddedRegion(siteId)) {
-      const candidateUrl = `https://${siteId}.umbraco.io`;
-      if (await validator(siteId, candidateUrl, env)) {
-        baseUrl = candidateUrl;
-      }
-    } else {
-      const candidateRegions =
-        typeof options.regions === "function"
-          ? options.regions(env)
-          : options.regions ?? [
-              options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION,
-            ];
+    // A bare alias falls back to the single default region.
+    const region = hasEmbeddedRegion(siteId)
+      ? undefined
+      : (options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION);
+    const candidateUrl = region
+      ? `https://${siteId}.${region}.umbraco.io`
+      : `https://${siteId}.umbraco.io`;
 
-      for (const region of candidateRegions) {
-        const candidateUrl = `https://${siteId}.${region}.umbraco.io`;
-        if (await validator(siteId, candidateUrl, env)) {
-          baseUrl = candidateUrl;
-          break;
-        }
-      }
-    }
+    const baseUrl = (await validator(siteId, candidateUrl, env))
+      ? candidateUrl
+      : undefined;
 
     if (!baseUrl) {
       setCache(siteId, { kind: "miss", expiresAt: now + ttl.miss });
