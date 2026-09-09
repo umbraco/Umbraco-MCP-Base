@@ -2,9 +2,10 @@
  * Tenant-prefixed OAuth router.
  *
  * Intercepts requests to /at/<alias>/{authorize,token,register,callback,
- * .well-known/oauth-authorization-server} and the per-tenant PRM at
- * /.well-known/oauth-protected-resource/at/<alias>, before they reach
- * OAuthProvider. Validates the alias, enforces the per-tenant client binding,
+ * .well-known/oauth-authorization-server}, the per-tenant AS metadata at
+ * /.well-known/oauth-authorization-server/at/<alias>[/mcp] and the per-tenant
+ * PRM at /.well-known/oauth-protected-resource/at/<alias>[/mcp], before they
+ * reach OAuthProvider. Validates the alias, enforces the per-tenant client binding,
  * synthesises/cross-validates `resource`, then strips the prefix and forwards
  * to OAuthProvider's root handlers.
  *
@@ -33,9 +34,17 @@ export interface TenantOAuthMatch {
   alias: string;
 }
 
+// Both well-known documents accept an optional `/mcp` suffix after the alias.
+// RFC 9728 §3 says the PRM URL is derived from the resource URL by inserting
+// the well-known segment, so a client that treats the MCP endpoint
+// (`/at/<alias>/mcp`) as the resource asks for `.../at/<alias>/mcp`. Microsoft
+// Copilot Studio does the same for RFC 8414 AS metadata — it inserts the
+// well-known segment using the MCP URL path, not the `authorization_servers`
+// path, and only falls back to the host root when that 404s (issue #308).
 const RFC_8414_AS_METADATA_REGEX =
-  /^\/\.well-known\/oauth-authorization-server\/at\/([^/]+)\/?$/;
-const PRM_REGEX = /^\/\.well-known\/oauth-protected-resource\/at\/([^/]+)\/?$/;
+  /^\/\.well-known\/oauth-authorization-server\/at\/([^/]+)(?:\/mcp)?\/?$/;
+const PRM_REGEX =
+  /^\/\.well-known\/oauth-protected-resource\/at\/([^/]+)(?:\/mcp)?\/?$/;
 const TENANT_OP_REGEX =
   /^\/at\/([^/]+)\/(authorize|token|register|callback|\.well-known\/oauth-authorization-server)\/?$/;
 
@@ -85,7 +94,16 @@ export function renderTenantAuthorizationServerMetadata(
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
+    // OAuthProvider registers DCR clients as `client_secret_basic` by default
+    // (and issues a secret) unless the client asks for `none`; it enforces
+    // whichever method the client registered with. Advertise the full set so
+    // confidential-only clients (Microsoft requires DCR to issue a secret)
+    // don't conclude the server is public-client-only. Issue #308.
+    token_endpoint_auth_methods_supported: [
+      "none",
+      "client_secret_basic",
+      "client_secret_post",
+    ],
     scopes_supported: ["openid", "offline_access"],
   };
   return new Response(JSON.stringify(body), {

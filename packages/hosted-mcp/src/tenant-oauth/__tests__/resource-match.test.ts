@@ -20,16 +20,28 @@ describe("validateResourceMatch", () => {
     expect(validateResourceMatch([canonical], canonical)).toEqual({ ok: true });
   });
 
-  it("rejects trailing-slash variant", () => {
-    const r = validateResourceMatch(`${canonical}/`, canonical);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain("does not match");
+  // Issue #308: the MCP spec tells clients to send the MCP server URL as
+  // `resource`, and that URL is `${canonical}/mcp`. Same tenant, same origin —
+  // accepted. The caller still forwards the bare canonical value.
+  it.each([`${canonical}/`, `${canonical}/mcp`, `${canonical}/mcp/`])(
+    "accepts same-tenant spelling %s",
+    (sent) => {
+      expect(validateResourceMatch(sent, canonical)).toEqual({ ok: true });
+    }
+  );
+
+  it("accepts a single-element array containing the /mcp spelling", () => {
+    expect(validateResourceMatch([`${canonical}/mcp`], canonical)).toEqual({ ok: true });
   });
 
-  it("rejects /mcp suffix variant", () => {
-    const r = validateResourceMatch(`${canonical}/mcp`, canonical);
-    expect(r.ok).toBe(false);
-  });
+  it.each([`${canonical}/mcpx`, `${canonical}/mcp/x`, `${canonical}//mcp`, `${canonical}/MCP`, `${canonical}/other`])(
+    "rejects non-canonical suffix %s",
+    (sent) => {
+      const r = validateResourceMatch(sent, canonical);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain("does not match");
+    }
+  );
 
   it("rejects different-tenant alias", () => {
     const r = validateResourceMatch("https://worker.example.com/at/other", canonical);

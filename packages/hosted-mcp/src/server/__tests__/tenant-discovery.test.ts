@@ -88,6 +88,42 @@ describe("createWorkerExport — tenant-OAuth dispatch", () => {
     expect(oauth.fetch).not.toHaveBeenCalled();
   });
 
+  it("serves the same tenant AS metadata at the /mcp-suffixed path Copilot Studio probes (issue #308)", async () => {
+    const oauth = { fetch: jest.fn() };
+    const handler = createWorkerExport(oauth as never, {
+      ...baseOptions,
+      siteRouting: makeRouting(),
+    });
+    const response = await handler.fetch(
+      new Request("https://worker.example.com/.well-known/oauth-authorization-server/at/abc/mcp"),
+      makeEnv(),
+      ctx
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.issuer).toBe("https://worker.example.com/at/abc");
+    expect(body.registration_endpoint).toBe("https://worker.example.com/at/abc/register");
+    expect(oauth.fetch).not.toHaveBeenCalled();
+  });
+
+  it("serves the tenant PRM at the /mcp-suffixed RFC 9728 path (issue #308)", async () => {
+    const oauth = { fetch: jest.fn() };
+    const handler = createWorkerExport(oauth as never, {
+      ...baseOptions,
+      siteRouting: makeRouting(),
+    });
+    const response = await handler.fetch(
+      new Request("https://worker.example.com/.well-known/oauth-protected-resource/at/abc/mcp"),
+      makeEnv(),
+      ctx
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.resource).toBe("https://worker.example.com/at/abc");
+    expect(body.authorization_servers).toEqual(["https://worker.example.com/at/abc"]);
+    expect(oauth.fetch).not.toHaveBeenCalled();
+  });
+
   it("serves tenant PRM at /.well-known/oauth-protected-resource/at/<alias> with tenant-pinned authorization_servers", async () => {
     const oauth = { fetch: jest.fn() };
     const handler = createWorkerExport(oauth as never, {

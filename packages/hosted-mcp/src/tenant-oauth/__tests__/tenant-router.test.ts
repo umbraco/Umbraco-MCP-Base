@@ -32,6 +32,20 @@ describe("renderTenantAuthorizationServerMetadata", () => {
     expect(body.code_challenge_methods_supported).toContain("S256");
   });
 
+  it("advertises confidential and public token-endpoint auth methods (issue #308)", async () => {
+    const response = renderTenantAuthorizationServerMetadata(
+      "https://worker.example.com",
+      "demo",
+      new Request("https://worker.example.com/.well-known/oauth-authorization-server/at/demo")
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.token_endpoint_auth_methods_supported).toEqual([
+      "none",
+      "client_secret_basic",
+      "client_secret_post",
+    ]);
+  });
+
   it("returns CORS-safe headers", () => {
     const request = new Request(
       "https://worker.example.com/.well-known/oauth-authorization-server/at/demo"
@@ -69,7 +83,17 @@ describe("matchTenantOAuthPath", () => {
     ["/at/demo/callback", "callback", "demo"],
     ["/at/demo/.well-known/oauth-authorization-server", "as-metadata", "demo"],
     ["/.well-known/oauth-authorization-server/at/demo", "as-metadata", "demo"],
+    ["/.well-known/oauth-authorization-server/at/demo/", "as-metadata", "demo"],
+    // Copilot Studio inserts the well-known segment using the MCP URL path
+    // (issue #308) — the `/mcp` suffix must resolve to the same tenant doc.
+    ["/.well-known/oauth-authorization-server/at/demo/mcp", "as-metadata", "demo"],
+    ["/.well-known/oauth-authorization-server/at/demo/mcp/", "as-metadata", "demo"],
     ["/.well-known/oauth-protected-resource/at/demo", "prm", "demo"],
+    ["/.well-known/oauth-protected-resource/at/demo/", "prm", "demo"],
+    ["/.well-known/oauth-protected-resource/at/demo/mcp", "prm", "demo"],
+    ["/.well-known/oauth-protected-resource/at/demo/mcp/", "prm", "demo"],
+    // Region-qualified Cloud aliases contain a dot.
+    ["/.well-known/oauth-authorization-server/at/demo.uksouth01/mcp", "as-metadata", "demo.uksouth01"],
   ])("matches %s as kind=%s alias=%s", (path, kind, alias) => {
     const match = matchTenantOAuthPath(path);
     expect(match).not.toBeNull();
@@ -84,6 +108,15 @@ describe("matchTenantOAuthPath", () => {
     "/at/",
     "/at/demo",
     "/random/path",
+    // Only `/mcp` is an accepted suffix — anything else after the alias is not
+    // a tenant well-known document.
+    "/.well-known/oauth-authorization-server/at/demo/mcpx",
+    "/.well-known/oauth-authorization-server/at/demo/mcp/extra",
+    "/.well-known/oauth-authorization-server/at/demo/other",
+    "/.well-known/oauth-protected-resource/at/demo/other",
+    // Path-after form with the MCP suffix is not served (Copilot Studio only
+    // probes it for openid-configuration, which OAuthProvider owns).
+    "/at/demo/mcp/.well-known/oauth-authorization-server",
   ])("does not match %s", (path) => {
     expect(matchTenantOAuthPath(path)).toBeNull();
   });
@@ -276,14 +309,14 @@ describe("dispatchTenantOAuth — authorize", () => {
     expect(oauthFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects 400 invalid_request when sent resource does not byte-equal canonical", async () => {
+  it("rejects 400 invalid_request when sent resource is not a canonical spelling", async () => {
     const kv = createMockKV();
     await putClientBinding(kv as never, "demo", "client-1");
     const oauthFetch = jest.fn();
     const response = await dispatchTenantOAuth(
       { kind: "authorize", alias: "demo" },
       new Request(
-        "https://worker.example.com/at/demo/authorize?client_id=client-1&response_type=code&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fdemo%2F"
+        "https://worker.example.com/at/demo/authorize?client_id=client-1&response_type=code&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fdemo%2Fother"
       ),
       makeEnv(kv),
       ctx,
@@ -294,6 +327,32 @@ describe("dispatchTenantOAuth — authorize", () => {
     const body = (await response.json()) as { error: string };
     expect(body.error).toBe("invalid_request");
     expect(oauthFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts the MCP endpoint URL as resource and forwards the bare canonical value (issue #308)", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn(async () => new Response("ok", { status: 200 }));
+    const response = await dispatchTenantOAuth(
+      { kind: "authorize", alias: "demo" },
+      new Request(
+        "https://worker.example.com/at/demo/authorize?client_id=client-1&response_type=code&resource=https%3A%2F%2Fworker.example.com%2Fat%2Fdemo%2Fmcp"
+      ),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+    expect(response.status).toBe(200);
+    expect(oauthFetch).toHaveBeenCalledTimes(1);
+    const forwarded = (oauthFetch.mock.calls[0] as unknown as [Request])[0];
+    const forwardedUrl = new URL(forwarded.url);
+    expect(forwardedUrl.pathname).toBe("/authorize");
+    // The accepted spelling must never leak into the audience — only the
+    // bare canonical value reaches OAuthProvider.
+    expect(forwardedUrl.searchParams.getAll("resource")).toEqual([
+      "https://worker.example.com/at/demo",
+    ]);
   });
 
   it("forwards unchanged when sent resource matches canonical exactly", async () => {
