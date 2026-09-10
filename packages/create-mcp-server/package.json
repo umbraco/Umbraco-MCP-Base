@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/create-umbraco-mcp-server",
-  "version": "1.0.0-beta.39",
+  "version": "1.0.0-beta.40",
   "type": "module",
   "description": "Create a new Umbraco MCP server project",
   "bin": {
@@ -60,6 +60,6 @@
     "ts-jest": "^29.4.11",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3",
-    "wrangler": "^4.104.0"
+    "wrangler": "^4.124.0"
   }
 }

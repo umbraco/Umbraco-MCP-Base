@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-hosted",
-  "version": "1.0.0-beta.39",
+  "version": "1.0.0-beta.40",
   "description": "Hosted MCP server infrastructure for Umbraco on Cloudflare Workers",
   "type": "module",
   "main": "dist/index.js",
@@ -44,7 +44,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260625.1",
+    "@cloudflare/workers-types": "^5.20260819.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.1.2",
     "jest": "^30.4.2",
