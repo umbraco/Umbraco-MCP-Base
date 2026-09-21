@@ -345,6 +345,18 @@ const REFRESH_EXPIRED_MESSAGE =
   "this MCP server to trigger a fresh login.";
 
 /**
+ * Same degraded server again, but for a refresh Umbraco rejected because of the
+ * *client*, not the token. Deliberately does NOT tell the user to reconnect: a
+ * fresh login replays the same broken client registration, so the advice would
+ * send them round a loop that cannot succeed. This one needs an administrator.
+ */
+const REFRESH_MISCONFIGURED_MESSAGE =
+  "Umbraco rejected this MCP server's OAuth client (invalid client_id/secret, or a grant type the client " +
+  "is not allowed to use). Reconnecting will not fix this — it replays the same client credentials. An " +
+  "administrator needs to correct the Umbraco-side client registration for this MCP server: its client id, " +
+  "its client secret, and the grant types it is permitted to use.";
+
+/**
  * Creates a per-request McpServer with tools registered and API client configured.
  *
  * This factory is called for each incoming MCP request to ensure:
@@ -512,14 +524,23 @@ async function initPerRequestServer(
   // holds an entry (so the guard above passed) but the session is over — hand
   // back the same degraded server rather than a toolset that 401s on every call.
   //
-  // Gated on `expired` specifically: a network blip or a 5xx from the token
-  // endpoint must not strip a session's tools, because the very next request
-  // may well refresh cleanly.
+  // Gated on the two *definitive* reasons: `expired` (Umbraco will never accept
+  // this refresh token again) and `misconfigured` (Umbraco rejected the client
+  // itself — a bad client_id/secret or grant configuration, which no number of
+  // retries will heal). A network blip or a 5xx from the token endpoint must
+  // not strip a session's tools, because the very next request may well refresh
+  // cleanly, so those two keep the full toolset.
   const refreshFailure = fetchClient.getRefreshFailure();
-  if (refreshFailure?.reason === "expired") {
-    const server = createAuthExpiredServer(options, baseInstructions, REFRESH_EXPIRED_MESSAGE);
+  const degradedRefresh =
+    refreshFailure?.reason === "expired"
+      ? { message: REFRESH_EXPIRED_MESSAGE, cause: "refresh-rejected-expired" }
+      : refreshFailure?.reason === "misconfigured"
+        ? { message: REFRESH_MISCONFIGURED_MESSAGE, cause: "refresh-rejected-misconfigured" }
+        : null;
+  if (degradedRefresh) {
+    const server = createAuthExpiredServer(options, baseInstructions, degradedRefresh.message);
     console.log(
-      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired cause=refresh-rejected tools=1 elapsedMs=${Date.now() - initStartedAt}`
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired cause=${degradedRefresh.cause} tools=1 elapsedMs=${Date.now() - initStartedAt}`
     );
     initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "degraded-auth-expired");
     initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 1);

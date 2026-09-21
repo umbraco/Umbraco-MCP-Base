@@ -114,7 +114,69 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(result.content[0].text).toContain("Umbraco:CMS:Global:TimeOut");
   });
 
-  it.each([["network"], ["server_error"], ["misconfigured"]] as const)(
+  it("degrades to the authentication-expired server when Umbraco rejected the OAuth client", async () => {
+    // Regression for #320: `misconfigured` used to be bucketed with the
+    // transient reasons, so a bad client_id/secret handed back a full toolset
+    // that 401'd on every single call, with nothing to tell an operator why.
+    refreshFailure = {
+      ok: false,
+      reason: "misconfigured",
+      status: 400,
+      error: "invalid_client",
+      message: "rejected",
+    };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, env, props);
+
+    expect(toolNames(server)).toEqual(["authentication-expired"]);
+    expect(doneLine(logSpy)).toContain("mode=degraded-auth-expired");
+    expect(doneLine(logSpy)).toContain("cause=refresh-rejected-misconfigured");
+  });
+
+  it("tells an administrator to fix the client registration rather than reconnect", async () => {
+    refreshFailure = {
+      ok: false,
+      reason: "misconfigured",
+      status: 400,
+      error: "invalid_client",
+      message: "rejected",
+    };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, env, props);
+
+    const tool = (server as unknown as {
+      _registeredTools: Record<string, { handler: () => Promise<{ content: { text: string }[] }> }>;
+    })._registeredTools["authentication-expired"];
+    const result = await tool.handler();
+
+    const text = result.content[0].text;
+    expect(text).toContain("administrator");
+    expect(text).toContain("client id");
+    // Reconnecting replays the same broken credentials, so the expired-session
+    // advice must not leak into this message.
+    expect(text).not.toContain("Umbraco:CMS:Global:TimeOut");
+    expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
+  });
+
+  it("uses a distinct cause for an expired token and a rejected client", async () => {
+    const causes: string[] = [];
+
+    for (const reason of ["expired", "misconfigured"] as const) {
+      logSpy.mockClear();
+      refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
+
+      const { createPerRequestServer } = await import("../create-server.js");
+      await createPerRequestServer(baseOptions, env, props);
+
+      causes.push(doneLine(logSpy)!.match(/cause=(\S+)/)![1]);
+    }
+
+    expect(causes[0]).not.toEqual(causes[1]);
+  });
+
+  it.each([["network"], ["server_error"]] as const)(
     "keeps the full toolset when the refresh failed with %s",
     async (reason) => {
       refreshFailure = { ok: false, reason, message: "transient" };

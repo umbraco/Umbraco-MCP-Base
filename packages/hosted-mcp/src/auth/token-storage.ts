@@ -402,17 +402,45 @@ export function refreshUmbracoToken(
   return pending;
 }
 
+/**
+ * Sentinel for a failure body we couldn't even read, so the diagnostic line
+ * distinguishes "Umbraco returned an empty body" from "reading the body threw".
+ */
+const UNREADABLE_BODY = "<unreadable>";
+
+/** One token-endpoint round-trip: the tokens it produced, or why it didn't. */
+type TokenEndpointAttempt =
+  | { ok: true; tokens: TokenResponse }
+  | { ok: false; failure: RefreshFailure };
+
 async function performRefresh(
   env: HostedMcpEnv,
   tokenKey: string,
   refreshToken: string,
   site?: StoredSiteContext
 ): Promise<RefreshTokenResult> {
+  /**
+   * Reads the persisted entry, logging rather than swallowing a KV failure.
+   * A silent `null` here is how a healthy session gets killed: we fall back to
+   * the caller's (possibly already-redeemed) snapshot, Umbraco answers
+   * `invalid_grant`, and that reads as a definitive `expired`.
+   */
+  const readStoredEntry = () =>
+    getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch((error) => {
+      logAuth(
+        env,
+        `refreshUmbracoToken KV READ FAILED key=${tokenKey} error=${sanitizeForLog(
+          error instanceof Error ? error.message : "unknown error"
+        )}`
+      );
+      return null;
+    });
+
   // Re-read KV first and prefer what's persisted there over the caller's
   // snapshot. A client instance can outlive several refreshes, and whoever
   // rotated the token last wrote it here; replaying the caller's stale copy
   // is a guaranteed `invalid_grant` ("already been redeemed").
-  const stored = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch(() => null);
+  const stored = await readStoredEntry();
   const persistedRefreshToken = stored?.tokens?.refresh_token;
   const effectiveRefreshToken = persistedRefreshToken ?? refreshToken;
   if (persistedRefreshToken && persistedRefreshToken !== refreshToken) {
@@ -429,16 +457,6 @@ async function performRefresh(
   const clientSecret = effectiveSite?.oauthClientSecret ?? env.UMBRACO_OAUTH_CLIENT_SECRET;
 
   const endpoints = getBackofficeEndpoints(baseUrl, serverUrl);
-
-  const params = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: effectiveRefreshToken,
-    client_id: clientId,
-  });
-
-  if (clientSecret) {
-    params.set("client_secret", clientSecret);
-  }
 
   logAuth(
     env,
@@ -469,67 +487,148 @@ async function performRefresh(
         return failure;
       };
 
-      let resp: Response;
-      try {
-        resp = await fetch(endpoints.token_endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params.toString(),
+      /**
+       * One POST of one refresh token, plus the classification of whatever came
+       * back. Factored out so the `invalid_grant` retry below can spend a second
+       * attempt on a newer token without duplicating the request or the
+       * classification. Returns the failure rather than calling `fail()`, so a
+       * rejection we're about to retry past doesn't warn or settle the span.
+       */
+      const postRefresh = async (tokenToPost: string): Promise<TokenEndpointAttempt> => {
+        const params = new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: tokenToPost,
+          client_id: clientId,
         });
+
+        if (clientSecret) {
+          params.set("client_secret", clientSecret);
+        }
+
+        let resp: Response;
+        try {
+          resp = await fetch(endpoints.token_endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: params.toString(),
+          });
+        } catch (error) {
+          const detail = sanitizeForLog(
+            error instanceof Error ? error.message : "unknown error"
+          );
+          logAuth(env, `refreshUmbracoToken NETWORK FAILURE key=${tokenKey} error=${detail}`);
+          return {
+            ok: false,
+            failure: {
+              ok: false,
+              reason: "network",
+              message: `Could not reach the Umbraco token endpoint: ${detail}`,
+            },
+          };
+        }
+
+        span.setAttribute(HostedTelemetryAttributes.HTTP_STATUS, resp.status);
+
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => UNREADABLE_BODY);
+          logAuth(
+            env,
+            `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
+          );
+          const errorCode = parseOAuthErrorCode(body);
+          const reason = classifyRefreshFailure(resp.status, errorCode);
+          return {
+            ok: false,
+            failure: {
+              ok: false,
+              reason,
+              status: resp.status,
+              error: errorCode,
+              message:
+                reason === "expired"
+                  ? "Umbraco rejected the stored refresh token (invalid_grant): it has expired, been revoked, or already been redeemed."
+                  : `Umbraco's token endpoint rejected the refresh request with HTTP ${resp.status}${errorCode ? ` (${errorCode})` : ""}.`,
+            },
+          };
+        }
+
+        let tokens: TokenResponse;
+        try {
+          tokens = (await resp.json()) as TokenResponse;
+        } catch {
+          logAuth(env, `refreshUmbracoToken UNPARSEABLE BODY key=${tokenKey} status=${resp.status}`);
+          return {
+            ok: false,
+            failure: {
+              ok: false,
+              reason: "server_error",
+              status: resp.status,
+              message: "Umbraco's token endpoint returned a success status with an unreadable body.",
+            },
+          };
+        }
+
+        if (typeof tokens?.access_token !== "string" || tokens.access_token.length === 0) {
+          logAuth(env, `refreshUmbracoToken NO ACCESS TOKEN key=${tokenKey} status=${resp.status}`);
+          return {
+            ok: false,
+            failure: {
+              ok: false,
+              reason: "server_error",
+              status: resp.status,
+              message: "Umbraco's token endpoint returned a success status but no access token.",
+            },
+          };
+        }
+
+        return { ok: true, tokens };
+      };
+
+      let attempt = await postRefresh(effectiveRefreshToken);
+
+      if (!attempt.ok && attempt.failure.reason === "expired") {
+        // `invalid_grant` is only definitive for the token we actually posted.
+        // A concurrent refresh — or one whose KV write hadn't landed when we
+        // read above — rotates the token underneath us, and Umbraco then
+        // correctly says "already redeemed" for the copy we still held. Re-read
+        // KV once and, only if it now holds something we haven't tried, spend
+        // exactly one more attempt on it. Bounded to a single retry: if that one
+        // also fails, or KV holds the same token, the session really is over.
+        const retryToken = (await readStoredEntry())?.tokens?.refresh_token;
+        if (retryToken && retryToken !== effectiveRefreshToken) {
+          logAuth(
+            env,
+            `refreshUmbracoToken RETRY key=${tokenKey} invalid_grant on the posted token; KV now holds a newer one, retrying once`
+          );
+          attempt = await postRefresh(retryToken);
+        }
+      }
+
+      if (!attempt.ok) {
+        return fail(attempt.failure);
+      }
+
+      const tokens = attempt.tokens;
+
+      // Carry the site context forward so the next refresh round-trip also
+      // uses the per-tenant client_id.
+      //
+      // Guarded: if this throws, Umbraco has already rotated the token and the
+      // old one is spent, but nobody has persisted the new one. Rejecting here
+      // would break the discriminated-union contract and leave the next attempt
+      // replaying a redeemed token — i.e. a false `expired`. Report it as the
+      // transient failure it is instead.
+      try {
+        await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, effectiveSite, env);
       } catch (error) {
         const detail = sanitizeForLog(
           error instanceof Error ? error.message : "unknown error"
         );
-        logAuth(env, `refreshUmbracoToken NETWORK FAILURE key=${tokenKey} error=${detail}`);
-        return fail({
-          ok: false,
-          reason: "network",
-          message: `Could not reach the Umbraco token endpoint: ${detail}`,
-        });
-      }
-
-      span.setAttribute(HostedTelemetryAttributes.HTTP_STATUS, resp.status);
-
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        logAuth(
-          env,
-          `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
-        );
-        const errorCode = parseOAuthErrorCode(body);
-        const reason = classifyRefreshFailure(resp.status, errorCode);
-        return fail({
-          ok: false,
-          reason,
-          status: resp.status,
-          error: errorCode,
-          message:
-            reason === "expired"
-              ? "Umbraco rejected the stored refresh token (invalid_grant): it has expired, been revoked, or already been redeemed."
-              : `Umbraco's token endpoint rejected the refresh request with HTTP ${resp.status}${errorCode ? ` (${errorCode})` : ""}.`,
-        });
-      }
-
-      let tokens: TokenResponse;
-      try {
-        tokens = (await resp.json()) as TokenResponse;
-      } catch {
-        logAuth(env, `refreshUmbracoToken UNPARSEABLE BODY key=${tokenKey} status=${resp.status}`);
+        logAuth(env, `refreshUmbracoToken KV WRITE FAILED key=${tokenKey} error=${detail}`);
         return fail({
           ok: false,
           reason: "server_error",
-          status: resp.status,
-          message: "Umbraco's token endpoint returned a success status with an unreadable body.",
-        });
-      }
-
-      if (typeof tokens?.access_token !== "string" || tokens.access_token.length === 0) {
-        logAuth(env, `refreshUmbracoToken NO ACCESS TOKEN key=${tokenKey} status=${resp.status}`);
-        return fail({
-          ok: false,
-          reason: "server_error",
-          status: resp.status,
-          message: "Umbraco's token endpoint returned a success status but no access token.",
+          message: `Umbraco issued new tokens, but they could not be persisted: ${detail}`,
         });
       }
 
@@ -542,9 +641,6 @@ async function performRefresh(
         HostedTelemetryAttributes.AUTH_ROTATED_REFRESH_TOKEN,
         !!tokens.refresh_token
       );
-      // Carry the site context forward so the next refresh round-trip also
-      // uses the per-tenant client_id.
-      await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, effectiveSite, env);
       return {
         ok: true,
         accessToken: tokens.access_token,
