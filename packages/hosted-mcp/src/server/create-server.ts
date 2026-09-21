@@ -27,6 +27,7 @@ import {
   registerToolCollection,
   setTelemetryAdapter,
   getTelemetryAdapter,
+  withRequestTelemetryContext,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
   useDraft202012ToolSchemas,
@@ -35,7 +36,9 @@ import {
   type ToolModeDefinition,
   type CollectionConfiguration,
   type ServerConfigForCollections,
+  type RequestTelemetryContext,
 } from "@umbraco-cms/mcp-server-sdk";
+import { resolveRequestTelemetry } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../types/env.js";
 import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
@@ -521,8 +524,23 @@ async function initPerRequestServer(
   const filterConfig: CollectionConfiguration =
     configLoader.loadFromConfig(effectiveConfig);
 
+  // Request-scoped span enrichment: which tenant, which region, which login.
+  // Resolved here — the only layer that holds both `props` and `env` — and
+  // handed to tool registration so each handler carries *this* request's
+  // values. Deliberately not folded into the tracing adapter's static
+  // attributes: that adapter is module-scoped and shared by every Durable
+  // Object in the isolate, so a tenant key placed there would leak across
+  // sessions (see `createCloudflareTracingAdapter`).
+  const requestTelemetry = await resolveRequestTelemetry(props, env);
+
   // Register tools from all collections (with filtering)
-  const registeredCount = registerCollectionTools(server, options.collections, currentUser, filterConfig);
+  const registeredCount = registerCollectionTools(
+    server,
+    options.collections,
+    currentUser,
+    filterConfig,
+    requestTelemetry,
+  );
 
   // Covers the common case (chaining disabled, or a consumer that
   // registers chained tools after this returns but at least one main
@@ -549,12 +567,19 @@ async function initPerRequestServer(
  *
  * `tool._meta` is forwarded verbatim to `tools/list` so host extensions like
  * OpenAI's `openai/fileParams` reach the client.
+ *
+ * `requestTelemetry`, when supplied, is attached to each registered handler so
+ * the values reach `withTelemetry` on the tool call's own `context` argument.
+ * The closure that carries them belongs to this one `McpServer` — i.e. to one
+ * request — which is what keeps two sessions sharing an isolate from being
+ * attributed to each other. Omit it and nothing extra is wrapped.
  */
 export function registerCollectionTools<TUser>(
   server: McpServer,
   collections: ToolCollectionExport[],
   currentUser: TUser,
   filterConfig: CollectionConfiguration,
+  requestTelemetry?: RequestTelemetryContext,
 ): number {
   let registered = 0;
   for (const collection of collections) {
@@ -583,7 +608,10 @@ export function registerCollectionTools<TUser>(
           annotations,
           ...(tool._meta ? { _meta: tool._meta } : {}),
         },
-        tool.handler as ToolCallback<typeof tool.inputSchema>
+        withRequestTelemetryContext(
+          tool.handler as (...args: any[]) => any,
+          requestTelemetry,
+        ) as ToolCallback<typeof tool.inputSchema>
       );
       registered += 1;
     }

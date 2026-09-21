@@ -139,6 +139,22 @@ export interface HostedMcpEnv {
   /** Cloud region used for `{alias}.{region}.umbraco.io` URL composition (default "euwest01"). */
   UMBRACO_CLOUD_REGION?: string;
 
+  // Telemetry (optional)
+  /**
+   * HMAC key used to derive the `umbraco.mcp.tenant` span attribute from the
+   * resolved `siteId` (generate with: openssl rand -hex 32; set via
+   * `wrangler secret put TENANT_HASH_KEY`).
+   *
+   * Keyed rather than a plain digest so the alias→tenant mapping can't be
+   * rebuilt from exported spans plus a list of Cloud aliases. Absent — local
+   * dev, or a deployment that hasn't had the secret pushed — simply means no
+   * tenant attribute; the plaintext alias is never emitted in its place.
+   *
+   * Changing the key re-labels every tenant from that point on, so treat it as
+   * stable infrastructure rather than something to rotate casually.
+   */
+  TENANT_HASH_KEY?: string;
+
   // Diagnostic (optional)
   /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
   ENABLE_INFO_ENDPOINT?: string;

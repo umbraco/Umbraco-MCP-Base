@@ -126,7 +126,15 @@ wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 
 # Always required
 wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
+
+# Optional — only if tracing is enabled and you want tenant attribution
+wrangler secret put TENANT_HASH_KEY        # openssl rand -hex 32
 ```
+
+`TENANT_HASH_KEY` keys the HMAC behind the `umbraco.mcp.tenant` span attribute.
+Without it, spans simply carry no tenant — the plaintext project alias is never
+emitted in its place. Keep the key stable: changing it re-labels every tenant
+from that point on.
 
 ### 5. Create KV namespace
 

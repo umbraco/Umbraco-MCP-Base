@@ -6,6 +6,9 @@
 #    npx wrangler secret put UMBRACO_BASE_URL
 #    npx wrangler secret put UMBRACO_OAUTH_CLIENT_ID
 #    npx wrangler secret put COOKIE_ENCRYPTION_KEY
+#    npx wrangler secret put TENANT_HASH_KEY   # optional: keys the hashed
+#      `umbraco.mcp.tenant` span attribute. Omit it and spans simply carry no
+#      tenant — the plaintext project alias is never emitted instead.
 # 3. Deploy: npx wrangler deploy
 #
 # Local dev: npx wrangler dev

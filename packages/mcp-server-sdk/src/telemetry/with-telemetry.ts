@@ -32,6 +32,7 @@ import {
   type TelemetrySpan,
 } from "./adapter.js";
 import { getToolCollection } from "./tool-collection-registry.js";
+import { applyRequestTelemetryAttributes } from "./request-context.js";
 import { TelemetryAttributes, TOOLS_CALL_METHOD, type ToolOutcome } from "./attributes.js";
 
 /**
@@ -93,7 +94,13 @@ export function withTelemetry<
 
   return {
     ...tool,
-    handler: (async (args: any, context: any) => {
+    handler: (async (...params: any[]) => {
+      // The MCP SDK calls a tool callback as `(args, extra)` when the tool
+      // declares an `inputSchema` and as `(extra)` when it doesn't, so derive
+      // which argument is the request context rather than assuming the first
+      // shape — the second one is how a no-argument tool arrives.
+      const context: any = params.length >= 2 ? params[1] : params[0];
+
       const attributes: SpanAttributes = {
         ...staticAttributes,
         // Per-call rather than static: dry-run is a runtime toggle.
@@ -110,11 +117,18 @@ export function withTelemetry<
         attributes[TelemetryAttributes.MCP_SESSION_ID] = sessionId;
       }
 
+      // Tenant / region / login session, read fresh off this call's own
+      // context for the same reason `sessionId` is: the active adapter is
+      // module-scoped and shared by every Durable Object in the isolate, so
+      // nothing request-shaped may be closed over there. See
+      // `request-context.ts`.
+      applyRequestTelemetryAttributes(attributes, context);
+
       let handlerStarted = false;
       const run = async (span: TelemetrySpan) => {
         handlerStarted = true;
         try {
-          const result = await originalHandler(args, context);
+          const result = await (originalHandler as (...a: any[]) => any)(...params);
           span.setAttribute(TelemetryAttributes.OUTCOME, classifyResult(result));
           return result;
         } catch (error) {
