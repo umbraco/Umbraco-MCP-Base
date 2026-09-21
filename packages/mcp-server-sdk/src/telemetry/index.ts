@@ -26,6 +26,16 @@ export {
 export { withTelemetry } from "./with-telemetry.js";
 
 export {
+  TELEMETRY_CONTEXT_KEY,
+  getRequestTelemetryContext,
+  applyRequestTelemetryAttributes,
+  prepareRequestTelemetryContext,
+  withRequestTelemetryContext,
+  type RequestTelemetryContext,
+  type WithTelemetryContext,
+} from "./request-context.js";
+
+export {
   TelemetryAttributes,
   TOOLS_CALL_METHOD,
   type ToolOutcome,

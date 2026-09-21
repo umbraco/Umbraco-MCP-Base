@@ -79,6 +79,14 @@ export {
   type AuthRefreshOutcome,
 } from "./telemetry/attributes.js";
 
+// Request-scoped span enrichment (tenant / region / login session).
+// `createPerRequestServer` already applies these; exported for consumers that
+// register tools themselves and want the same attribution.
+export {
+  resolveRequestTelemetry,
+  hashWithKey,
+} from "./telemetry/request-telemetry.js";
+
 // ============================================================================
 // Auth
 // ============================================================================

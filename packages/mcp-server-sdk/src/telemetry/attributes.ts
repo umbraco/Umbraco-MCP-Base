@@ -26,16 +26,41 @@
  * Which layer supplies which key:
  * - **Tool-scoped** keys (`GEN_AI_TOOL_NAME` … `DRY_RUN`) are set by
  *   `withTelemetry`, which knows the tool but not the server or the request.
- * - **Server/request-scoped** keys (`SERVER_NAME` … `TENANT`) are set by the
- *   host's `TelemetryAdapter`, which is constructed per request and does know
- *   them. The SDK names them here so hosts agree on the spelling; it does not
- *   set them.
+ * - **Server-scoped** keys (`SERVER_NAME` … `CLIENT_VERSION`) are set by the
+ *   host's `TelemetryAdapter`. They must be constant for the lifetime of the
+ *   host process/isolate — the adapter lives in module scope, so anything it
+ *   closes over is shared by every span the isolate records.
+ * - **Request-scoped** keys (`TENANT`, `REGION`, `LOGIN_SESSION`) reach
+ *   `withTelemetry` on the tool call's own `context` argument, exactly as
+ *   `MCP_SESSION_ID` does. See `request-context.ts` for why a closure would
+ *   be wrong here.
+ *
+ * The SDK names all of them here so hosts agree on the spelling; it only sets
+ * the tool-scoped and request-scoped ones.
  */
 export const TelemetryAttributes = {
   /** JSON-RPC method being served. Always `tools/call` for tool spans. */
   MCP_METHOD_NAME: "mcp.method.name",
   /** MCP session identifier, when the transport supplies one. */
   MCP_SESSION_ID: "mcp.session.id",
+  /**
+   * Opaque identifier for one *login*, deliberately spelled differently from
+   * `MCP_SESSION_ID`.
+   *
+   * `mcp.session.id` is minted fresh by the MCP transport on every reconnect,
+   * which makes it the wrong granularity for "how many distinct people are
+   * using this". This one is supplied by the host from whatever token the
+   * login produced, so it survives MCP reconnects and only rotates when the
+   * login itself does. Hosts must put an opaque value here — but "opaque"
+   * alone isn't the bar: a value random from birth can still double as a
+   * lookup key into a credential store elsewhere in the host (exactly what
+   * `mcp-hosted`'s login token key is), and exporting *that* verbatim hands
+   * anyone reading spans a way to pull live credentials, not just a way to
+   * count logins. If the value serves double duty like that, key-hash it the
+   * same way an identifying value like a tenant alias would be hashed —
+   * never forward it as-is on the assumption that randomness alone is safe.
+   */
+  LOGIN_SESSION: "umbraco.mcp.login_session",
   /** Tool being invoked, e.g. `get-document-by-id`. */
   GEN_AI_TOOL_NAME: "gen_ai.tool.name",
 
@@ -63,10 +88,19 @@ export const TelemetryAttributes = {
   /** Adapter-supplied: calling MCP client version. */
   CLIENT_VERSION: "umbraco.mcp.client.version",
   /**
-   * Adapter-supplied: opaque tenant key. Must be a keyed hash, never a
-   * plaintext Umbraco Cloud project alias — the alias identifies a customer.
+   * Opaque tenant key. Must be a keyed hash, never a plaintext Umbraco Cloud
+   * project alias — the alias identifies a customer.
+   *
+   * Request-scoped, so hosts supply it through the per-call telemetry context
+   * (see `request-context.ts`), never through the adapter's static attributes.
    */
   TENANT: "umbraco.mcp.tenant",
+  /**
+   * Hosting region the tenant resolved to, e.g. `euwest01`. Low cardinality
+   * and not customer-identifying on its own, so it is emitted in plaintext
+   * next to the hashed `TENANT`. Request-scoped, same carrier as `TENANT`.
+   */
+  REGION: "umbraco.mcp.region",
 } as const;
 
 /** The only `mcp.method.name` value this module emits. Also the span-name prefix. */

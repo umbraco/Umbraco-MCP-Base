@@ -31,6 +31,7 @@ import {
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
 import { getClientTenant } from "../tenant-oauth/binding-store.js";
+import { toHex } from "../crypto/hex.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -90,7 +91,7 @@ function checkAllResourceAliasesMatchClient(
 function generateSecureRandom(length: number = 32): string {
   const buffer = new Uint8Array(length);
   crypto.getRandomValues(buffer);
-  return Array.from(buffer, (b) => b.toString(16).padStart(2, "0")).join("");
+  return toHex(buffer);
 }
 
 /**

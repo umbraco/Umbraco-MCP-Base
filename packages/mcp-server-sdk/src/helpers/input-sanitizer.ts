@@ -9,6 +9,7 @@
  */
 
 import { ToolValidationError } from "./tool-validation-error.js";
+import { resolveToolCallParams } from "./tool-call-params.js";
 
 /**
  * Options for sanitizeStringInput to opt-out of specific checks.
@@ -345,7 +346,15 @@ export function withInputSanitization<
 
   return {
     ...tool,
-    handler: ((args: Record<string, unknown>, context: any) => {
+    handler: ((...params: any[]) => {
+      // `args` is `undefined` (not `extra` mis-bound to it) for a schema-less
+      // tool — see tool-call-params.ts. `tool.inputSchema` is also falsy for
+      // such a tool, so the sanitisation loop below never ran against `extra`
+      // in practice, but the final forward did — fixed alongside it.
+      const { args, context } = resolveToolCallParams(params) as {
+        args: Record<string, unknown> | undefined;
+        context: any;
+      };
       if (args && typeof args === "object" && tool.inputSchema) {
         const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
@@ -362,7 +371,9 @@ export function withInputSanitization<
         }
       }
 
-      return originalHandler(args as any, context);
+      // Forward the SDK's own call shape unchanged, not the just-derived
+      // args/context — preserves the original arity for the next decorator.
+      return (originalHandler as (...a: any[]) => any)(...params);
     }) as import("@modelcontextprotocol/sdk/server/mcp.js").ToolCallback<Args>,
   };
 }

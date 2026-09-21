@@ -1,5 +1,5 @@
 import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-import { DEFAULT_COLLECTION_CONFIG, versionCheckService } from "@umbraco-cms/mcp-server-sdk";
+import { DEFAULT_COLLECTION_CONFIG, TELEMETRY_CONTEXT_KEY, versionCheckService } from "@umbraco-cms/mcp-server-sdk";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections, CollectionConfiguration } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { SiteConfig } from "../../types/multi-site.js";
@@ -1260,5 +1260,106 @@ describe("registerCollectionTools", () => {
     // An explicit empty object IS truthy in our spread guard — preserve the
     // user's intent rather than second-guessing them.
     expect(config).toHaveProperty("_meta", {});
+  });
+
+  it("carries the request's telemetry values on the handler's context", async () => {
+    const tool = createMockTool("read-thing", ["read"]);
+    const seen: any[] = [];
+    tool.handler = (async (_args: unknown, extra: unknown) => {
+      seen.push(extra);
+      return { content: [{ type: "text" as const, text: "ok" }] };
+    }) as any;
+
+    const server = makeMockServer();
+    registerCollectionTools(server, [createMockCollection("misc", [tool])], {} as any, allowAllConfig, {
+      tenant: "hash-a",
+      region: "euwest01",
+      loginSession: "login-a",
+    });
+
+    const [, , registered] = (server.registerTool as jest.Mock).mock.calls[0] as [
+      string,
+      unknown,
+      (...args: any[]) => Promise<unknown>,
+    ];
+    await registered({}, { sessionId: "sess-a" });
+
+    expect(seen[0][TELEMETRY_CONTEXT_KEY]).toEqual({
+      tenant: "hash-a",
+      region: "euwest01",
+      loginSession: "login-a",
+    });
+  });
+
+  it("registers unwrapped handlers when there is nothing to carry", () => {
+    const tool = createMockTool("read-thing", ["read"]);
+
+    const server = makeMockServer();
+    registerCollectionTools(server, [createMockCollection("misc", [tool])], {} as any, allowAllConfig);
+
+    const [, , registered] = (server.registerTool as jest.Mock).mock.calls[0] as [
+      string,
+      unknown,
+      unknown,
+    ];
+    expect(registered).toBe(tool.handler);
+  });
+
+  it("keeps two concurrent per-request registrations from cross-contaminating", async () => {
+    // The bug the carrier design exists to avoid. Two Durable Objects share one
+    // isolate — one module graph, one telemetry adapter — and each registers the
+    // same tool definition through its own `registerCollectionTools` pass. The
+    // two calls are then interleaved and resolved out of order; each must still
+    // see only its own request's values.
+    const seen: Array<{ session: unknown; carried: any }> = [];
+    const gate: Array<() => void> = [];
+    const sharedTool = createMockTool("read-thing", ["read"]);
+    sharedTool.handler = (async (_args: unknown, extra: any) => {
+      seen.push({ session: extra?.sessionId, carried: extra?.[TELEMETRY_CONTEXT_KEY] });
+      await new Promise<void>((resolve) => gate.push(resolve));
+      return { content: [{ type: "text" as const, text: "ok" }] };
+    }) as any;
+    const collections = [createMockCollection("misc", [sharedTool])];
+
+    const serverA = makeMockServer();
+    registerCollectionTools(serverA, collections, {} as any, allowAllConfig, {
+      tenant: "hash-a",
+      region: "euwest01",
+      loginSession: "login-a",
+    });
+    const serverB = makeMockServer();
+    registerCollectionTools(serverB, collections, {} as any, allowAllConfig, {
+      tenant: "hash-b",
+      region: "uksouth01",
+      loginSession: "login-b",
+    });
+
+    const handlerA = (serverA.registerTool as jest.Mock).mock.calls[0][2] as (
+      ...args: any[]
+    ) => Promise<unknown>;
+    const handlerB = (serverB.registerTool as jest.Mock).mock.calls[0][2] as (
+      ...args: any[]
+    ) => Promise<unknown>;
+
+    const inFlightA = handlerA({}, { sessionId: "sess-a" });
+    const inFlightB = handlerB({}, { sessionId: "sess-b" });
+    expect(gate).toHaveLength(2);
+    gate[1]();
+    gate[0]();
+    await Promise.all([inFlightA, inFlightB]);
+
+    const fromA = seen.find((s) => s.session === "sess-a");
+    const fromB = seen.find((s) => s.session === "sess-b");
+
+    expect(fromA?.carried).toEqual({
+      tenant: "hash-a",
+      region: "euwest01",
+      loginSession: "login-a",
+    });
+    expect(fromB?.carried).toEqual({
+      tenant: "hash-b",
+      region: "uksouth01",
+      loginSession: "login-b",
+    });
   });
 });

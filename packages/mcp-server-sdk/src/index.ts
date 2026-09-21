@@ -151,11 +151,18 @@ export {
   withTelemetry,
   TelemetryAttributes,
   TOOLS_CALL_METHOD,
+  TELEMETRY_CONTEXT_KEY,
+  getRequestTelemetryContext,
+  applyRequestTelemetryAttributes,
+  prepareRequestTelemetryContext,
+  withRequestTelemetryContext,
   type TelemetryAdapter,
   type TelemetrySpan,
   type SpanAttributes,
   type AttributeValue,
   type ToolOutcome,
+  type RequestTelemetryContext,
+  type WithTelemetryContext,
 } from "./telemetry/index.js";
 
 // CLI Introspection & Context Generation

@@ -80,9 +80,11 @@ let activeAdapter: TelemetryAdapter = passThroughAdapter;
  * a Durable Object is single-threaded, so one module-level value per isolate is
  * safe. The critical difference from the version-check singleton — which must
  * *not* be shared this way — is that an adapter carries **no per-request
- * state**. It is a function. Whatever request-scoped values a host wants on its
- * spans (client name, tenant key) belong in the closure the host builds when it
- * constructs the adapter for that request, never in mutable state here.
+ * state**. It is a function. Request-scoped values a host wants on its spans
+ * (tenant, region, login session) must not be closed over here *or* in the
+ * adapter the host constructs — one isolate can host several Durable Objects,
+ * so either closure would be shared across sessions. They travel on the tool
+ * call's own `context` instead; see `request-context.ts`.
  *
  * @param adapter - The adapter to install
  */

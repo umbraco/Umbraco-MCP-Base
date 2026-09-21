@@ -182,6 +182,27 @@ describe("withInputSanitization", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("forwards a schema-less tool's single-argument call as a single argument", async () => {
+    // The MCP SDK calls a tool with no inputSchema as `callback(extra)` — one
+    // argument. Hard-destructuring `(args, context)` used to forward that as
+    // `originalHandler(extra, undefined)`, dropping the real `context`.
+    const handler = jest.fn().mockReturnValue({ content: [] });
+    const tool = {
+      name: "test-no-schema",
+      description: "test",
+      // No inputSchema.
+      handler,
+      slices: [],
+    } as any;
+
+    const sanitized = withInputSanitization(tool);
+    const extra = { sessionId: "sess-1" };
+    await (sanitized.handler as (...args: any[]) => any)(extra);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]).toEqual([extra]);
+  });
+
   it("should pass through valid inputs", () => {
     const handler = jest.fn().mockReturnValue({ content: [] });
     const tool = {
