@@ -72,7 +72,7 @@ export interface RequestTelemetryContext {
 
 /** Anything with the carrier attached. `RequestHandlerExtra` in practice. */
 export type WithTelemetryContext = {
-  [TELEMETRY_CONTEXT_KEY]?: RequestTelemetryContext;
+  readonly [TELEMETRY_CONTEXT_KEY]?: Readonly<RequestTelemetryContext>;
 };
 
 /** True when the object carries at least one usable value. */
@@ -91,7 +91,7 @@ function isNonEmpty(value: RequestTelemetryContext): boolean {
  */
 export function getRequestTelemetryContext(
   context: unknown
-): RequestTelemetryContext | undefined {
+): Readonly<RequestTelemetryContext> | undefined {
   if (typeof context !== "object" || context === null) {
     return undefined;
   }
@@ -155,8 +155,11 @@ export function withRequestTelemetryContext<
   }
   // Frozen so a handler can't reach in and rewrite another layer's view of
   // who the caller is, and copied so later mutation of the host's object
-  // can't retroactively change calls already in flight.
-  const carried: RequestTelemetryContext = Object.freeze({ ...telemetry });
+  // can't retroactively change calls already in flight. `Readonly<...>`
+  // makes that a compile-time property of the carrier itself too, not just
+  // an artifact of `applyRequestTelemetryAttributes` reading it before the
+  // wrapped handler runs.
+  const carried: Readonly<RequestTelemetryContext> = Object.freeze({ ...telemetry });
 
   return function attachTelemetryContext(this: unknown, ...params: any[]) {
     const extraIndex = params.length >= 2 ? 1 : 0;

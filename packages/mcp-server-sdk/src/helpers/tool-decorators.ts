@@ -58,9 +58,18 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
 
   return {
     ...tool,
-    handler: (async (args: any, context: any) => {
+    handler: (async (...params: any[]) => {
       try {
-        return await originalHandler(args, context);
+        // Forward exactly what was received: the MCP SDK calls a tool
+        // callback as `(args, extra)` when it declares an `inputSchema` and
+        // as `(extra)` when it doesn't. This is the outermost decorator, so
+        // it's the one that receives that call directly — hard-coding two
+        // named params here silently turned a no-schema tool's `(extra)`
+        // call into a `(extra, undefined)` call for every decorator inside,
+        // dropping `context` (and with it `mcp.session.id` and the
+        // request-scoped telemetry carrier) for exactly the tools that
+        // declare no input.
+        return await (originalHandler as (...a: any[]) => any)(...params);
       } catch (error) {
         console.error(`Error in tool ${tool.name}:`, error);
 

@@ -15,7 +15,7 @@
 import { describe, it, expect, jest, afterEach } from "@jest/globals";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { AuthProps } from "../../types/auth.js";
-import { hashTenant, resolveRequestTelemetry } from "../request-telemetry.js";
+import { hashWithKey, resolveRequestTelemetry } from "../request-telemetry.js";
 import { aliasOnly, regionOnly, hasEmbeddedRegion } from "../../cloud/site-id.js";
 
 const HASH_KEY = "0123456789abcdef0123456789abcdef";
@@ -68,18 +68,18 @@ describe("site-id splitting", () => {
   });
 });
 
-describe("hashTenant", () => {
-  it("is stable for the same siteId across calls", async () => {
-    const first = await hashTenant("example-project.euwest01", HASH_KEY);
-    const second = await hashTenant("example-project.euwest01", HASH_KEY);
+describe("hashWithKey", () => {
+  it("is stable for the same value across calls", async () => {
+    const first = await hashWithKey("example-project.euwest01", HASH_KEY);
+    const second = await hashWithKey("example-project.euwest01", HASH_KEY);
 
     expect(first).toBe(second);
     expect(first).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("differs for a different siteId", async () => {
-    const a = await hashTenant("project-a.euwest01", HASH_KEY);
-    const b = await hashTenant("project-b.euwest01", HASH_KEY);
+  it("differs for a different value", async () => {
+    const a = await hashWithKey("project-a.euwest01", HASH_KEY);
+    const b = await hashWithKey("project-b.euwest01", HASH_KEY);
 
     expect(a).not.toBe(b);
   });
@@ -87,24 +87,32 @@ describe("hashTenant", () => {
   it("keeps two regions of the same alias distinct", async () => {
     // The whole siteId is hashed, not just the alias — so if one alias ever
     // does live in two regions, they stay two tenants.
-    const west = await hashTenant("example-project.euwest01", HASH_KEY);
-    const south = await hashTenant("example-project.uksouth01", HASH_KEY);
+    const west = await hashWithKey("example-project.euwest01", HASH_KEY);
+    const south = await hashWithKey("example-project.uksouth01", HASH_KEY);
 
     expect(west).not.toBe(south);
   });
 
   it("differs under a different key", async () => {
-    const withKey = await hashTenant("example-project.euwest01", HASH_KEY);
-    const withOther = await hashTenant("example-project.euwest01", "a-different-key");
+    const withKey = await hashWithKey("example-project.euwest01", HASH_KEY);
+    const withOther = await hashWithKey("example-project.euwest01", "a-different-key");
 
     expect(withKey).not.toBe(withOther);
   });
 
   it("never contains the plaintext alias", async () => {
-    const hash = await hashTenant("example-project.euwest01", HASH_KEY);
+    const hash = await hashWithKey("example-project.euwest01", HASH_KEY);
 
     expect(hash).not.toContain("example-project");
     expect(hash).not.toContain("euwest01");
+  });
+
+  it("produces a different digest for a login-session value than for a siteId under the same key", async () => {
+    // Same key, different inputs — the two attributes must not collide.
+    const tenant = await hashWithKey("example-project.euwest01", HASH_KEY);
+    const login = await hashWithKey("token-key-abc", HASH_KEY);
+
+    expect(tenant).not.toBe(login);
   });
 });
 
@@ -115,9 +123,13 @@ describe("resolveRequestTelemetry", () => {
       makeEnv()
     );
 
-    expect(telemetry.tenant).toBe(await hashTenant("example-project.euwest01", HASH_KEY));
+    expect(telemetry.tenant).toBe(await hashWithKey("example-project.euwest01", HASH_KEY));
     expect(telemetry.region).toBe("euwest01");
-    expect(telemetry.loginSession).toBe("token-key-abc");
+    // Hashed, not forwarded as-is — `umbracoTokenKey` doubles as the KV
+    // lookup key for this login's stored Umbraco tokens, so the exported
+    // attribute must never equal the raw value.
+    expect(telemetry.loginSession).toBe(await hashWithKey("token-key-abc", HASH_KEY));
+    expect(telemetry.loginSession).not.toBe("token-key-abc");
   });
 
   it("omits the region for a self-hosted siteId without erroring", async () => {
@@ -126,7 +138,7 @@ describe("resolveRequestTelemetry", () => {
       makeEnv()
     );
 
-    expect(telemetry.tenant).toBe(await hashTenant("self-hosted", HASH_KEY));
+    expect(telemetry.tenant).toBe(await hashWithKey("self-hosted", HASH_KEY));
     expect(telemetry).not.toHaveProperty("region");
   });
 
@@ -135,7 +147,7 @@ describe("resolveRequestTelemetry", () => {
 
     expect(telemetry).not.toHaveProperty("tenant");
     expect(telemetry).not.toHaveProperty("region");
-    expect(telemetry.loginSession).toBe("token-key-abc");
+    expect(telemetry.loginSession).toBe(await hashWithKey("token-key-abc", HASH_KEY));
   });
 
   it("omits the login session when there is no token key", async () => {
@@ -165,10 +177,37 @@ describe("resolveRequestTelemetry", () => {
     expect(telemetry.region).toBe("euwest01");
   });
 
-  it("never hashes an absent siteId", async () => {
+  it("omits the login session — but keeps the region — when no hash key is configured", async () => {
+    // The raw token key must never be forwarded just because hashing isn't
+    // available; it's a credential-store lookup key, not a low-cardinality
+    // label like region.
+    const telemetry = await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv({ TENANT_HASH_KEY: undefined })
+    );
+
+    expect(telemetry).not.toHaveProperty("loginSession");
+    expect(telemetry.region).toBe("euwest01");
+  });
+
+  it("treats an empty-string TENANT_HASH_KEY the same as an absent one", async () => {
+    // A Wrangler secret set to "" (misconfiguration) is a distinct code path
+    // from `undefined` — both must still withhold tenant and login-session,
+    // never hash with an empty key.
+    const telemetry = await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv({ TENANT_HASH_KEY: "" })
+    );
+
+    expect(telemetry).not.toHaveProperty("tenant");
+    expect(telemetry).not.toHaveProperty("loginSession");
+    expect(telemetry.region).toBe("euwest01");
+  });
+
+  it("never hashes an absent siteId or an absent login session", async () => {
     const spy = jest.spyOn(crypto.subtle, "sign");
 
-    await resolveRequestTelemetry(makeProps(), makeEnv());
+    await resolveRequestTelemetry({ userId: "user-1", umbracoTokenKey: "" } as AuthProps, makeEnv());
 
     expect(spy).not.toHaveBeenCalled();
   });
@@ -184,6 +223,8 @@ describe("resolveRequestTelemetry", () => {
 
     expect(telemetry).not.toHaveProperty("tenant");
     expect(telemetry.region).toBe("euwest01");
-    expect(telemetry.loginSession).toBe("token-key-abc");
+    // Login-session hashing fails the same way, for the same reason — it
+    // must be dropped too, not fall back to the raw token key.
+    expect(telemetry).not.toHaveProperty("loginSession");
   });
 });

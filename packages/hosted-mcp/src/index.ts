@@ -84,7 +84,7 @@ export {
 // register tools themselves and want the same attribution.
 export {
   resolveRequestTelemetry,
-  hashTenant,
+  hashWithKey,
 } from "./telemetry/request-telemetry.js";
 
 // ============================================================================

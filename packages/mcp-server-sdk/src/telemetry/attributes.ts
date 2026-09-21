@@ -51,8 +51,14 @@ export const TelemetryAttributes = {
    * which makes it the wrong granularity for "how many distinct people are
    * using this". This one is supplied by the host from whatever token the
    * login produced, so it survives MCP reconnects and only rotates when the
-   * login itself does. Hosts must only put an already-opaque value here — one
-   * random from birth, never a hash of something identifying.
+   * login itself does. Hosts must put an opaque value here — but "opaque"
+   * alone isn't the bar: a value random from birth can still double as a
+   * lookup key into a credential store elsewhere in the host (exactly what
+   * `mcp-hosted`'s login token key is), and exporting *that* verbatim hands
+   * anyone reading spans a way to pull live credentials, not just a way to
+   * count logins. If the value serves double duty like that, key-hash it the
+   * same way an identifying value like a tenant alias would be hashed —
+   * never forward it as-is on the assumption that randomness alone is safe.
    */
   LOGIN_SESSION: "umbraco.mcp.login_session",
   /** Tool being invoked, e.g. `get-document-by-id`. */
