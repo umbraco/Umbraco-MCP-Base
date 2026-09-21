@@ -333,10 +333,7 @@ function parseOAuthErrorCode(body: string): string | undefined {
 }
 
 /** Maps a token-endpoint rejection onto a `RefreshFailureReason`. */
-function classifyRefreshFailure(
-  status: number,
-  errorCode: string | undefined
-): RefreshFailureReason {
+function classifyRefreshFailure(errorCode: string | undefined): RefreshFailureReason {
   if (errorCode === "invalid_grant") return "expired";
   if (errorCode && CLIENT_ERROR_CODES.has(errorCode)) return "misconfigured";
   // A 4xx (or 5xx) with no recognised client-error code isn't attributable to
@@ -384,7 +381,16 @@ const inFlightRefreshes = new Map<string, Promise<RefreshTokenResult>>();
  * definitive `expired`, permanently killing a session over a one-time KV
  * write blip. Populated right after a successful exchange, before the KV
  * write is attempted; cleared by `storeUmbracoToken` once a write for that
- * key succeeds (whether that write is this rotation's or a later login's).
+ * *same key* succeeds. A later login never does that: it always mints a
+ * fresh `tokenKey` (`umbraco-handler.ts`), so a key whose refresh never
+ * again succeeds keeps its entry for the isolate's lifetime — the
+ * `invalid_grant` branch in `performRefresh` deletes it as soon as it's
+ * proven dead, which covers the case that actually arises in practice.
+ *
+ * No size or age bound otherwise: a sustained KV outage (rather than a one-
+ * time blip) would leave one entry per still-affected `tokenKey` — the same
+ * unbounded-but-scoped-to-active-sessions shape already accepted for
+ * `inFlightRefreshes` above, not a new failure mode.
  */
 const lastRotatedTokens = new Map<string, string>();
 
@@ -565,7 +571,7 @@ async function performRefresh(
             `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
           );
           const errorCode = parseOAuthErrorCode(body);
-          const reason = classifyRefreshFailure(resp.status, errorCode);
+          const reason = classifyRefreshFailure(errorCode);
           return {
             ok: false,
             failure: {
@@ -624,11 +630,15 @@ async function performRefresh(
         // exactly one more attempt on it. Bounded to a single retry: if that one
         // also fails, or KV holds the same token, the session really is over.
         //
-        // Checks the cache first: a prior refresh that rotated but failed to
-        // persist (see `lastRotatedTokens`) never made it into KV at all, so a
-        // KV-only re-read would miss it and report a false `expired`.
-        const retryToken =
-          lastRotatedTokens.get(tokenKey) ?? (await readStoredEntry())?.tokens?.refresh_token;
+        // If what we posted came from the cache, Umbraco has now proven it dead
+        // too: drop it so it can't shadow a genuinely newer token another
+        // isolate already persisted to KV (the cross-isolate race documented on
+        // `inFlightRefreshes`), and so it doesn't linger forever for a session
+        // that never refreshes successfully again.
+        if (cachedRotatedToken && effectiveRefreshToken === cachedRotatedToken) {
+          lastRotatedTokens.delete(tokenKey);
+        }
+        const retryToken = (await readStoredEntry())?.tokens?.refresh_token;
         if (retryToken && retryToken !== effectiveRefreshToken) {
           logAuth(
             env,

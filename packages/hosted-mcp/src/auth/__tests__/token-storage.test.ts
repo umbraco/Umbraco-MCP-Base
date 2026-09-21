@@ -292,6 +292,57 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     // would have found nothing newer either).
     expect(postedRefreshTokens).toEqual(["rt", "rotated-1"]);
     expect(second).toMatchObject({ ok: true, accessToken: "access-2" });
+
+    // The second call's persist succeeded, so its cache entry must be gone.
+    // Prove it: have a third party write a different token straight to KV
+    // (bypassing this module's own store path, standing in for an unrelated
+    // write to the same key) and check the next call picks that up instead
+    // of a leftover cached value shadowing it.
+    stored = storedEntry("rotated-external");
+    await refreshUmbracoToken(env, "key-cache-recovery", "some-other-snapshot");
+    expect(postedRefreshTokens[2]).toEqual("rotated-external");
+  });
+
+  it("falls back to KV instead of replaying a cached token Umbraco has already rejected", async () => {
+    // Regression: the `invalid_grant` retry used to check the cache before
+    // KV, but the cache can only ever equal the token that was just posted —
+    // so once populated, that lookup was always a no-op and could never fall
+    // through to a genuinely newer token another isolate had persisted to KV
+    // (the cross-isolate race `inFlightRefreshes` already documents as an
+    // accepted limitation). That starved the retry of the one case it exists
+    // for, turning a recoverable situation into a false `expired`.
+    let putShouldThrow = true;
+    let stored: string | null = null;
+    const kv = {
+      get: async () => stored,
+      put: async (_key: string, value: string) => {
+        if (putShouldThrow) throw new Error("kv write quota exceeded");
+        stored = value;
+      },
+      delete: async () => undefined,
+    };
+    const env = createEnv(kv as unknown as ReturnType<typeof createKv>);
+
+    respondWith(
+      json({ access_token: "access-1", refresh_token: "cached-only" }, 200),
+      json({ error: "invalid_grant" }, 400),
+      json({ access_token: "access-2", refresh_token: "rotated-2" }, 200)
+    );
+
+    const first = await refreshUmbracoToken(env, "key-cross-isolate", "rt");
+    expect(first).toMatchObject({ ok: false, reason: "server_error" });
+
+    // Simulate another isolate persisting a genuinely newer token while this
+    // isolate's cache still holds the one from its own failed write above.
+    stored = storedEntry("kv-newer");
+    putShouldThrow = false;
+
+    const second = await refreshUmbracoToken(env, "key-cross-isolate", "rt");
+
+    // Posts the stale cached token first, as before; on invalid_grant it must
+    // fall through to KV's newer token rather than reporting `expired`.
+    expect(postedRefreshTokens).toEqual(["rt", "cached-only", "kv-newer"]);
+    expect(second).toMatchObject({ ok: true, accessToken: "access-2" });
   });
 
   it("keeps token material out of the failure message", async () => {
