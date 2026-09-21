@@ -28,7 +28,10 @@ export const SERVER_INIT_SPAN = "mcp.server.init";
 export const AUTH_REFRESH_SPAN = "mcp.auth.refresh";
 
 export const HostedTelemetryAttributes = {
-  /** `full` when tools were registered, `degraded-auth-expired` when the KV token was gone. */
+  /**
+   * `full` when tools were registered, `degraded-auth-expired` when the KV token
+   * was gone or its refresh token was definitively rejected by Umbraco.
+   */
   INIT_MODE: "umbraco.mcp.init.mode",
   /** Number of tools registered on the server this request will use. */
   INIT_TOOL_COUNT: "umbraco.mcp.init.tool_count",
@@ -37,6 +40,12 @@ export const HostedTelemetryAttributes = {
 
   /** `refreshed` when Umbraco issued a new access token, `failed` otherwise. */
   AUTH_OUTCOME: "umbraco.mcp.auth.outcome",
+  /**
+   * Why a refresh failed, as one of the normalised `AuthRefreshFailureReason`
+   * values — never the raw OAuth error string or response body, both of which
+   * can carry instance-identifying detail and must not leave the account.
+   */
+  AUTH_FAILURE_REASON: "umbraco.mcp.auth.failure_reason",
   /** Whether the refresh used a per-site OAuth client rather than the Worker-wide one. */
   AUTH_SITE_CONTEXT: "umbraco.mcp.auth.site_context",
   /** Whether Umbraco returned a new refresh token to store alongside the access token. */
@@ -54,3 +63,14 @@ export type ServerInitMode = "full" | "degraded-auth-expired";
 
 /** `umbraco.mcp.auth.outcome` values. */
 export type AuthRefreshOutcome = "refreshed" | "failed";
+
+/**
+ * `umbraco.mcp.auth.failure_reason` values — the normalised classification of a
+ * failed refresh. Mirrors `RefreshFailureReason` in `auth/token-storage.ts`;
+ * only `expired` is definitive enough to strip a session's toolset.
+ */
+export type AuthRefreshFailureReason =
+  | "expired"
+  | "misconfigured"
+  | "server_error"
+  | "network";

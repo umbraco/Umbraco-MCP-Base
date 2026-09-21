@@ -133,6 +133,7 @@ describe("mcp.server.init span", () => {
 describe("mcp.auth.refresh span", () => {
   const originalFetch = globalThis.fetch;
   let logSpy: ReturnType<typeof jest.spyOn>;
+  let warnSpy: ReturnType<typeof jest.spyOn>;
 
   const refreshEnv = {
     UMBRACO_BASE_URL: "https://example.com",
@@ -147,11 +148,13 @@ describe("mcp.auth.refresh span", () => {
   beforeEach(() => {
     recordSpans();
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     logSpy.mockRestore();
+    warnSpy.mockRestore();
     clearTelemetryAdapter();
   });
 
@@ -163,9 +166,9 @@ describe("mcp.auth.refresh span", () => {
       )) as typeof fetch;
 
     const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
-    const token = await refreshUmbracoToken(refreshEnv, "token-key", "old-refresh");
+    const result = await refreshUmbracoToken(refreshEnv, "token-key", "old-refresh");
 
-    expect(token).toBe("new-access");
+    expect(result).toMatchObject({ ok: true, accessToken: "new-access" });
     expect(spanNamed(AUTH_REFRESH_SPAN)!.attributes).toMatchObject({
       [HostedTelemetryAttributes.AUTH_OUTCOME]: "refreshed",
       [HostedTelemetryAttributes.HTTP_STATUS]: 200,
@@ -173,16 +176,17 @@ describe("mcp.auth.refresh span", () => {
     });
   });
 
-  it("records a failed refresh with its status", async () => {
+  it("records a failed refresh with its status and normalised reason", async () => {
     globalThis.fetch = (async () =>
       new Response("invalid_grant", { status: 400 })) as typeof fetch;
 
     const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
-    const token = await refreshUmbracoToken(refreshEnv, "token-key", "expired-refresh");
+    const result = await refreshUmbracoToken(refreshEnv, "token-key", "stale-refresh");
 
-    expect(token).toBeNull();
+    expect(result).toMatchObject({ ok: false, reason: "expired", status: 400 });
     expect(spanNamed(AUTH_REFRESH_SPAN)!.attributes).toMatchObject({
       [HostedTelemetryAttributes.AUTH_OUTCOME]: "failed",
+      [HostedTelemetryAttributes.AUTH_FAILURE_REASON]: "expired",
       [HostedTelemetryAttributes.HTTP_STATUS]: 400,
     });
   });
@@ -210,7 +214,11 @@ describe("mcp.auth.refresh span", () => {
       new Response("invalid_grant: user 42 at /Users/someone/site", { status: 400 })) as typeof fetch;
 
     const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
-    await refreshUmbracoToken(refreshEnv, "secret-token-key", "expired");
+    // The refresh token fixture deliberately shares no substring with the
+    // normalised failure reasons (`expired`, `network`, …), which the span now
+    // carries legitimately — otherwise this assertion would fail on vocabulary
+    // rather than on a leak.
+    await refreshUmbracoToken(refreshEnv, "secret-token-key", "s3cr3t-refresh-material");
 
     // The logAuth lines deliberately carry the key and body for `wrangler tail`;
     // the span must not, because spans leave the account.
@@ -218,6 +226,41 @@ describe("mcp.auth.refresh span", () => {
     expect(serialised).not.toContain("secret-token-key");
     expect(serialised).not.toContain("invalid_grant");
     expect(serialised).not.toContain("/Users/someone");
-    expect(serialised).not.toContain("expired");
+    expect(serialised).not.toContain("s3cr3t-refresh-material");
+  });
+
+  it("warns unconditionally on failure with status and error code, and no token material", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "invalid_grant" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
+    // LOG_AUTH is unset on `refreshEnv`, so the only line that may appear is
+    // the warn — the whole point of the issue's "no evidence to work from".
+    await refreshUmbracoToken(refreshEnv, "secret-token-key", "s3cr3t-refresh-material");
+
+    const warnings = warnSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    const failure = warnings.find((l: string) => l.includes("token refresh FAILED"));
+    expect(failure).toBeDefined();
+    expect(failure).toContain("reason=expired");
+    expect(failure).toContain("status=400");
+    expect(failure).toContain("error=invalid_grant");
+    expect(failure).not.toContain("s3cr3t-refresh-material");
+    expect(failure).not.toContain("secret-token-key");
+  });
+
+  it("does not warn on a successful refresh", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ access_token: "new-access" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
+    await refreshUmbracoToken(refreshEnv, "token-key", "old-refresh");
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

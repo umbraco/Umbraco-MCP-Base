@@ -77,6 +77,7 @@ export {
   HostedTelemetryAttributes,
   type ServerInitMode,
   type AuthRefreshOutcome,
+  type AuthRefreshFailureReason,
 } from "./telemetry/attributes.js";
 
 // ============================================================================
@@ -92,6 +93,10 @@ export {
 export {
   getStoredUmbracoToken,
   refreshUmbracoToken,
+  type RefreshTokenResult,
+  type RefreshSuccess,
+  type RefreshFailure,
+  type RefreshFailureReason,
 } from "./auth/token-storage.js";
 
 export {
@@ -118,6 +123,7 @@ export {
   CAPTURE_RAW_HTTP_RESPONSE,
   type UmbracoFetchClient,
   type UmbracoFetchClientConfig,
+  type UmbracoFetchRequestConfig,
   type FetchClientOptions,
 } from "./http/umbraco-fetch-client.js";
 

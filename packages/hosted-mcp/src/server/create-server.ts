@@ -286,6 +286,65 @@ function sanitizeForLog(value: unknown): string {
 }
 
 /**
+ * Builds the degraded, single-tool server used when this session has no usable
+ * Umbraco credentials — either KV has no token entry at all, or the stored
+ * refresh token has been definitively rejected by Umbraco.
+ *
+ * One tool, whose only job is to tell the client to reconnect. Returning the
+ * full toolset instead would give the model a hundred tools that each 401.
+ */
+function createAuthExpiredServer(
+  options: Pick<CreateServerOptions, "name" | "version">,
+  instructions: string | undefined,
+  detail: string
+): McpServer {
+  const server = new McpServer(
+    { name: options.name, version: options.version },
+    {
+      jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+      instructions,
+    },
+  );
+  server.registerTool(
+    "authentication-expired",
+    {
+      description: "Your Umbraco session has expired. Disconnect and reconnect this MCP server to re-authenticate.",
+      inputSchema: z.object({}),
+      annotations: {
+        title: "Authentication Expired",
+        readOnlyHint: true,
+      },
+    },
+    async () => ({
+      content: [
+        {
+          type: "text" as const,
+          text: detail,
+        },
+      ],
+      isError: true,
+    })
+  );
+  useDraft202012ToolSchemas(server);
+  return server;
+}
+
+/** The message the degraded server's single tool returns. */
+const AUTH_EXPIRED_MESSAGE =
+  "Your Umbraco authentication has expired or been invalidated. Please disconnect and reconnect this MCP server to trigger a fresh login.";
+
+/**
+ * Same, but for the case where we know *why*: Umbraco rejected the stored
+ * refresh token outright. Worth saying, because the cause is a configurable
+ * Umbraco setting rather than anything the user did.
+ */
+const REFRESH_EXPIRED_MESSAGE =
+  "Your Umbraco session has expired: the stored refresh token was rejected by Umbraco (invalid_grant). " +
+  "Umbraco derives both token lifetimes from `Umbraco:CMS:Global:TimeOut` (20 minutes by default), so a " +
+  "session left idle for longer than that has to be re-authenticated. Please disconnect and reconnect " +
+  "this MCP server to trigger a fresh login.";
+
+/**
  * Creates a per-request McpServer with tools registered and API client configured.
  *
  * This factory is called for each incoming MCP request to ensure:
@@ -390,36 +449,9 @@ async function initPerRequestServer(
     // invalidated it). Return a degraded server with a single tool that tells the
     // client to disconnect and reconnect to trigger a fresh OAuth flow.
     // No credentials means no version check either — there's nothing to call.
-    const server = new McpServer(
-      { name: options.name, version: options.version },
-      {
-        jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
-        instructions: baseInstructions,
-      },
-    );
-    server.registerTool(
-      "authentication-expired",
-      {
-        description: "Your Umbraco session has expired. Disconnect and reconnect this MCP server to re-authenticate.",
-        inputSchema: z.object({}),
-        annotations: {
-          title: "Authentication Expired",
-          readOnlyHint: true,
-        },
-      },
-      async () => ({
-        content: [
-          {
-            type: "text" as const,
-            text: "Your Umbraco authentication has expired or been invalidated. Please disconnect and reconnect this MCP server to trigger a fresh login.",
-          },
-        ],
-        isError: true,
-      })
-    );
-    useDraft202012ToolSchemas(server);
+    const server = createAuthExpiredServer(options, baseInstructions, AUTH_EXPIRED_MESSAGE);
     console.log(
-      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired tools=1 elapsedMs=${Date.now() - initStartedAt}`
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired cause=no-token-in-kv tools=1 elapsedMs=${Date.now() - initStartedAt}`
     );
     initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "degraded-auth-expired");
     initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 1);
@@ -474,6 +506,25 @@ async function initPerRequestServer(
     expectedUmbracoMajor ? checkVersion() : Promise.resolve(null),
     fetchCurrentUser(fetchClient),
   ]);
+
+  // Those two round-trips are also this request's liveness probe. If either hit
+  // a 401 and the refresh came back with a definitive `invalid_grant`, KV still
+  // holds an entry (so the guard above passed) but the session is over — hand
+  // back the same degraded server rather than a toolset that 401s on every call.
+  //
+  // Gated on `expired` specifically: a network blip or a 5xx from the token
+  // endpoint must not strip a session's tools, because the very next request
+  // may well refresh cleanly.
+  const refreshFailure = fetchClient.getRefreshFailure();
+  if (refreshFailure?.reason === "expired") {
+    const server = createAuthExpiredServer(options, baseInstructions, REFRESH_EXPIRED_MESSAGE);
+    console.log(
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired cause=refresh-rejected tools=1 elapsedMs=${Date.now() - initStartedAt}`
+    );
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "degraded-auth-expired");
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 1);
+    return server;
+  }
 
   const instructions = [baseInstructions, versionCheckMessage]
     .filter((part): part is string => Boolean(part))

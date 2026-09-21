@@ -12,6 +12,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 import {
   getStoredUmbracoToken,
   refreshUmbracoToken,
+  type RefreshFailure,
   type StoredSiteContext,
 } from "../auth/token-storage.js";
 import { logAuth } from "../auth/log.js";
@@ -105,25 +106,90 @@ export interface UmbracoFetchClientConfig {
  * ```
  */
 /**
- * The fetch client function type returned by createUmbracoFetchClient.
+ * A request as the Orval mutator hands it to the client.
  */
-export type UmbracoFetchClient = ReturnType<typeof createUmbracoFetchClient>;
+export interface UmbracoFetchRequestConfig {
+  url: string;
+  method: string;
+  data?: unknown;
+  params?: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
 
-export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
+/**
+ * The fetch client returned by `createUmbracoFetchClient`: an Orval-compatible
+ * mutator, plus a read-out of the last token refresh that failed.
+ */
+export interface UmbracoFetchClient {
+  <T>(
+    requestConfig: UmbracoFetchRequestConfig,
+    options?: FetchClientOptions
+  ): Promise<HttpResponse<T> | T>;
+  /**
+   * The last refresh failure this client observed, or `undefined` if it has
+   * never failed to refresh. `createPerRequestServer` reads this after its
+   * opening round-trips so a definitively dead session (`reason: "expired"`)
+   * can be surfaced as the degraded `authentication-expired` server rather
+   * than as a toolset that 401s on every call.
+   */
+  getRefreshFailure(): RefreshFailure | undefined;
+}
+
+/**
+ * RFC 7807 problem body synthesised when a 401 could not be recovered by a
+ * refresh.
+ *
+ * Umbraco's Management API answers an expired access token with a 401 that has
+ * an **empty body**, so without this the failure surfaced to the user as a bare
+ * `UmbracoApiError: Unauthorized` with nothing to act on. The refresh result
+ * knows exactly what went wrong, so spend it here.
+ */
+function synthesizeRefreshFailureBody(
+  status: number,
+  statusText: string,
+  failure: RefreshFailure
+): Response {
+  const expired = failure.reason === "expired";
+  const problem = {
+    type: expired
+      ? "https://umbraco.com/probs/mcp/session-expired"
+      : "https://umbraco.com/probs/mcp/token-refresh-failed",
+    title: expired ? "Umbraco session expired" : "Umbraco token refresh failed",
+    status,
+    detail: expired
+      ? "Umbraco session expired — disconnect and reconnect this MCP server to re-authenticate. " +
+        "The stored refresh token is no longer valid. Umbraco derives both token lifetimes from " +
+        "`Umbraco:CMS:Global:TimeOut` (20 minutes by default), so a session idle for longer than " +
+        "that has to be re-authenticated."
+      : `The Umbraco access token expired and could not be refreshed, so this request stays unauthorized. ${failure.message}`,
+    // RFC 7807 extension members — the normalised reason and the OAuth error
+    // code, so a caller can branch without re-parsing `detail`.
+    refreshFailureReason: failure.reason,
+    ...(failure.error ? { oauthError: failure.error } : {}),
+  };
+
+  return new Response(JSON.stringify(problem), {
+    status,
+    statusText,
+    headers: { "Content-Type": "application/problem+json" },
+  });
+}
+
+export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): UmbracoFetchClient {
   let currentToken = config.accessToken;
+  // Tracked here rather than read from `config.refreshContext` on every call:
+  // OpenIddict rotates the refresh token on each redemption, so a client that
+  // kept replaying its original one could only ever refresh once ("The
+  // specified refresh token has already been redeemed" on the second attempt).
+  let currentRefreshToken = config.refreshContext?.refreshToken;
+  let lastRefreshFailure: RefreshFailure | undefined;
   const normalizedBaseUrl = normalizeBaseUrl(config.baseUrl);
 
   /**
    * The mutator function - compatible with Orval custom instance pattern.
    */
   async function fetchClient<T>(
-    requestConfig: {
-      url: string;
-      method: string;
-      data?: unknown;
-      params?: Record<string, unknown>;
-      headers?: Record<string, string>;
-    },
+    requestConfig: UmbracoFetchRequestConfig,
     options?: FetchClientOptions
   ): Promise<HttpResponse<T> | T> {
     const queryString = serializeParams(requestConfig.params);
@@ -157,21 +223,28 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
 
     // Handle token refresh on 401
     if (resp.status === 401) {
-      if (config.refreshContext) {
+      if (config.refreshContext && currentRefreshToken) {
         const env = config.refreshContext.env;
         logAuth(
           env,
           `401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
         );
-        const newToken = await refreshUmbracoToken(
+        const result = await refreshUmbracoToken(
           env,
           config.refreshContext.tokenKey,
-          config.refreshContext.refreshToken,
+          currentRefreshToken,
           config.refreshContext.site
         );
 
-        if (newToken) {
-          currentToken = newToken;
+        if (result.ok) {
+          currentToken = result.accessToken;
+          // Adopt the rotated refresh token. Without this the next refresh on
+          // this same client replays a redeemed token and Umbraco answers
+          // `400 invalid_grant`.
+          if (result.refreshToken) {
+            currentRefreshToken = result.refreshToken;
+          }
+          lastRefreshFailure = undefined;
           headers.Authorization = `Bearer ${currentToken}`;
           resp = await fetch(fullUrl, { ...fetchOptions, headers });
           logAuth(
@@ -179,15 +252,23 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
             `retry after refresh ${requestConfig.method} ${requestConfig.url} status=${resp.status}`
           );
         } else {
+          lastRefreshFailure = result;
           logAuth(
             env,
-            `refresh failed — propagating 401 for ${requestConfig.method} ${requestConfig.url}`
+            `refresh failed (${result.reason}) — synthesizing problem details for ${requestConfig.method} ${requestConfig.url}`
+          );
+          // Umbraco's 401 body is empty, so replace it with something the user
+          // can act on before it reaches the MCP client's error rendering.
+          resp = synthesizeRefreshFailureBody(
+            resp.status,
+            resp.statusText || "Unauthorized",
+            result
           );
         }
       } else {
-        // No refreshContext means no refresh_token was stored — we can't
-        // gate this on LOG_AUTH because the caller has no env handle here,
-        // but the resulting 401 will surface to the MCP client regardless.
+        // No refreshContext (or no refresh token left) means auto-refresh is
+        // off for this session — we can't gate a log on LOG_AUTH because the
+        // caller has no env handle here, but the 401 surfaces regardless.
       }
     }
 
@@ -231,7 +312,9 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
     return data;
   }
 
-  return fetchClient;
+  return Object.assign(fetchClient, {
+    getRefreshFailure: () => lastRefreshFailure,
+  }) as UmbracoFetchClient;
 }
 
 /**
@@ -247,7 +330,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig) {
 export async function createFetchClientFromKV(
   env: HostedMcpEnv,
   tokenKey: string
-): Promise<ReturnType<typeof createUmbracoFetchClient> | null> {
+): Promise<UmbracoFetchClient | null> {
   const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
   if (!entry) {
     logAuth(env, `createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
