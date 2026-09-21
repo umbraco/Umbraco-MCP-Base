@@ -127,14 +127,24 @@ wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 # Always required
 wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
 
-# Optional — only if tracing is enabled and you want tenant attribution
+# Optional — only if tracing is enabled and you want tenant/login-session attribution
 wrangler secret put TENANT_HASH_KEY        # openssl rand -hex 32
+
+# Optional — only if login-session needs to rotate independently of tenant
+wrangler secret put LOGIN_SESSION_HASH_KEY # openssl rand -hex 32
 ```
 
-`TENANT_HASH_KEY` keys the HMAC behind the `umbraco.mcp.tenant` span attribute.
-Without it, spans simply carry no tenant — the plaintext project alias is never
-emitted in its place. Keep the key stable: changing it re-labels every tenant
-from that point on.
+`TENANT_HASH_KEY` keys the HMAC behind both the `umbraco.mcp.tenant` and
+`umbraco.mcp.login_session` span attributes — omitting it disables both, not
+just tenant. Without it, spans simply carry neither — the plaintext project
+alias and the raw login token key are never emitted in their place. Keep the
+key stable: changing it re-labels every tenant (and rotates every open
+login's session id) from that point on.
+
+`LOGIN_SESSION_HASH_KEY` is a separate, optional key for `login_session`
+alone — set it only if you need to rotate that dimension's hash (e.g. after a
+suspected leak) without also relabeling every tenant's historical span data.
+Unset, it falls back to `TENANT_HASH_KEY`.
 
 ### 5. Create KV namespace
 

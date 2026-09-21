@@ -9,7 +9,24 @@
 
 import { describe, it, expect, jest } from "@jest/globals";
 import { z } from "zod";
-import { withStandardDecorators } from "../tool-decorators.js";
+import { withStandardDecorators, withPreExecutionCheck } from "../tool-decorators.js";
+
+describe("withPreExecutionCheck", () => {
+  it("forwards a schema-less tool's single-argument call as a single argument", async () => {
+    // The MCP SDK calls a tool with no inputSchema as `callback(extra)` — one
+    // argument. Hard-destructuring `(args, context)` used to forward that as
+    // `originalHandler(extra, undefined)`, dropping the real `context`.
+    const handler = jest.fn().mockReturnValue({ content: [] });
+    const tool = { name: "t", description: "", handler, slices: [] } as any;
+
+    const wrapped = withPreExecutionCheck(tool);
+    const extra = { sessionId: "sess-1" };
+    await (wrapped.handler as (...args: any[]) => any)(extra);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]).toEqual([extra]);
+  });
+});
 
 describe("withStandardDecorators", () => {
   it("preserves `_meta` declared on the tool definition", () => {

@@ -47,7 +47,48 @@ function makeTool(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+describe("prepareRequestTelemetryContext", () => {
+  it("returns undefined for undefined or an empty object", async () => {
+    const { prepareRequestTelemetryContext } = await setup();
+
+    expect(prepareRequestTelemetryContext(undefined)).toBeUndefined();
+    expect(prepareRequestTelemetryContext({})).toBeUndefined();
+  });
+
+  it("returns a frozen copy when there is at least one value", async () => {
+    const { prepareRequestTelemetryContext } = await setup();
+    const source = { tenant: "hash-a" };
+
+    const prepared = prepareRequestTelemetryContext(source);
+
+    expect(prepared).toEqual({ tenant: "hash-a" });
+    expect(prepared).not.toBe(source);
+    expect(Object.isFrozen(prepared)).toBe(true);
+  });
+});
+
 describe("withRequestTelemetryContext", () => {
+  it("reuses an already-prepared carrier instead of re-freezing a new copy", async () => {
+    // The perf path `registerCollectionTools` relies on: prepare once outside
+    // a per-tool loop, then every tool's wrapper should attach that exact
+    // reference rather than paying isNonEmpty + freeze again per tool.
+    const { withRequestTelemetryContext, prepareRequestTelemetryContext, TELEMETRY_CONTEXT_KEY } =
+      await setup();
+    const prepared = prepareRequestTelemetryContext({ tenant: "hash-a" });
+    const seen: any[] = [];
+
+    const wrapped = withRequestTelemetryContext(
+      async (extra: unknown) => {
+        seen.push(extra);
+      },
+      prepared
+    );
+    await wrapped({ sessionId: "sess-1" });
+
+    expect(seen[0][TELEMETRY_CONTEXT_KEY]).toBe(prepared);
+  });
+
+
   it("attaches the values to the extra argument of a two-argument call", async () => {
     const { withRequestTelemetryContext, TELEMETRY_CONTEXT_KEY } = await setup();
     const seen: any[] = [];

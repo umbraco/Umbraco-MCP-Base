@@ -155,6 +155,17 @@ export interface HostedMcpEnv {
    */
   TENANT_HASH_KEY?: string;
 
+  /**
+   * HMAC key used to derive the `umbraco.mcp.login_session` span attribute
+   * from `umbracoTokenKey` (same generation/rotation mechanics as
+   * `TENANT_HASH_KEY`). Optional: **falls back to `TENANT_HASH_KEY`** when
+   * unset, so existing deployments need no change. Set this separately only
+   * when tenant and login-session hashes need independent rotation policies
+   * (e.g. rotating one after a suspected leak without relabeling the other's
+   * historical span data) — otherwise one key for both is fine.
+   */
+  LOGIN_SESSION_HASH_KEY?: string;
+
   // Diagnostic (optional)
   /** Set to "true" to enable the /info diagnostic endpoint (dev-only) */
   ENABLE_INFO_ENDPOINT?: string;

@@ -40,6 +40,7 @@
 
 import type { SpanAttributes } from "./adapter.js";
 import { TelemetryAttributes } from "./attributes.js";
+import { toolCallExtraIndex } from "../helpers/tool-call-params.js";
 
 /**
  * The property on the tool-call `context` (`RequestHandlerExtra`) under which
@@ -78,6 +79,28 @@ export type WithTelemetryContext = {
 /** True when the object carries at least one usable value. */
 function isNonEmpty(value: RequestTelemetryContext): boolean {
   return Boolean(value.tenant || value.region || value.loginSession);
+}
+
+/**
+ * Validates and freezes a telemetry context once, so a caller wrapping many
+ * tool handlers for the same request — `registerCollectionTools`, one call
+ * per registered tool — can reuse the result instead of paying the
+ * `isNonEmpty` check and the freeze allocation again for every tool.
+ *
+ * @param telemetry - The request's raw values
+ * @returns The frozen carrier, or `undefined` for the no-op case (matches
+ *   `withRequestTelemetryContext`'s own short-circuit)
+ */
+export function prepareRequestTelemetryContext(
+  telemetry: RequestTelemetryContext | undefined
+): Readonly<RequestTelemetryContext> | undefined {
+  if (!telemetry || !isNonEmpty(telemetry)) {
+    return undefined;
+  }
+  // Frozen for the reasons `withRequestTelemetryContext` documents below —
+  // copied so later mutation of the host's object can't retroactively change
+  // calls already in flight.
+  return Object.freeze({ ...telemetry });
 }
 
 /**
@@ -144,25 +167,30 @@ export function applyRequestTelemetryAttributes(
  * being observable to anything else holding a reference.
  *
  * @param callback - The tool callback being registered
- * @param telemetry - The request's values; a no-op wrapper when it has none
+ * @param telemetry - The request's values (raw, or already run through
+ *   `prepareRequestTelemetryContext`); a no-op wrapper when there's nothing
+ *   to carry
  * @returns A callback with the same signature
  */
 export function withRequestTelemetryContext<
   Callback extends (...args: any[]) => any
 >(callback: Callback, telemetry: RequestTelemetryContext | undefined): Callback {
-  if (!telemetry || !isNonEmpty(telemetry)) {
+  // A caller registering many tools for the same request (`registerCollectionTools`)
+  // calls `prepareRequestTelemetryContext` once and passes the frozen result
+  // here for every tool — recognise that and skip re-deriving `isNonEmpty` +
+  // re-freezing per tool. `Object.isFrozen` is `true` for `undefined` too, so
+  // the no-op case still routes through here correctly. A direct caller
+  // passing a raw, unprepared object (every test in this file) still gets a
+  // fully self-contained, correct result — just computed here instead.
+  const carried: Readonly<RequestTelemetryContext> | undefined = Object.isFrozen(telemetry)
+    ? (telemetry as Readonly<RequestTelemetryContext> | undefined)
+    : prepareRequestTelemetryContext(telemetry);
+  if (!carried) {
     return callback;
   }
-  // Frozen so a handler can't reach in and rewrite another layer's view of
-  // who the caller is, and copied so later mutation of the host's object
-  // can't retroactively change calls already in flight. `Readonly<...>`
-  // makes that a compile-time property of the carrier itself too, not just
-  // an artifact of `applyRequestTelemetryAttributes` reading it before the
-  // wrapped handler runs.
-  const carried: Readonly<RequestTelemetryContext> = Object.freeze({ ...telemetry });
 
   return function attachTelemetryContext(this: unknown, ...params: any[]) {
-    const extraIndex = params.length >= 2 ? 1 : 0;
+    const extraIndex = toolCallExtraIndex(params);
     const extra = params[extraIndex];
     if (typeof extra === "object" && extra !== null) {
       params[extraIndex] = { ...extra, [TELEMETRY_CONTEXT_KEY]: carried };

@@ -160,7 +160,7 @@ export function withPreExecutionCheck<Args extends undefined | ZodRawShape, Outp
 
   return {
     ...tool,
-    handler: (async (args: any, context: any) => {
+    handler: (async (...params: any[]) => {
       // Check if there's a pre-execution hook and if it blocks
       if (preExecutionHook) {
         const result = preExecutionHook();
@@ -179,7 +179,11 @@ export function withPreExecutionCheck<Args extends undefined | ZodRawShape, Outp
         }
       }
 
-      return await originalHandler(args, context);
+      // Forward the SDK's own call shape unchanged — this decorator doesn't
+      // read args/context itself, and hard-destructuring `(args, context)`
+      // would silently drop `context` for a schema-less tool (see
+      // helpers/tool-call-params.ts).
+      return await (originalHandler as (...a: any[]) => any)(...params);
     }) as ToolCallback<Args>,
   };
 }

@@ -116,6 +116,32 @@ describe("withDryRun", () => {
     expect((result as any).structuredContent.dryRun).toBe(true);
   });
 
+  it("does not leak the extra/context object as inputReceived for a schema-less tool", async () => {
+    // The MCP SDK calls a tool with no inputSchema as `callback(extra)` — one
+    // argument, not two. Hard-destructuring `(args, context)` used to bind
+    // `extra` to `args`, so this preview would return the internal
+    // RequestHandlerExtra (session id, telemetry carrier, etc.) to the client.
+    const { withDryRun, configureDryRunMode } = await getDryRunModule();
+    configureDryRunMode(true);
+
+    const handler = jest.fn();
+    const tool = {
+      name: "test-no-schema",
+      description: "no input schema",
+      handler,
+      slices: ["delete"],
+      // No inputSchema — this tool is called as `handler(extra)`.
+    } as any;
+
+    const extra = { sessionId: "sess-1", umbracoTelemetry: { tenant: "hash-a" } };
+    const wrapped = withDryRun(tool);
+    const result = await (wrapped.handler as (...args: any[]) => any)(extra);
+
+    expect(handler).not.toHaveBeenCalled();
+    const structured = (result as any).structuredContent;
+    expect(structured.inputReceived).toEqual({});
+  });
+
   it("should include annotation info in dry-run response", async () => {
     const { withDryRun, configureDryRunMode } = await getDryRunModule();
     configureDryRunMode(true);

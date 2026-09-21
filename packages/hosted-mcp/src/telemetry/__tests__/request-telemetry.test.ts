@@ -212,6 +212,41 @@ describe("resolveRequestTelemetry", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("hashes login-session under LOGIN_SESSION_HASH_KEY when set, independently of TENANT_HASH_KEY", async () => {
+    const otherKey = "fedcba9876543210fedcba9876543210";
+    const telemetry = await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv({ LOGIN_SESSION_HASH_KEY: otherKey })
+    );
+
+    expect(telemetry.tenant).toBe(await hashWithKey("example-project.euwest01", HASH_KEY));
+    expect(telemetry.loginSession).toBe(await hashWithKey("token-key-abc", otherKey));
+    // Rotating LOGIN_SESSION_HASH_KEY alone must not change the tenant hash.
+    expect(telemetry.loginSession).not.toBe(await hashWithKey("token-key-abc", HASH_KEY));
+  });
+
+  it("imports the HMAC key once, not twice, when tenant and login-session share key material", async () => {
+    const importSpy = jest.spyOn(crypto.subtle, "importKey");
+
+    await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv() // no LOGIN_SESSION_HASH_KEY — falls back to TENANT_HASH_KEY
+    );
+
+    expect(importSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("imports the HMAC key twice when tenant and login-session use distinct keys", async () => {
+    const importSpy = jest.spyOn(crypto.subtle, "importKey");
+
+    await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv({ LOGIN_SESSION_HASH_KEY: "fedcba9876543210fedcba9876543210" })
+    );
+
+    expect(importSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("drops the tenant rather than failing the request when hashing throws", async () => {
     jest.spyOn(crypto.subtle, "importKey").mockRejectedValue(new Error("boom") as never);
     jest.spyOn(console, "error").mockImplementation(() => {});

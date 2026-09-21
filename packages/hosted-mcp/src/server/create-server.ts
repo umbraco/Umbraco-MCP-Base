@@ -27,6 +27,7 @@ import {
   registerToolCollection,
   setTelemetryAdapter,
   getTelemetryAdapter,
+  prepareRequestTelemetryContext,
   withRequestTelemetryContext,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
@@ -531,7 +532,11 @@ async function initPerRequestServer(
   // attributes: that adapter is module-scoped and shared by every Durable
   // Object in the isolate, so a tenant key placed there would leak across
   // sessions (see `createCloudflareTracingAdapter`).
-  const requestTelemetry = await resolveRequestTelemetry(props, env);
+  // Prepared (validated + frozen) once here rather than inside
+  // `registerCollectionTools`'s per-tool loop — every tool in this request
+  // wraps the same reference, so there's no reason to re-check emptiness or
+  // re-freeze a copy once per tool.
+  const requestTelemetry = prepareRequestTelemetryContext(await resolveRequestTelemetry(props, env));
 
   // Register tools from all collections (with filtering)
   const registeredCount = registerCollectionTools(
@@ -572,7 +577,11 @@ async function initPerRequestServer(
  * the values reach `withTelemetry` on the tool call's own `context` argument.
  * The closure that carries them belongs to this one `McpServer` — i.e. to one
  * request — which is what keeps two sessions sharing an isolate from being
- * attributed to each other. Omit it and nothing extra is wrapped.
+ * attributed to each other. Omit it and nothing extra is wrapped. Callers
+ * should pass the result of `prepareRequestTelemetryContext` (already
+ * validated and frozen) rather than a raw value — every tool in this loop
+ * shares the same reference, so preparing it once here instead of once per
+ * tool (inside `withRequestTelemetryContext`) is the whole point.
  */
 export function registerCollectionTools<TUser>(
   server: McpServer,

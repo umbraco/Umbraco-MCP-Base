@@ -154,6 +154,7 @@ export {
   TELEMETRY_CONTEXT_KEY,
   getRequestTelemetryContext,
   applyRequestTelemetryAttributes,
+  prepareRequestTelemetryContext,
   withRequestTelemetryContext,
   type TelemetryAdapter,
   type TelemetrySpan,

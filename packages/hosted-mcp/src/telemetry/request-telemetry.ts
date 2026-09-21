@@ -30,18 +30,41 @@
  * infrastructure, shared by thousands of projects, and identifies nobody. It
  * goes out in plaintext so dashboards can break tenant spread down by region
  * without anyone needing to reverse a hash.
+ *
+ * Tenant and login-session are hashed under `TENANT_HASH_KEY` by default, but
+ * `LOGIN_SESSION_HASH_KEY` (env.ts) can override the latter independently —
+ * rotating one need not relabel the other's historical span data. When both
+ * resolve to the same key material (the default), the imported `CryptoKey` is
+ * reused rather than importing it twice per request.
  */
 
 import type { RequestTelemetryContext } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import type { AuthProps } from "../types/auth.js";
 import { regionOnly } from "../cloud/site-id.js";
+import { toHex } from "../crypto/hex.js";
 
-/** Hex-encodes a digest. Lower case, no separators — a stable attribute value. */
-function toHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+/**
+ * Imports raw key material for HMAC-SHA256 signing.
+ *
+ * Split out from `hashWithKey` so a caller signing more than one value under
+ * the same key material in one request (`resolveRequestTelemetry`) can import
+ * once and reuse the `CryptoKey`, instead of paying `importKey` per value.
+ */
+async function importHmacKey(key: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+}
+
+/** Signs `value` with an already-imported HMAC key and returns lower-case hex. */
+async function signHex(cryptoKey: CryptoKey, value: string): Promise<string> {
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(value));
+  return toHex(new Uint8Array(signature));
 }
 
 /**
@@ -59,23 +82,17 @@ function toHex(buffer: ArrayBuffer): string {
  * key outside the Worker.
  *
  * `crypto.subtle` is available on the Workers runtime and on Node 18+, so this
- * needs no polyfill in either place.
+ * needs no polyfill in either place. Standalone convenience — imports the key
+ * fresh every call; `resolveRequestTelemetry` uses `importHmacKey`/`signHex`
+ * directly so it can reuse one import across both attributes.
  *
  * @param value - The value to hash, e.g. a `siteId` or an `umbracoTokenKey`
- * @param key - The `TENANT_HASH_KEY` secret
+ * @param key - The hash key secret (`TENANT_HASH_KEY` or `LOGIN_SESSION_HASH_KEY`)
  * @returns Lower-case hex HMAC-SHA256 digest
  */
 export async function hashWithKey(value: string, key: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(value));
-  return toHex(signature);
+  const cryptoKey = await importHmacKey(key);
+  return signHex(cryptoKey, value);
 }
 
 /**
@@ -103,24 +120,23 @@ export async function resolveRequestTelemetry(
     }
   }
 
-  const hashKey = env.TENANT_HASH_KEY;
-  if (typeof hashKey !== "string" || hashKey.length === 0) {
-    // No key configured (local dev, or the secret isn't deployed yet). Tenant
-    // and login-session both ride this same hash — the alias must not be
-    // emitted in tenant's place, and the raw token key must not be emitted in
-    // login-session's. Dropping both rather than the SDK's older behaviour
-    // (forwarding the token key unhashed) is deliberate: `umbracoTokenKey` is
-    // also the KV lookup key for that login's stored Umbraco access/refresh
-    // tokens (`token-storage.ts`), so exporting it verbatim to the tracing
-    // backend would hand anyone who can read spans a live credential-store
-    // key. Region alone (already plaintext, already low-cardinality) still
-    // goes out.
-    return telemetry;
-  }
+  const tenantKey = env.TENANT_HASH_KEY;
+  // Independent key optional, defaults to tenant's — see env.ts and the
+  // module doc comment above.
+  const loginSessionKey = env.LOGIN_SESSION_HASH_KEY || tenantKey;
 
-  if (siteId) {
+  // No key configured (local dev, or the secret isn't deployed yet) leaves
+  // the corresponding attribute unset — the alias must not be emitted in
+  // tenant's place, and the raw token key must not be emitted in
+  // login-session's (it's also the KV lookup key for that login's stored
+  // Umbraco access/refresh tokens, see `hashWithKey`'s doc comment). Region
+  // alone (already plaintext, already low-cardinality) still goes out
+  // regardless of either key's presence.
+  let tenantCryptoKey: CryptoKey | undefined;
+  if (siteId && typeof tenantKey === "string" && tenantKey.length > 0) {
     try {
-      telemetry.tenant = await hashWithKey(siteId, hashKey);
+      tenantCryptoKey = await importHmacKey(tenantKey);
+      telemetry.tenant = await signHex(tenantCryptoKey, siteId);
     } catch (error) {
       console.error("[mcp-hosted] failed to compute tenant hash; omitting the attribute:", error);
     }
@@ -130,12 +146,18 @@ export async function resolveRequestTelemetry(
   // only rotated when the refresh token expires, so it survives the MCP
   // transport's reconnects in a way `mcp.session.id` deliberately doesn't.
   // Hashed all the same: being random doesn't stop it from also being the KV
-  // key that unlocks this login's stored Umbraco tokens (see `hashWithKey`'s
-  // doc comment) — the exported attribute must not double as that key.
+  // key that unlocks this login's stored Umbraco tokens.
   const loginSession = props?.umbracoTokenKey;
-  if (typeof loginSession === "string" && loginSession.length > 0) {
+  if (typeof loginSession === "string" && loginSession.length > 0 &&
+    typeof loginSessionKey === "string" && loginSessionKey.length > 0) {
     try {
-      telemetry.loginSession = await hashWithKey(loginSession, hashKey);
+      // Reuse the tenant import when both attributes share key material
+      // (the default) instead of importing it a second time.
+      const cryptoKey =
+        loginSessionKey === tenantKey && tenantCryptoKey
+          ? tenantCryptoKey
+          : await importHmacKey(loginSessionKey);
+      telemetry.loginSession = await signHex(cryptoKey, loginSession);
     } catch (error) {
       console.error(
         "[mcp-hosted] failed to compute login-session hash; omitting the attribute:",

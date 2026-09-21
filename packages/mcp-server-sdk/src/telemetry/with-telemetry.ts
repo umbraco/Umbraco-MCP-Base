@@ -26,6 +26,7 @@ import { ToolDefinition } from "../types/tool-definition.js";
 import { ToolValidationError } from "../helpers/tool-validation-error.js";
 import { UmbracoApiError } from "../helpers/api-call-helpers.js";
 import { isDryRunEnabled } from "../helpers/dry-run.js";
+import { resolveToolCallParams } from "../helpers/tool-call-params.js";
 import {
   getTelemetryAdapter,
   type SpanAttributes,
@@ -95,11 +96,7 @@ export function withTelemetry<
   return {
     ...tool,
     handler: (async (...params: any[]) => {
-      // The MCP SDK calls a tool callback as `(args, extra)` when the tool
-      // declares an `inputSchema` and as `(extra)` when it doesn't, so derive
-      // which argument is the request context rather than assuming the first
-      // shape — the second one is how a no-argument tool arrives.
-      const context: any = params.length >= 2 ? params[1] : params[0];
+      const { context } = resolveToolCallParams(params) as { context: any };
 
       const attributes: SpanAttributes = {
         ...staticAttributes,
