@@ -11,6 +11,8 @@
  * prefix and get everything this product emits.
  */
 
+import type { RefreshFailureReason } from "../auth/token-storage.js";
+
 /**
  * Span covering `createPerRequestServer`.
  *
@@ -66,11 +68,9 @@ export type AuthRefreshOutcome = "refreshed" | "failed";
 
 /**
  * `umbraco.mcp.auth.failure_reason` values — the normalised classification of a
- * failed refresh. Mirrors `RefreshFailureReason` in `auth/token-storage.ts`;
- * only `expired` is definitive enough to strip a session's toolset.
+ * failed refresh. Aliases `RefreshFailureReason` from `auth/token-storage.ts`
+ * (the type-only import back into that module is erased at compile time, so
+ * this isn't a runtime cycle) so the two can't drift apart. Only `expired` is
+ * definitive enough to strip a session's toolset.
  */
-export type AuthRefreshFailureReason =
-  | "expired"
-  | "misconfigured"
-  | "server_error"
-  | "network";
+export type AuthRefreshFailureReason = RefreshFailureReason;

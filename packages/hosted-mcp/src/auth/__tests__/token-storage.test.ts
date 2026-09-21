@@ -109,15 +109,17 @@ describe("refreshUmbracoToken failure classification", () => {
     expect((result as { error?: string }).error).toBeUndefined();
   });
 
-  it("reports an unattributable 4xx as misconfigured rather than expired", async () => {
-    // The exact case the classifier's comment calls out: a 4xx we cannot pin on
-    // the token must never read as a definitive `expired`, or an unrelated
-    // gateway rejection would end a healthy session.
+  it("reports an unattributable 4xx as a server error rather than misconfigured or expired", async () => {
+    // A 4xx we cannot pin on a known client-error code must never read as a
+    // definitive `expired`, nor as `misconfigured` — `misconfigured` degrades
+    // the session (see create-server.ts) just like `expired` does, and a
+    // WAF/CDN/rate-limiter blip in front of the token endpoint has nothing to
+    // do with the client registration.
     respondWith(text("Forbidden by upstream policy", 403));
 
     const result = await refreshUmbracoToken(createEnv(createKv()), "key-ambiguous-4xx", "rt");
 
-    expect(result).toMatchObject({ ok: false, reason: "misconfigured", status: 403 });
+    expect(result).toMatchObject({ ok: false, reason: "server_error", status: 403 });
   });
 
   it("reports a 200 with an unparseable body as a server error", async () => {
@@ -254,6 +256,42 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     const result = await refreshUmbracoToken(env, "key-kv-write-throws", "rt");
 
     expect(result).toMatchObject({ ok: false, reason: "server_error" });
+  });
+
+  it("recovers using the cached rotated token instead of replaying a stale snapshot", async () => {
+    // Regression: `storeUmbracoToken` throwing right after a successful token
+    // exchange used to lose the rotated token entirely — KV never got it, so
+    // the very next refresh replayed the caller's now-dead snapshot, got
+    // `invalid_grant` with nothing newer in KV either, and reported a
+    // definitive `expired` over what was really a one-time KV write blip.
+    let putAttempts = 0;
+    let stored: string | null = null;
+    const kv = {
+      get: async () => stored,
+      put: async (_key: string, value: string) => {
+        putAttempts += 1;
+        if (putAttempts === 1) throw new Error("kv write quota exceeded");
+        stored = value;
+      },
+      delete: async () => undefined,
+    };
+    const env = createEnv(kv as unknown as ReturnType<typeof createKv>);
+
+    respondWith(
+      json({ access_token: "access-1", refresh_token: "rotated-1" }, 200),
+      json({ access_token: "access-2", refresh_token: "rotated-2" }, 200)
+    );
+
+    const first = await refreshUmbracoToken(env, "key-cache-recovery", "rt");
+    expect(first).toMatchObject({ ok: false, reason: "server_error" });
+
+    const second = await refreshUmbracoToken(env, "key-cache-recovery", "rt");
+
+    // Posts the token from the failed-write rotation, not the caller's stale
+    // "rt" snapshot (KV itself never got the first write, so a KV-only re-read
+    // would have found nothing newer either).
+    expect(postedRefreshTokens).toEqual(["rt", "rotated-1"]);
+    expect(second).toMatchObject({ ok: true, accessToken: "access-2" });
   });
 
   it("keeps token material out of the failure message", async () => {

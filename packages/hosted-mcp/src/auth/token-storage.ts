@@ -9,6 +9,7 @@ import { normalizeBaseUrl, getTelemetryAdapter } from "@umbraco-cms/mcp-server-s
 import type { HostedMcpEnv } from "../types/env.js";
 import { logAuth } from "./log.js";
 import { AUTH_REFRESH_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
+import { sanitizeForLog } from "../util/log-sanitize.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -149,6 +150,10 @@ export async function storeUmbracoToken(
     JSON.stringify(entry),
     { expirationTtl: 30 * 24 * 60 * 60 } // 30 days
   );
+  // This write is now the source of truth for `tokenKey` — whether it's a
+  // refresh's rotation or a fresh login. Drop any cached rotated token so a
+  // stale one from an earlier failed write can never outrank it.
+  lastRotatedTokens.delete(tokenKey);
 }
 
 /**
@@ -290,15 +295,6 @@ export interface RefreshFailure {
 
 export type RefreshTokenResult = RefreshSuccess | RefreshFailure;
 
-/**
- * Strips control characters so a value that ends up in a log line (or in a
- * problem body we hand back to the MCP client) can't forge one.
- */
-function sanitizeForLog(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\x00-\x1F\x7F]/g, "?");
-}
-
 /** OAuth 2.0 error codes that mean "your client is wrong", not "your token is stale". */
 const CLIENT_ERROR_CODES = new Set([
   "invalid_client",
@@ -343,10 +339,13 @@ function classifyRefreshFailure(
 ): RefreshFailureReason {
   if (errorCode === "invalid_grant") return "expired";
   if (errorCode && CLIENT_ERROR_CODES.has(errorCode)) return "misconfigured";
-  if (status >= 500) return "server_error";
-  // A 4xx we can't attribute to the token: most likely the client registration.
-  // Deliberately NOT `expired` — see the `RefreshFailureReason` doc comment.
-  return "misconfigured";
+  // A 4xx (or 5xx) with no recognised client-error code isn't attributable to
+  // the client registration — it's as likely a WAF/CDN/rate-limiter blip in
+  // front of the token endpoint. `misconfigured` degrades the session (see
+  // `create-server.ts`), so guessing it here for an unrecognised 4xx would let
+  // a transient gateway rejection do the same damage a single network blip
+  // must not: only a known client-error code means "your client is wrong".
+  return "server_error";
 }
 
 /**
@@ -363,8 +362,31 @@ function classifyRefreshFailure(
  * Module-scoped is correct here: the key is the per-session KV reference, so
  * two different users can never collide, and a Worker isolate is single-
  * threaded (entries are removed as soon as the refresh settles).
+ *
+ * Known limitation, accepted rather than solved here: this only coalesces
+ * refreshes within one isolate. Two isolates (or a Durable Object relocation)
+ * racing on the same `tokenKey` aren't coalesced, and KV is only eventually
+ * consistent, so the losing isolate's bounded retry (see `performRefresh`)
+ * could still observe a pre-propagation read and report a false `expired`. A
+ * narrow, low-probability edge case inherent to KV rather than a defect in
+ * this coalescing.
  */
 const inFlightRefreshes = new Map<string, Promise<RefreshTokenResult>>();
+
+/**
+ * The refresh token from the most recent successful token exchange for a
+ * given `tokenKey`, kept only until it's confirmed persisted to KV.
+ *
+ * Exists for one failure mode: `storeUmbracoToken` throws *after* Umbraco has
+ * already rotated the token. Without this, that rotated token is nowhere —
+ * KV still holds the now-dead one — so the very next refresh replays it,
+ * gets `invalid_grant`, finds nothing newer in KV either, and reports a
+ * definitive `expired`, permanently killing a session over a one-time KV
+ * write blip. Populated right after a successful exchange, before the KV
+ * write is attempted; cleared by `storeUmbracoToken` once a write for that
+ * key succeeds (whether that write is this rotation's or a later login's).
+ */
+const lastRotatedTokens = new Map<string, string>();
 
 /**
  * Refreshes an expired Umbraco token using the refresh token, stores the new
@@ -440,13 +462,20 @@ async function performRefresh(
   // snapshot. A client instance can outlive several refreshes, and whoever
   // rotated the token last wrote it here; replaying the caller's stale copy
   // is a guaranteed `invalid_grant` ("already been redeemed").
+  //
+  // `lastRotatedTokens` outranks both: it's only ever set to a token Umbraco
+  // issued more recently than whatever KV currently holds (see its own doc
+  // comment for the KV-write-failure case that makes this necessary).
   const stored = await readStoredEntry();
   const persistedRefreshToken = stored?.tokens?.refresh_token;
-  const effectiveRefreshToken = persistedRefreshToken ?? refreshToken;
-  if (persistedRefreshToken && persistedRefreshToken !== refreshToken) {
+  const cachedRotatedToken = lastRotatedTokens.get(tokenKey);
+  const effectiveRefreshToken = cachedRotatedToken ?? persistedRefreshToken ?? refreshToken;
+  if (effectiveRefreshToken !== refreshToken) {
     logAuth(
       env,
-      `refreshUmbracoToken key=${tokenKey} using rotated refresh token from KV instead of the caller's snapshot`
+      `refreshUmbracoToken key=${tokenKey} using ${
+        cachedRotatedToken ? "a rotated token pending KV persistence" : "rotated refresh token from KV"
+      } instead of the caller's snapshot`
     );
   }
   const effectiveSite = site ?? stored?.site;
@@ -594,7 +623,12 @@ async function performRefresh(
         // KV once and, only if it now holds something we haven't tried, spend
         // exactly one more attempt on it. Bounded to a single retry: if that one
         // also fails, or KV holds the same token, the session really is over.
-        const retryToken = (await readStoredEntry())?.tokens?.refresh_token;
+        //
+        // Checks the cache first: a prior refresh that rotated but failed to
+        // persist (see `lastRotatedTokens`) never made it into KV at all, so a
+        // KV-only re-read would miss it and report a false `expired`.
+        const retryToken =
+          lastRotatedTokens.get(tokenKey) ?? (await readStoredEntry())?.tokens?.refresh_token;
         if (retryToken && retryToken !== effectiveRefreshToken) {
           logAuth(
             env,
@@ -610,6 +644,14 @@ async function performRefresh(
 
       const tokens = attempt.tokens;
 
+      // Cache the rotated token before attempting to persist it: Umbraco has
+      // already redeemed the old one at this point, so if the write below
+      // fails, this is the only place the new one still exists. Cleared by
+      // `storeUmbracoToken` once a write for this key actually succeeds.
+      if (tokens.refresh_token) {
+        lastRotatedTokens.set(tokenKey, tokens.refresh_token);
+      }
+
       // Carry the site context forward so the next refresh round-trip also
       // uses the per-tenant client_id.
       //
@@ -617,7 +659,9 @@ async function performRefresh(
       // old one is spent, but nobody has persisted the new one. Rejecting here
       // would break the discriminated-union contract and leave the next attempt
       // replaying a redeemed token — i.e. a false `expired`. Report it as the
-      // transient failure it is instead.
+      // transient failure it is instead. The cache above means that "next
+      // attempt" doesn't have to mean "next attempt after the session is
+      // already gone" — see `lastRotatedTokens`.
       try {
         await storeUmbracoToken(env.OAUTH_KV, tokenKey, tokens, effectiveSite, env);
       } catch (error) {

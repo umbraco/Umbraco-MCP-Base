@@ -13,6 +13,7 @@ import {
   type CloudflareTracing,
 } from "../telemetry/cloudflare-tracing.js";
 import { SERVER_INIT_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
+import { sanitizeForLog } from "../util/log-sanitize.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { z } from "zod";
 import {
@@ -272,17 +273,6 @@ export async function resolveRequestSite(
   }
 
   return options.multiSite?.sites.find((s) => s.id === siteId);
-}
-
-/**
- * Replaces control characters (newlines, NULs, etc.) in a log token with `?`
- * so user-tainted fields can't forge log lines on `wrangler tail`. Returns
- * `<none>` for null/undefined.
- */
-function sanitizeForLog(value: unknown): string {
-  if (value === null || value === undefined) return "<none>";
-  // eslint-disable-next-line no-control-regex
-  return String(value).replace(/[\x00-\x1F\x7F]/g, "?");
 }
 
 /**
