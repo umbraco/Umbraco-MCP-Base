@@ -75,10 +75,12 @@ export interface CloudflareTracingAdapterOptions {
  * tenant. That is the same trap `createPerRequestServer` documents for the
  * SDK's version-check singleton.
  *
- * So request-scoped enrichment (`umbraco.mcp.tenant`, `umbraco.mcp.client.*`,
- * the resolved site) is deliberately **not** supported yet. It needs a
- * per-request carrier rather than a closure, and mislabelled tenant data is
- * worse than absent tenant data.
+ * So request-scoped enrichment is deliberately **not** supported here, and
+ * won't be. It travels a different road: `resolveRequestTelemetry` builds the
+ * values per request, `registerCollectionTools` attaches them to that
+ * request's tool handlers, and `withTelemetry` reads them off the tool call's
+ * own `context` — the same path `mcp.session.id` already takes, with no
+ * closure that outlives the call. See the SDK's `telemetry/request-context.ts`.
  *
  * @param options - The injected `tracing` object and any static attributes
  * @returns An adapter ready to hand to the SDK's `setTelemetryAdapter`

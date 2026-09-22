@@ -9,7 +9,24 @@
 
 import { describe, it, expect, jest } from "@jest/globals";
 import { z } from "zod";
-import { withStandardDecorators } from "../tool-decorators.js";
+import { withStandardDecorators, withPreExecutionCheck } from "../tool-decorators.js";
+
+describe("withPreExecutionCheck", () => {
+  it("forwards a schema-less tool's single-argument call as a single argument", async () => {
+    // The MCP SDK calls a tool with no inputSchema as `callback(extra)` — one
+    // argument. Hard-destructuring `(args, context)` used to forward that as
+    // `originalHandler(extra, undefined)`, dropping the real `context`.
+    const handler = jest.fn().mockReturnValue({ content: [] });
+    const tool = { name: "t", description: "", handler, slices: [] } as any;
+
+    const wrapped = withPreExecutionCheck(tool);
+    const extra = { sessionId: "sess-1" };
+    await (wrapped.handler as (...args: any[]) => any)(extra);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]).toEqual([extra]);
+  });
+});
 
 describe("withStandardDecorators", () => {
   it("preserves `_meta` declared on the tool definition", () => {
@@ -69,5 +86,55 @@ describe("withStandardDecorators", () => {
     const received = (handler.mock.calls[0] as any[])[0] as { file: typeof fileObject };
     expect(received.file).toBe(fileObject);
     expect(received.file).toEqual(fileObject);
+  });
+
+  it("carries sessionId and the request-scoped telemetry carrier through the full chain for a tool with no inputSchema", async () => {
+    // Regression guard: `withErrorHandling` is the outermost decorator, so
+    // it's the one the MCP SDK calls directly. It used to hard-forward two
+    // named params (`args, context`), which turned the SDK's one-argument
+    // `(extra)` call — how it invokes any tool that declares no inputSchema,
+    // e.g. `get-server-info` — into a two-argument `(extra, undefined)` call
+    // for every decorator inside, silently dropping `context` and with it
+    // `mcp.session.id` plus the tenant/region/login-session telemetry carrier.
+    jest.resetModules();
+    const telemetry = await import("../../telemetry/index.js");
+    const { withStandardDecorators } = await import("../tool-decorators.js");
+
+    const spans: Array<{ attributes: Record<string, unknown> }> = [];
+    telemetry.setTelemetryAdapter({
+      startSpan: async (_name, attributes, fn) => {
+        const recorded = { attributes: { ...attributes } };
+        spans.push(recorded);
+        return fn({
+          setAttribute(key, value) {
+            recorded.attributes[key] = value;
+          },
+        });
+      },
+    });
+
+    const tool = {
+      name: "get-server-info",
+      description: "",
+      handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    } as any;
+
+    const decorated = withStandardDecorators(tool);
+    // Applied the same way a host applies it at registration time.
+    const registered = telemetry.withRequestTelemetryContext(decorated.handler as any, {
+      tenant: "hash-a",
+      region: "euwest01",
+      loginSession: "login-a",
+    });
+
+    // Exactly how the MCP SDK calls a tool that declares no inputSchema:
+    // one argument, the request-handler `extra`.
+    await (registered as any)({ sessionId: "sess-1" });
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0].attributes["mcp.session.id"]).toBe("sess-1");
+    expect(spans[0].attributes["umbraco.mcp.tenant"]).toBe("hash-a");
+    expect(spans[0].attributes["umbraco.mcp.region"]).toBe("euwest01");
+    expect(spans[0].attributes["umbraco.mcp.login_session"]).toBe("login-a");
   });
 });

@@ -6,6 +6,13 @@
 #    npx wrangler secret put UMBRACO_BASE_URL
 #    npx wrangler secret put UMBRACO_OAUTH_CLIENT_ID
 #    npx wrangler secret put COOKIE_ENCRYPTION_KEY
+#    npx wrangler secret put TENANT_HASH_KEY   # optional: keys the hashed
+#      `umbraco.mcp.tenant` AND `umbraco.mcp.login_session` span attributes.
+#      Omit it and spans simply carry neither — the plaintext project alias
+#      and the raw login token key are never emitted instead.
+#    npx wrangler secret put LOGIN_SESSION_HASH_KEY  # optional: overrides the
+#      key above for login_session alone, so it can rotate independently of
+#      tenant. Falls back to TENANT_HASH_KEY when unset.
 # 3. Deploy: npx wrangler deploy
 #
 # Local dev: npx wrangler dev

@@ -32,6 +32,7 @@ import type {
   SiteRoutingConfig,
   SiteRoutingResolver,
 } from "../types/multi-site.js";
+import { aliasOnly, hasEmbeddedRegion } from "./site-id.js";
 
 export interface UmbracoCloudRoutingOptions {
   /**
@@ -98,22 +99,6 @@ const DEFAULT_CACHE_TTL = { ok: 60_000, miss: 30_000, error: 10_000 };
 // entries and, if still over the cap, drop the oldest. Stops a stream of
 // unique aliases (typos, scans) from growing the Map without bound.
 const MAX_CACHE_ENTRIES = 1_000;
-// Matches the `.<region>` suffix of a `<alias>.<region>` siteId, e.g.
-// "uksouth01", "euwest01" — a lowercase-letter region name plus a 2-digit
-// instance number. Deliberately narrow so an alias that happens to contain
-// a dot isn't misread as carrying a region.
-const REGION_SUFFIX = /\.[a-z]+\d{2}$/;
-
-function hasEmbeddedRegion(siteId: string): boolean {
-  return REGION_SUFFIX.test(siteId);
-}
-
-// The alias portion of a `<alias>.<region>` siteId — what a Cloud project's
-// own OAuth client registration (which only knows its own bare alias, not
-// "region" as a concept) expects as the `/callback/<id>` path segment.
-function aliasOnly(siteId: string): string {
-  return siteId.replace(REGION_SUFFIX, "");
-}
 
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }

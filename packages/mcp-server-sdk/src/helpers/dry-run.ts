@@ -12,6 +12,7 @@ import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResult } from "./tool-result.js";
+import { resolveToolCallParams } from "./tool-call-params.js";
 
 /**
  * Module-level dry-run toggle.
@@ -53,16 +54,20 @@ export function withDryRun<
 
   return {
     ...tool,
-    handler: ((args: any, context: any) => {
+    handler: ((...params: any[]) => {
       if (!dryRunEnabled) {
-        return originalHandler(args, context);
+        return originalHandler(...(params as [any, any]));
       }
 
       // Read-only tools execute normally in dry-run mode
       const isReadOnly = tool.annotations?.readOnlyHint === true;
       if (isReadOnly) {
-        return originalHandler(args, context);
+        return originalHandler(...(params as [any, any]));
       }
+
+      // `args` is `undefined` (not `extra` mis-bound to it) for a schema-less
+      // tool — see tool-call-params.ts.
+      const { args } = resolveToolCallParams(params);
 
       // Mutation tool — return dry-run preview
       return createToolResult({
