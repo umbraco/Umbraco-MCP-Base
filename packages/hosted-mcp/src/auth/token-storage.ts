@@ -260,6 +260,18 @@ export type RefreshFailureReason =
   | "expired"
   /** The token endpoint rejected the client, not the token (bad client_id/secret, wrong grant). */
   | "misconfigured"
+  /**
+   * The token endpoint rejected the *request itself* (`invalid_request` /
+   * `invalid_scope`) rather than the token or the client's credentials.
+   * Distinct from `misconfigured` because the fix isn't necessarily a bad
+   * client_id/secret — it can be a malformed request, or a scope this
+   * client's registration no longer grants. Still degrading: if it's not
+   * transient (e.g. a scope permanently narrowed on the Umbraco side), the
+   * fixed param set `postRefresh` sends would get rejected the same way on
+   * every single retry forever, and a session must not silently keep
+   * offering a toolset that always 401s with no explanation.
+   */
+  | "request_rejected"
   /** The token endpoint answered, but with a 5xx or an unusable body. */
   | "server_error"
   /** The token endpoint could not be reached at all. */
@@ -304,12 +316,12 @@ export type RefreshTokenResult = RefreshSuccess | RefreshFailure;
 const CLIENT_ERROR_CODES = new Set(["invalid_client", "unauthorized_client", "unsupported_grant_type"]);
 
 /**
- * Recognised OAuth error codes that don't mean the client registration is
- * wrong — `invalid_request` (a malformed token request, e.g. from a proxy
- * mangling the POST body) and `invalid_scope` — so they get `server_error`'s
- * non-degrading treatment rather than `misconfigured`'s. Kept out of
- * `CLIENT_ERROR_CODES` because bucketing them there would point an
- * administrator at a client_id/secret/grant-type problem that isn't theirs.
+ * Recognised OAuth error codes that mean the *request* was rejected —
+ * `invalid_request` (e.g. a proxy mangling the POST body) and `invalid_scope`
+ * — rather than the client's own credentials. Classified separately as
+ * `request_rejected`, not folded into `CLIENT_ERROR_CODES`/`misconfigured`,
+ * because `REFRESH_MISCONFIGURED_MESSAGE` specifically blames client_id/
+ * secret/grant-type — the wrong diagnostic here.
  */
 const REQUEST_ERROR_CODES = new Set(["invalid_request", "invalid_scope"]);
 
@@ -362,12 +374,14 @@ function parseOAuthErrorCode(body: string): string | undefined {
 function classifyRefreshFailure(errorCode: string | undefined): RefreshFailureReason {
   if (errorCode === "invalid_grant") return "expired";
   if (errorCode && CLIENT_ERROR_CODES.has(errorCode)) return "misconfigured";
+  if (errorCode && REQUEST_ERROR_CODES.has(errorCode)) return "request_rejected";
   // A 4xx (or 5xx) with no recognised client-error code isn't attributable to
   // the client registration — it's as likely a WAF/CDN/rate-limiter blip in
   // front of the token endpoint. `misconfigured` degrades the session (see
   // `create-server.ts`), so guessing it here for an unrecognised 4xx would let
   // a transient gateway rejection do the same damage a single network blip
-  // must not: only a known client-error code means "your client is wrong".
+  // must not: only a known client-error or request-error code is definitive
+  // enough to degrade.
   return "server_error";
 }
 

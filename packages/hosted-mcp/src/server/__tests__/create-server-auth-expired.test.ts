@@ -160,10 +160,56 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
   });
 
-  it("uses a distinct cause for an expired token and a rejected client", async () => {
+  it("degrades to the authentication-expired server when Umbraco rejected the request itself", async () => {
+    // A permanently narrowed scope (or a malformed request) fails the same
+    // fixed param set on every retry forever — degrading here is what stops
+    // the session from silently keeping a full, 401-ing toolset indefinitely.
+    refreshFailure = {
+      ok: false,
+      reason: "request_rejected",
+      status: 400,
+      error: "invalid_scope",
+      message: "rejected",
+    };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, env, props);
+
+    expect(toolNames(server)).toEqual(["authentication-expired"]);
+    expect(doneLine(logSpy)).toContain("mode=degraded-auth-expired");
+    expect(doneLine(logSpy)).toContain("cause=refresh-rejected-request");
+  });
+
+  it("tells an administrator to check scope/request handling rather than client credentials", async () => {
+    refreshFailure = {
+      ok: false,
+      reason: "request_rejected",
+      status: 400,
+      error: "invalid_scope",
+      message: "rejected",
+    };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(baseOptions, env, props);
+
+    const tool = (server as unknown as {
+      _registeredTools: Record<string, { handler: () => Promise<{ content: { text: string }[] }> }>;
+    })._registeredTools["authentication-expired"];
+    const result = await tool.handler();
+
+    const text = result.content[0].text;
+    expect(text).toContain("administrator");
+    expect(text).toContain("scope");
+    // Distinct diagnostic from `misconfigured`: this isn't a client_id/secret
+    // problem, and reconnecting replays the same rejected request.
+    expect(text).not.toContain("Umbraco:CMS:Global:TimeOut");
+    expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
+  });
+
+  it("uses a distinct cause for each degrading reason", async () => {
     const causes: string[] = [];
 
-    for (const reason of ["expired", "misconfigured"] as const) {
+    for (const reason of ["expired", "misconfigured", "request_rejected"] as const) {
       logSpy.mockClear();
       refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
 
@@ -173,7 +219,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       causes.push(doneLine(logSpy)!.match(/cause=(\S+)/)![1]);
     }
 
-    expect(causes[0]).not.toEqual(causes[1]);
+    expect(new Set(causes).size).toBe(causes.length);
   });
 
   it.each([["network"], ["server_error"]] as const)(

@@ -101,19 +101,22 @@ describe("refreshUmbracoToken failure classification", () => {
   });
 
   it.each(["invalid_request", "invalid_scope"] as const)(
-    "reports %s as a server error, not misconfigured",
+    "reports %s as request_rejected, not misconfigured",
     async (errorCode) => {
       // `REFRESH_MISCONFIGURED_MESSAGE` specifically tells an administrator to
       // check the client_id/secret/grant-type registration — the wrong
       // diagnostic for a malformed request or bad scope, which can come from
       // a proxy mangling the request rather than the client itself being
-      // misregistered. Bucketing these as `misconfigured` would also degrade
-      // a session with no retry, same as a genuinely dead refresh token.
+      // misregistered. Still degrading like `misconfigured` (not folded into
+      // the retryable `server_error`): `refreshUmbracoToken` always posts the
+      // same fixed param set, so a permanently narrowed scope would otherwise
+      // fail identically forever with the session silently keeping its full,
+      // 401-ing toolset.
       respondWith(json({ error: errorCode }, 400));
 
       const result = await refreshUmbracoToken(createEnv(createKv()), `key-${errorCode}`, "rt");
 
-      expect(result).toMatchObject({ ok: false, reason: "server_error", error: errorCode });
+      expect(result).toMatchObject({ ok: false, reason: "request_rejected", error: errorCode });
     }
   );
 
@@ -130,7 +133,7 @@ describe("refreshUmbracoToken failure classification", () => {
 
   it.each([
     ["invalid_client", "misconfigured"],
-    ["invalid_request", "server_error"],
+    ["invalid_request", "request_rejected"],
   ] as const)(
     "classifies %s via the non-JSON whole-word fallback scan as %s",
     async (errorCode, reason) => {

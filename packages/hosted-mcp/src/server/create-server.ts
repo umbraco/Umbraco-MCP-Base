@@ -375,20 +375,42 @@ const REFRESH_MISCONFIGURED_MESSAGE =
   "its client secret, and the grant types it is permitted to use.";
 
 /**
- * Which `RefreshFailureReason`s degrade the session, and what to tell the
- * client when they do. A `Record` keyed by the full reason type rather than a
- * chain of `? :` so adding a new `RefreshFailureReason` forces an explicit
- * decision here at the definition site — a nested ternary would instead let a
- * forgotten reason fall through to "don't degrade" (a session left with its
- * full, 401-ing toolset) with nothing at compile time to catch it. Reasons
- * left out of the record (currently `network`, `server_error`) keep the full
- * toolset: a blip must not strip a working session.
+ * Same again, but Umbraco rejected the refresh *request* itself
+ * (`invalid_request` / `invalid_scope`) rather than the token or the client's
+ * credentials. Also does NOT suggest reconnecting: `refreshUmbracoToken`
+ * always posts the same fixed param set, so if this instance's OAuth client
+ * registration no longer grants a scope this request needs, every future
+ * refresh — including the one a fresh login would immediately need — fails
+ * identically. Degrading rather than silently keeping the full toolset means
+ * a persistent version of this surfaces instead of 401ing forever with no
+ * explanation.
  */
-const DEGRADED_REFRESH_REASONS: Partial<
-  Record<RefreshFailureReason, { message: string; cause: string }>
+const REFRESH_REQUEST_REJECTED_MESSAGE =
+  "Umbraco rejected the token refresh request itself (invalid_request or invalid_scope), not the stored " +
+  "refresh token or this MCP server's client credentials. Reconnecting is unlikely to help, since the same " +
+  "request would be rejected the same way. An administrator should check whether this Umbraco instance's " +
+  "OAuth client registration still grants the scope this server requests, and whether anything between " +
+  "this Worker and Umbraco (a proxy or gateway) could be altering the refresh request.";
+
+/**
+ * Which `RefreshFailureReason`s degrade the session, and what to tell the
+ * client when they do — `null` for the two left non-degrading (`network`,
+ * `server_error`: a blip must not strip a working session). A `Record` over
+ * every `RefreshFailureReason` (not `Partial`) rather than a chain of `? :`
+ * so adding a new reason is a compile error here until it's given an explicit
+ * entry — `Partial` would let a forgotten reason silently resolve to
+ * `undefined` (i.e. "don't degrade") with nothing at compile time to catch it,
+ * which defeats the point of keying by the reason type at all.
+ */
+const DEGRADED_REFRESH_REASONS: Record<
+  RefreshFailureReason,
+  { message: string; cause: string } | null
 > = {
   expired: { message: REFRESH_EXPIRED_MESSAGE, cause: "refresh-rejected-expired" },
   misconfigured: { message: REFRESH_MISCONFIGURED_MESSAGE, cause: "refresh-rejected-misconfigured" },
+  request_rejected: { message: REFRESH_REQUEST_REJECTED_MESSAGE, cause: "refresh-rejected-request" },
+  server_error: null,
+  network: null,
 };
 
 /**
@@ -574,7 +596,7 @@ async function initPerRequestServer(
   // this check would silently stop firing. Keep something calling through
   // `fetchClient` ahead of this line.
   const refreshFailure = fetchClient.getRefreshFailure();
-  const degradedRefresh = refreshFailure ? DEGRADED_REFRESH_REASONS[refreshFailure.reason] ?? null : null;
+  const degradedRefresh = refreshFailure ? DEGRADED_REFRESH_REASONS[refreshFailure.reason] : null;
   if (degradedRefresh) {
     const server = createAuthExpiredServer(options, baseInstructions, degradedRefresh.message);
     console.log(
