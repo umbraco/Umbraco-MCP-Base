@@ -28,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "tsup && node -e \"const fs=require('fs');fs.copyFileSync('agents-mcp.d.ts','dist/agents-mcp.d.ts');const d=fs.readFileSync('dist/index.d.ts','utf8');fs.writeFileSync('dist/index.d.ts','/// <reference path=\\"agents-mcp.d.ts\\" />\\n'+d)\"",
+    "build": "tsup && node -e \"const fs=require('fs');fs.copyFileSync('agents-mcp.d.ts','dist/agents-mcp.d.ts');const d=fs.readFileSync('dist/index.d.ts','utf8');fs.writeFileSync('dist/index.d.ts','/// <reference path=\\\"agents-mcp.d.ts\\\" />\\n'+d)\"",
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.testing.json",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest",
