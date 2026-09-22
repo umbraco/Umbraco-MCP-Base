@@ -13,4 +13,9 @@ echo ""
 echo "First run will auto-install (unattended). This may take a minute."
 echo ""
 
+# Fixed dev-only key so Umbraco doesn't generate one and write it into the
+# tracked appsettings.json on first boot. Not a secret — this instance only
+# ever holds disposable local/CI test data.
+export Umbraco__CMS__Imaging__HMACSecretKey="UVxUpS9ujPsI5cHolRYY3dOOVT9Z9yJwU0kWhVDAUcM667c/S7gCjG/t0IIvDbNobMaSQojnzTrRCnZ1ad0GcQ=="
+
 dotnet run --project "$PROJECT_DIR"

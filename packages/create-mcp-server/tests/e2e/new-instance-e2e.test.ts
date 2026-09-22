@@ -216,7 +216,7 @@ describeOrSkip("new-instance E2E", () => {
     // Verify key files exist
     expect(fs.existsSync(path.join(projectDir, "package.json"))).toBe(true);
     expect(
-      fs.existsSync(path.join(projectDir, "umbraco", "McpOAuthComposer.cs")),
+      fs.existsSync(path.join(projectDir, "umbraco", "ProgramSnippet.cs")),
     ).toBe(true);
     expect(fs.existsSync(path.join(projectDir, ".env.example"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "src", "index.ts"))).toBe(true);
@@ -284,10 +284,12 @@ describeOrSkip("new-instance E2E", () => {
       "admin@test.com",
     );
 
-    // Verify McpOAuthComposer.cs was copied
-    expect(
-      fs.existsSync(path.join(instanceDir, "McpOAuthComposer.cs")),
-    ).toBe(true);
+    // Verify the hosted Worker's OAuth client was configured for
+    // Umbraco.Mcp.HostedAuth (registered via installed package, not a composer)
+    expect(devSettings.HostedMcp).toEqual({
+      Mode: "SelfHosted",
+      Clients: [{ ClientId: "umbraco-back-office-hosted-mcp", Origins: [] }],
+    });
 
     // Verify Program.cs was patched with both snippets
     const programCs = fs.readFileSync(
@@ -296,14 +298,6 @@ describeOrSkip("new-instance E2E", () => {
     );
     expect(programCs).toContain("appsettings.local.json");
     expect(programCs).toContain("DisableTransportSecurityRequirement");
-
-    // Verify McpOAuthComposer has try-catch resilience
-    const composer = fs.readFileSync(
-      path.join(instanceDir, "McpOAuthComposer.cs"),
-      "utf-8",
-    );
-    expect(composer).toContain("try");
-    expect(composer).toContain("catch");
 
     // Verify dotnet build succeeds
     console.log("[new-instance-e2e] Building Umbraco instance...");

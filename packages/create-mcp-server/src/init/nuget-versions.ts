@@ -77,15 +77,29 @@ export async function getLatestVersionForMajor(
  * boot (Umbraco 18 removed Swashbuckle, which 17.x add-ons reference). Returns
  * undefined when NuGet is unreachable or the package has no version for that
  * major — callers should then fall back to PSW's default (latest) resolution.
+ *
+ * `preferStableFallbackToPrerelease` retries with prereleases included when the
+ * stricter (`includePrerelease`-gated) lookup finds nothing — for a package that
+ * hasn't shipped a stable release for this major yet (e.g. a brand-new add-on),
+ * so it doesn't fall through to PSW's mismatched-major default just because the
+ * requested Umbraco version happens to be stable.
  */
 export async function getLatestPackageVersionForMajor(
   packageId: string,
   major: number,
-  opts: { includePrerelease?: boolean } = {},
+  opts: {
+    includePrerelease?: boolean;
+    preferStableFallbackToPrerelease?: boolean;
+  } = {},
 ): Promise<string | undefined> {
   try {
     const versions = await fetchNugetVersions(packageId);
-    return pickLatestForMajor(versions, major, opts);
+    const match = pickLatestForMajor(versions, major, opts);
+    if (match) return match;
+    if (!opts.includePrerelease && opts.preferStableFallbackToPrerelease) {
+      return pickLatestForMajor(versions, major, { includePrerelease: true });
+    }
+    return undefined;
   } catch {
     return undefined;
   }

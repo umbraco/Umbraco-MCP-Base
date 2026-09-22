@@ -113,12 +113,11 @@ const options = {
   // other value, the Worker behaves single-tenant — `UMBRACO_BASE_URL` is
   // honoured and `/at/*` requests 401 from OAuthProvider.
   //
-  // Each Cloud project served by this Worker must:
-  //   1. Register an OAuth client with the `oauthClientId` below (PKCE/public
-  //      recommended) — see umbraco/McpOAuthComposer.cs.
-  //   2. Add the Cloud-only short-circuit composer that lets cold-start MCP
-  //      clients reach Umbraco ID SSO — see
-  //      umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs.
+  // Each Cloud project served by this Worker must have the
+  // `Umbraco.Mcp.HostedAuth` NuGet package installed — it registers the OAuth
+  // client (matching `oauthClientId` below) and the cold-start SSO short
+  // circuit automatically, with no composer or config required (see
+  // "Hosted Worker OAuth Setup" in README.md).
   //
   // Replace `oauthClientId` with the client id registered in your Cloud
   // projects (single value across all projects for this MCP type).

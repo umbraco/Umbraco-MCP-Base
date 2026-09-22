@@ -9,6 +9,15 @@ import {
 
 const DEVELOPMENT_MODE_PACKAGE = "Umbraco.Cms.DevelopmentMode.Backoffice";
 
+// Registers the hosted Worker as an OpenIddict authorization_code client —
+// see configureHostedMcpAuth() below. Version-pinned like DEVELOPMENT_MODE_PACKAGE,
+// but with a stable-fallback-to-prerelease lookup since it hasn't shipped a
+// stable release for every major yet.
+const HOSTED_AUTH_PACKAGE = "Umbraco.Mcp.HostedAuth";
+
+// Must match the template's `.dev.vars.example` UMBRACO_OAUTH_CLIENT_ID.
+const HOSTED_MCP_CLIENT_ID = "umbraco-back-office-hosted-mcp";
+
 // The starter kit's dependency that tracks the CMS major (clean 7.x depends on
 // Umbraco.Cms.Web.Website 17.x, clean 8.x on 18.x). We match the kit version by
 // this dependency rather than the kit's own version, which versions separately.
@@ -108,12 +117,9 @@ export async function setupInstance(
     configureAppsettings(instanceDir, opts.connectionString, adminEmail, adminPassword);
   }
 
-  // Copy McpOAuthComposer.cs into the instance if it exists in the project
-  const composerSrc = path.join(opts.projectDir, "umbraco", "McpOAuthComposer.cs");
-  if (fs.existsSync(composerSrc)) {
-    const composerDest = path.join(instanceDir, "McpOAuthComposer.cs");
-    fs.copyFileSync(composerSrc, composerDest);
-  }
+  // Registers the hosted Worker as an OAuth client — Umbraco.Mcp.HostedAuth
+  // (in extraPackages above) reads this on startup instead of a composer.
+  configureHostedMcpAuth(instanceDir);
 
   // Patch Program.cs to disable OpenIddict transport security in development
   patchProgramCs(instanceDir);
@@ -144,6 +150,7 @@ export async function setupInstance(
 export async function resolvePackageVersion(
   packageName: string,
   umbracoVersion?: string,
+  opts: { preferStableFallbackToPrerelease?: boolean } = {},
 ): Promise<string | undefined> {
   if (!umbracoVersion) return undefined;
 
@@ -151,21 +158,33 @@ export async function resolvePackageVersion(
   if (Number.isNaN(major)) return undefined;
 
   const includePrerelease = umbracoVersion.includes("-");
-  return getLatestPackageVersionForMajor(packageName, major, { includePrerelease });
+  return getLatestPackageVersionForMajor(packageName, major, {
+    includePrerelease,
+    preferStableFallbackToPrerelease: opts.preferStableFallbackToPrerelease,
+  });
 }
 
 /**
  * Build the list of supporting packages PSW should install alongside the chosen
- * add-on. Currently just DevelopmentMode — which registers the umbraco-swagger
- * OAuth client the discover flow authenticates with — version-matched to the CMS
- * major (PSW installs latest stable by default, the wrong major for a prerelease
- * or older CMS).
+ * add-on, version-matched to the CMS major (PSW installs latest stable by
+ * default, the wrong major for a prerelease or older CMS):
+ * - DevelopmentMode — registers the umbraco-swagger OAuth client the discover
+ *   flow authenticates with.
+ * - Umbraco.Mcp.HostedAuth — registers the hosted Worker's OAuth client (see
+ *   configureHostedMcpAuth()). Uses stable-fallback-to-prerelease since it
+ *   hasn't shipped a stable release for every major yet.
  */
 export async function resolveExtraPackages(
   umbracoVersion?: string,
 ): Promise<Array<{ name: string; version?: string }>> {
   return [
     { name: DEVELOPMENT_MODE_PACKAGE, version: await resolvePackageVersion(DEVELOPMENT_MODE_PACKAGE, umbracoVersion) },
+    {
+      name: HOSTED_AUTH_PACKAGE,
+      version: await resolvePackageVersion(HOSTED_AUTH_PACKAGE, umbracoVersion, {
+        preferStableFallbackToPrerelease: true,
+      }),
+    },
   ];
 }
 
@@ -255,6 +274,30 @@ function configureAppsettings(
   };
   umbraco.CMS = cms;
   devSettings.Umbraco = umbraco;
+
+  fs.writeFileSync(devPath, JSON.stringify(devSettings, null, 2) + "\n");
+}
+
+/**
+ * Register the hosted Worker as a self-hosted OpenIddict client for
+ * Umbraco.Mcp.HostedAuth (installed via extraPackages above). Writes to
+ * appsettings.Development.json, alongside the unattended-install config.
+ *
+ * The client id must match the template's `.dev.vars.example`
+ * UMBRACO_OAUTH_CLIENT_ID. No Origins are needed for local `wrangler dev` —
+ * the package registers its localhost callback automatically.
+ */
+function configureHostedMcpAuth(instanceDir: string): void {
+  const devPath = path.join(instanceDir, "appsettings.Development.json");
+  let devSettings: Record<string, unknown> = {};
+  if (fs.existsSync(devPath)) {
+    devSettings = JSON.parse(fs.readFileSync(devPath, "utf-8"));
+  }
+
+  devSettings.HostedMcp = {
+    Mode: "SelfHosted",
+    Clients: [{ ClientId: HOSTED_MCP_CLIENT_ID, Origins: [] }],
+  };
 
   fs.writeFileSync(devPath, JSON.stringify(devSettings, null, 2) + "\n");
 }
