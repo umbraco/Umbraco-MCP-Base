@@ -128,6 +128,24 @@ describe("refreshUmbracoToken failure classification", () => {
     }
   );
 
+  it.each([
+    ["invalid_client", "misconfigured"],
+    ["invalid_request", "server_error"],
+  ] as const)(
+    "classifies %s via the non-JSON whole-word fallback scan as %s",
+    async (errorCode, reason) => {
+      // The JSON-body tests above never exercise `parseOAuthErrorCode`'s text
+      // fallback (a proxy that rewrites the body to plain text), so a code
+      // moved between `CLIENT_ERROR_CODES` and `REQUEST_ERROR_CODES` would go
+      // uncaught here even though the JSON-path `it.each` blocks above cover it.
+      respondWith(text(`error=${errorCode}&error_description=rejected`, 400));
+
+      const result = await refreshUmbracoToken(createEnv(createKv()), `key-text-${errorCode}`, "rt");
+
+      expect(result).toMatchObject({ ok: false, reason, error: errorCode });
+    }
+  );
+
   it("classifies a known error code correctly even with a stray control character", async () => {
     // Regression: `parseOAuthErrorCode` used to sanitize the error string
     // (stripping control characters) before comparing it against the known

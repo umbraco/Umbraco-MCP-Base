@@ -198,4 +198,27 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(toolNames(server)).toEqual([]);
     expect(doneLine(logSpy)).toContain("mode=full");
   });
+
+  it("isAuthExpiredServer recognises a real degraded server and rejects a real full one", async () => {
+    // Every other test of `isAuthExpiredServer` (register-chained-tools.test.ts)
+    // mocks it away entirely, so nothing exercises the real WeakSet-based
+    // implementation against a server `createAuthExpiredServer` actually built.
+    // Without this, `authExpiredServers.add(server)` being dropped, or called
+    // on the wrong object, would pass every existing test.
+    refreshFailure = {
+      ok: false,
+      reason: "expired",
+      status: 400,
+      error: "invalid_grant",
+      message: "rejected",
+    };
+
+    const { createPerRequestServer, isAuthExpiredServer } = await import("../create-server.js");
+    const degraded = await createPerRequestServer(baseOptions, env, props);
+    expect(isAuthExpiredServer(degraded)).toBe(true);
+
+    refreshFailure = undefined;
+    const full = await createPerRequestServer(baseOptions, env, props);
+    expect(isAuthExpiredServer(full)).toBe(false);
+  });
 });
