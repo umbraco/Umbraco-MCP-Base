@@ -42,6 +42,7 @@ import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import type { AuthProps, ConsentChoices } from "../types/auth.js";
+import type { RefreshFailureReason } from "../auth/token-storage.js";
 
 /**
  * Fetches the current user from Umbraco's Management API.
@@ -276,6 +277,32 @@ export async function resolveRequestSite(
 }
 
 /**
+ * Servers built by `createAuthExpiredServer`, so `isAuthExpiredServer` can
+ * tell them apart from a normal, fully-registered server without adding a
+ * discriminated return type to `createPerRequestServer` (a breaking change
+ * for every existing caller). A `WeakSet` rather than a property on the
+ * server instance: nothing about the degraded server's own shape needs to
+ * change for callers to detect it.
+ */
+const authExpiredServers = new WeakSet<McpServer>();
+
+/**
+ * Whether `server` is the degraded, single-tool server `createPerRequestServer`
+ * returns when there's no usable Umbraco session (see `createAuthExpiredServer`).
+ *
+ * Callers that register additional tools on the server returned by
+ * `createPerRequestServer` — `registerChainedTools` is the one in this
+ * package — MUST check this and skip when it's true. Without it, a chained
+ * toolset gets bolted onto the degraded server on top of its single
+ * `authentication-expired` tool, silently defeating the point of degrading:
+ * the model sees a full set of tools that all 401 instead of the one tool
+ * that says why.
+ */
+export function isAuthExpiredServer(server: McpServer): boolean {
+  return authExpiredServers.has(server);
+}
+
+/**
  * Builds the degraded, single-tool server used when this session has no usable
  * Umbraco credentials — either KV has no token entry at all, or the stored
  * refresh token has been definitively rejected by Umbraco.
@@ -316,6 +343,7 @@ function createAuthExpiredServer(
     })
   );
   useDraft202012ToolSchemas(server);
+  authExpiredServers.add(server);
   return server;
 }
 
@@ -345,6 +373,23 @@ const REFRESH_MISCONFIGURED_MESSAGE =
   "is not allowed to use). Reconnecting will not fix this — it replays the same client credentials. An " +
   "administrator needs to correct the Umbraco-side client registration for this MCP server: its client id, " +
   "its client secret, and the grant types it is permitted to use.";
+
+/**
+ * Which `RefreshFailureReason`s degrade the session, and what to tell the
+ * client when they do. A `Record` keyed by the full reason type rather than a
+ * chain of `? :` so adding a new `RefreshFailureReason` forces an explicit
+ * decision here at the definition site — a nested ternary would instead let a
+ * forgotten reason fall through to "don't degrade" (a session left with its
+ * full, 401-ing toolset) with nothing at compile time to catch it. Reasons
+ * left out of the record (currently `network`, `server_error`) keep the full
+ * toolset: a blip must not strip a working session.
+ */
+const DEGRADED_REFRESH_REASONS: Partial<
+  Record<RefreshFailureReason, { message: string; cause: string }>
+> = {
+  expired: { message: REFRESH_EXPIRED_MESSAGE, cause: "refresh-rejected-expired" },
+  misconfigured: { message: REFRESH_MISCONFIGURED_MESSAGE, cause: "refresh-rejected-misconfigured" },
+};
 
 /**
  * Creates a per-request McpServer with tools registered and API client configured.
@@ -520,13 +565,16 @@ async function initPerRequestServer(
   // retries will heal). A network blip or a 5xx from the token endpoint must
   // not strip a session's tools, because the very next request may well refresh
   // cleanly, so those two keep the full toolset.
+  //
+  // `getRefreshFailure()` only ever reports something after the fetch client
+  // has actually made a request — `fetchCurrentUser` above is what does that
+  // here (the version check only runs when `expectedUmbracoMajor` is set, so
+  // it can't be relied on alone). If a future change removes or reorders
+  // `fetchCurrentUser` so nothing exercises `fetchClient` before this point,
+  // this check would silently stop firing. Keep something calling through
+  // `fetchClient` ahead of this line.
   const refreshFailure = fetchClient.getRefreshFailure();
-  const degradedRefresh =
-    refreshFailure?.reason === "expired"
-      ? { message: REFRESH_EXPIRED_MESSAGE, cause: "refresh-rejected-expired" }
-      : refreshFailure?.reason === "misconfigured"
-        ? { message: REFRESH_MISCONFIGURED_MESSAGE, cause: "refresh-rejected-misconfigured" }
-        : null;
+  const degradedRefresh = refreshFailure ? DEGRADED_REFRESH_REASONS[refreshFailure.reason] ?? null : null;
   if (degradedRefresh) {
     const server = createAuthExpiredServer(options, baseInstructions, degradedRefresh.message);
     console.log(

@@ -191,6 +191,54 @@ describe("mcp.auth.refresh span", () => {
     });
   });
 
+  it("records the retry's status separately from the initial attempt's", async () => {
+    // Regression: the retry used to overwrite HTTP_STATUS on the same span
+    // attribute as the initial attempt, so a span for a rejected-then-retried
+    // refresh that ultimately succeeded showed only the 200 — no trace the
+    // first POST was ever rejected.
+    let reads = 0;
+    const entries = [
+      JSON.stringify({ tokens: { access_token: "stored-access", refresh_token: "stale" } }),
+      JSON.stringify({ tokens: { access_token: "stored-access", refresh_token: "rotated" } }),
+    ];
+    const rotatedEnv = {
+      ...refreshEnv,
+      OAUTH_KV: {
+        get: async () => {
+          const entry = entries[Math.min(reads, entries.length - 1)];
+          reads += 1;
+          return entry;
+        },
+        put: async () => undefined,
+        delete: async () => undefined,
+      },
+    } as unknown as HostedMcpEnv;
+
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ access_token: "fresh-access" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const { refreshUmbracoToken } = await import("../../auth/token-storage.js");
+    const result = await refreshUmbracoToken(rotatedEnv, "token-key", "caller-snapshot");
+
+    expect(result).toMatchObject({ ok: true, accessToken: "fresh-access" });
+    expect(spanNamed(AUTH_REFRESH_SPAN)!.attributes).toMatchObject({
+      [HostedTelemetryAttributes.HTTP_STATUS]: 400,
+      [HostedTelemetryAttributes.AUTH_RETRY_HTTP_STATUS]: 200,
+    });
+  });
+
   it("flags whether a per-site OAuth client was used", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ access_token: "a" }), {

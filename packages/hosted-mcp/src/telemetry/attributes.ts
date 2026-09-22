@@ -54,10 +54,19 @@ export const HostedTelemetryAttributes = {
   AUTH_ROTATED_REFRESH_TOKEN: "umbraco.mcp.auth.rotated_refresh_token",
 
   /**
-   * HTTP status from the token endpoint. Standard OTel key, so an APM's HTTP
-   * views pick it up without mapping.
+   * HTTP status from the token endpoint's first attempt. Standard OTel key,
+   * so an APM's HTTP views pick it up without mapping.
    */
   HTTP_STATUS: "http.response.status_code",
+  /**
+   * HTTP status from the bounded `invalid_grant` retry (see `performRefresh`),
+   * set only when that retry actually runs. Kept distinct from `HTTP_STATUS`
+   * so a retry that succeeds doesn't silently overwrite the rejection that
+   * triggered it — without this, a span could show `HTTP_STATUS=200` with no
+   * trace the first attempt was ever rejected, undercounting how often the
+   * stale-rotation retry path fires.
+   */
+  AUTH_RETRY_HTTP_STATUS: "umbraco.mcp.auth.retry_http_status",
 } as const;
 
 /** `umbraco.mcp.init.mode` values. */

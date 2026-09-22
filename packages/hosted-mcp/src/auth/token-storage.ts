@@ -295,17 +295,26 @@ export interface RefreshFailure {
 
 export type RefreshTokenResult = RefreshSuccess | RefreshFailure;
 
-/** OAuth 2.0 error codes that mean "your client is wrong", not "your token is stale". */
-const CLIENT_ERROR_CODES = new Set([
-  "invalid_client",
-  "unauthorized_client",
-  "unsupported_grant_type",
-  "invalid_request",
-  "invalid_scope",
-]);
+/**
+ * OAuth 2.0 error codes that mean "this client's own registration is wrong"
+ * (bad client_id/secret, or a grant type it isn't allowed to use) — exactly
+ * what `REFRESH_MISCONFIGURED_MESSAGE` in `create-server.ts` tells the
+ * administrator to go fix.
+ */
+const CLIENT_ERROR_CODES = new Set(["invalid_client", "unauthorized_client", "unsupported_grant_type"]);
+
+/**
+ * Recognised OAuth error codes that don't mean the client registration is
+ * wrong — `invalid_request` (a malformed token request, e.g. from a proxy
+ * mangling the POST body) and `invalid_scope` — so they get `server_error`'s
+ * non-degrading treatment rather than `misconfigured`'s. Kept out of
+ * `CLIENT_ERROR_CODES` because bucketing them there would point an
+ * administrator at a client_id/secret/grant-type problem that isn't theirs.
+ */
+const REQUEST_ERROR_CODES = new Set(["invalid_request", "invalid_scope"]);
 
 /** Every OAuth error code we recognise in a token-endpoint error response. */
-const KNOWN_ERROR_CODES = ["invalid_grant", ...CLIENT_ERROR_CODES];
+const KNOWN_ERROR_CODES = ["invalid_grant", ...CLIENT_ERROR_CODES, ...REQUEST_ERROR_CODES];
 
 /**
  * Pulls the OAuth 2.0 `error` code out of a token-endpoint error body.
@@ -320,13 +329,30 @@ function parseOAuthErrorCode(body: string): string | undefined {
   try {
     const parsed = JSON.parse(body) as { error?: unknown };
     if (parsed && typeof parsed === "object" && typeof parsed.error === "string") {
-      // Bounded and sanitised: it reaches an unconditional log line and an
-      // RFC 7807 body, so it must not be able to forge either.
+      // Match against the known codes with control characters *removed*
+      // (not `sanitizeForLog`'s `?`-replacement, which is for display and
+      // would leave "invalid_grant\u0000" as "invalid_grant?" — never equal
+      // to "invalid_grant"). A stray control character survives JSON.parse
+      // intact; stripping it before comparing means a genuinely dead refresh
+      // token still classifies as `expired` instead of a retryable
+      // `server_error`. Safe to do for comparison only: the value returned on
+      // a match is the known-safe fixed string, never the raw input.
+      // eslint-disable-next-line no-control-regex
+      const stripped = parsed.error.replace(/[\x00-\x1F\x7F]/g, "");
+      const known = KNOWN_ERROR_CODES.find((code) => code === stripped);
+      if (known) return known;
+      // Bounded and sanitised: an unrecognised value reaches an unconditional
+      // log line and an RFC 7807 body, so it must not be able to forge either.
       return sanitizeForLog(parsed.error).slice(0, 64);
     }
   } catch {
     // Not JSON — fall through to the text scan.
   }
+  // Whole-word scan so a proxy that rewrites the body to text still
+  // classifies correctly. Narrow but accepted risk: an intermediary error
+  // page that happens to contain one of these words (e.g. boilerplate
+  // documentation text) would be misread as a genuine OAuth rejection rather
+  // than the gateway blip it actually is.
   return KNOWN_ERROR_CODES.find((code) =>
     new RegExp(`\\b${code}\\b`).test(body)
   );
@@ -529,7 +555,10 @@ async function performRefresh(
        * classification. Returns the failure rather than calling `fail()`, so a
        * rejection we're about to retry past doesn't warn or settle the span.
        */
-      const postRefresh = async (tokenToPost: string): Promise<TokenEndpointAttempt> => {
+      const postRefresh = async (
+        tokenToPost: string,
+        attemptKind: "initial" | "retry" = "initial"
+      ): Promise<TokenEndpointAttempt> => {
         const params = new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: tokenToPost,
@@ -562,7 +591,15 @@ async function performRefresh(
           };
         }
 
-        span.setAttribute(HostedTelemetryAttributes.HTTP_STATUS, resp.status);
+        // Kept distinct per attempt: the retry is a second, separate HTTP
+        // request, and overwriting the initial attempt's status with its
+        // result would erase evidence the first one was ever rejected.
+        span.setAttribute(
+          attemptKind === "initial"
+            ? HostedTelemetryAttributes.HTTP_STATUS
+            : HostedTelemetryAttributes.AUTH_RETRY_HTTP_STATUS,
+          resp.status
+        );
 
         if (!resp.ok) {
           const body = await resp.text().catch(() => UNREADABLE_BODY);
@@ -635,7 +672,11 @@ async function performRefresh(
         // isolate already persisted to KV (the cross-isolate race documented on
         // `inFlightRefreshes`), and so it doesn't linger forever for a session
         // that never refreshes successfully again.
-        if (cachedRotatedToken && effectiveRefreshToken === cachedRotatedToken) {
+        //
+        // `effectiveRefreshToken` is `cachedRotatedToken ?? persistedRefreshToken
+        // ?? refreshToken`, so whenever `cachedRotatedToken` is set it's always
+        // what got posted — no need to compare the two.
+        if (cachedRotatedToken) {
           lastRotatedTokens.delete(tokenKey);
         }
         const retryToken = (await readStoredEntry())?.tokens?.refresh_token;
@@ -644,7 +685,7 @@ async function performRefresh(
             env,
             `refreshUmbracoToken RETRY key=${tokenKey} invalid_grant on the posted token; KV now holds a newer one, retrying once`
           );
-          attempt = await postRefresh(retryToken);
+          attempt = await postRefresh(retryToken, "retry");
         }
       }
 

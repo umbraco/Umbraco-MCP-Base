@@ -100,6 +100,47 @@ describe("refreshUmbracoToken failure classification", () => {
     expect(result).toMatchObject({ ok: false, reason: "misconfigured", error: "invalid_client" });
   });
 
+  it.each(["invalid_request", "invalid_scope"] as const)(
+    "reports %s as a server error, not misconfigured",
+    async (errorCode) => {
+      // `REFRESH_MISCONFIGURED_MESSAGE` specifically tells an administrator to
+      // check the client_id/secret/grant-type registration — the wrong
+      // diagnostic for a malformed request or bad scope, which can come from
+      // a proxy mangling the request rather than the client itself being
+      // misregistered. Bucketing these as `misconfigured` would also degrade
+      // a session with no retry, same as a genuinely dead refresh token.
+      respondWith(json({ error: errorCode }, 400));
+
+      const result = await refreshUmbracoToken(createEnv(createKv()), `key-${errorCode}`, "rt");
+
+      expect(result).toMatchObject({ ok: false, reason: "server_error", error: errorCode });
+    }
+  );
+
+  it.each(["invalid_client", "unauthorized_client", "unsupported_grant_type"] as const)(
+    "reports %s as misconfigured",
+    async (errorCode) => {
+      respondWith(json({ error: errorCode }, 400));
+
+      const result = await refreshUmbracoToken(createEnv(createKv()), `key-${errorCode}`, "rt");
+
+      expect(result).toMatchObject({ ok: false, reason: "misconfigured", error: errorCode });
+    }
+  );
+
+  it("classifies a known error code correctly even with a stray control character", async () => {
+    // Regression: `parseOAuthErrorCode` used to sanitize the error string
+    // (stripping control characters) before comparing it against the known
+    // OAuth codes, so "invalid_grant\u0000" no longer strictly equalled
+    // "invalid_grant" — misclassifying a genuinely dead refresh token as a
+    // retryable server_error instead of a definitive expired.
+    respondWith(json({ error: "invalid_grant\u0000" }, 400));
+
+    const result = await refreshUmbracoToken(createEnv(createKv()), "key-control-char", "rt");
+
+    expect(result).toMatchObject({ ok: false, reason: "expired", error: "invalid_grant" });
+  });
+
   it("reports a bare 5xx with no OAuth error body as a server error", async () => {
     respondWith(text("", 503));
 
