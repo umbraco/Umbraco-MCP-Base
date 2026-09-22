@@ -493,10 +493,17 @@ describe("runInit", () => {
         "umbraco-back-office-mcp"
       );
 
-      // Verify McpOAuthComposer.cs was copied to demo-site
-      const composerPath = path.join(PROJECT_DIR, "demo-site", "McpOAuthComposer.cs");
-      expect(mockFs.files.has(composerPath)).toBe(true);
-      expect(mockFs.files.get(composerPath)).toContain("McpOAuthComposer");
+      // Verify the hosted Worker's OAuth client was configured for
+      // Umbraco.Mcp.HostedAuth (registered via installed package, not a composer)
+      const devSettings = JSON.parse(
+        mockFs.files.get(
+          path.join(PROJECT_DIR, "demo-site", "appsettings.Development.json")
+        )!
+      );
+      expect(devSettings.HostedMcp).toEqual({
+        Mode: "SelfHosted",
+        Clients: [{ ClientId: "umbraco-back-office-hosted-mcp", Origins: [] }],
+      });
 
       // Verify Program.cs was patched with OpenIddict snippet
       const programCs = mockFs.files.get(path.join(PROJECT_DIR, "demo-site", "Program.cs"))!;

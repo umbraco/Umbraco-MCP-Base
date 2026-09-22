@@ -8,8 +8,9 @@
 #
 # Automatically patches:
 #   - .dev.vars (UMBRACO_BASE_URL → tunnel URL for browser redirects)
-#   - Umbraco appsettings.local.json (MCP_TUNNEL_URL for OAuth redirect URI)
-#     — only if UMBRACO_PROJECT_DIR env var is set
+#   - Umbraco appsettings.local.json (adds the tunnel URL to the
+#     Umbraco.Mcp.HostedAuth client's HostedMcp:Clients Origins so the OAuth
+#     redirect URI is registered) — only if UMBRACO_PROJECT_DIR env var is set
 #
 # After starting, restart Umbraco and the worker to pick up the new URLs.
 #
@@ -18,7 +19,7 @@
 #
 # Optional:
 #   UMBRACO_PROJECT_DIR=/path/to/UmbracoProject ./scripts/tunnels.sh
-#     Sets MCP_TUNNEL_URL in that project's appsettings.local.json
+#     Adds the tunnel URL to that project's HostedMcp:Clients Origins
 
 set -e
 
@@ -102,23 +103,29 @@ if [ -n "$UMBRACO_PROJECT_DIR" ]; then
 import json
 with open('$APPSETTINGS', 'r') as f:
     data = json.load(f)
-data['MCP_TUNNEL_URL'] = '$WORKER_URL'
+hosted_mcp = data.setdefault('HostedMcp', {})
+clients = hosted_mcp.setdefault('Clients', [{}])
+client = clients[0]
+client['ClientId'] = 'umbraco-back-office-hosted-mcp'
+origins = client.setdefault('Origins', [])
+if '$WORKER_URL' not in origins:
+    origins.append('$WORKER_URL')
 with open('$APPSETTINGS', 'w') as f:
     json.dump(data, f, indent=4)
 "
     echo "Patched $APPSETTINGS"
-    echo "  MCP_TUNNEL_URL=$WORKER_URL"
+    echo "  HostedMcp:Clients:0:Origins += $WORKER_URL"
   else
     echo "WARNING: python3 not found, cannot patch appsettings.local.json"
-    echo "  Manually add: \"MCP_TUNNEL_URL\": \"$WORKER_URL\""
+    echo "  Manually add \"$WORKER_URL\" to HostedMcp:Clients:0:Origins"
   fi
 else
   echo ""
   echo "  To auto-register the tunnel callback URI in Umbraco, set UMBRACO_PROJECT_DIR:"
   echo "    UMBRACO_PROJECT_DIR=/path/to/UmbracoProject ./scripts/tunnels.sh"
   echo ""
-  echo "  Or manually add to your Umbraco project's appsettings.local.json:"
-  echo "    \"MCP_TUNNEL_URL\": \"$WORKER_URL\""
+  echo "  Or manually add \"$WORKER_URL\" to HostedMcp:Clients:0:Origins in"
+  echo "  your Umbraco project's appsettings.local.json"
 fi
 
 echo ""

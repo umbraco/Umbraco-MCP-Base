@@ -66,7 +66,7 @@ describe("in-process MCP chaining with real Umbraco API", () => {
 
   it("calls get-server-version through the proxy chain and gets real data", async function () {
     // Skip in CI if no client_credentials API user is configured
-    // (the McpOAuthComposer only creates an authorization_code client)
+    // (Umbraco.Mcp.HostedAuth only creates an authorization_code client)
     if (process.env.CI && !process.env.UMBRACO_API_USER_CONFIGURED) {
       return;
     }
