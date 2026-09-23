@@ -138,9 +138,10 @@ jobs:
       - name: Start Umbraco
         run: |
           cd tests/umbraco-instance
+          HMAC_SECRET_KEY="$(openssl rand -base64 64)"
           ASPNETCORE_ENVIRONMENT=Development \
           ASPNETCORE_URLS="http://localhost:5200;https://localhost:5201" \
-          Umbraco__CMS__Imaging__HMACSecretKey="UVxUpS9ujPsI5cHolRYY3dOOVT9Z9yJwU0kWhVDAUcM667c/S7gCjG/t0IIvDbNobMaSQojnzTrRCnZ1ad0GcQ==" \
+          Umbraco__CMS__Imaging__HMACSecretKey="$HMAC_SECRET_KEY" \
           dotnet run --no-launch-profile > /tmp/umbraco.log 2>&1 &
           echo $! > /tmp/umbraco.pid
 
