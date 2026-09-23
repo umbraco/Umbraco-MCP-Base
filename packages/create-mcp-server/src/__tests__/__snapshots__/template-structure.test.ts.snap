@@ -83,9 +83,6 @@ exports[`template structure should match the expected file listing 1`] = `
   "tests/hosted-e2e/wrangler.e2e.toml",
   "tsconfig.json",
   "tsup.config.ts",
-  "umbraco/McpExternalLoginShortCircuitComposer.Cloud.cs",
-  "umbraco/McpHostedClientsComposer.Cloud.cs",
-  "umbraco/McpOAuthComposer.cs",
   "umbraco/ProgramSnippet.cs",
   "wrangler.toml",
 ]
@@ -152,9 +149,7 @@ npm run inspect
 ├── scripts/
 │   └── tunnels.sh              # Cloudflare tunnels for remote MCP client testing
 ├── umbraco/
-│   ├── McpOAuthComposer.cs                            # Self-hosted: OAuth client for your own Worker
-│   ├── McpHostedClientsComposer.Cloud.cs              # Cloud only (commented out): one or more hosted MCP clients (Editor / Dev / …) chosen via array
-│   └── McpExternalLoginShortCircuitComposer.Cloud.cs  # Cloud only (commented out): redirects to Umbraco SSO instead of dead-ending at /umbraco/login
+│   └── ProgramSnippet.cs   # Dev-only OpenIddict transport-security patch (see "Hosted Worker OAuth Setup" below)
 ├── __tests__/
 │   └── example/                # Example tests
 ├── package.json
@@ -243,6 +238,42 @@ claude .
 \`\`\`
 
 The server reads credentials from \`.env\` via \`node --env-file=.env ./dist/index.js\`, so no secrets are committed to source control.
+
+## Hosted Worker OAuth Setup
+
+The Umbraco instance behind \`src/worker.ts\` needs to register the Worker as an
+OpenIddict \`authorization_code\` client — the backoffice UI only supports
+\`client_credentials\`, which this flow doesn't use. That registration is
+handled by the [\`Umbraco.Mcp.HostedAuth\`](https://github.com/umbraco/Umbraco.Mcp.HostedAuth)
+NuGet package, not a hand-written composer:
+
+\`\`\`bash
+dotnet add package Umbraco.Mcp.HostedAuth
+\`\`\`
+
+**Self-hosted / local dev** — list the client(s) explicitly under \`HostedMcp:Clients\`.
+\`wrangler dev\`'s callback (\`http://127.0.0.1:8787/callback\`) is registered
+automatically; add your deployed Worker's origin when you have one:
+
+\`\`\`jsonc
+{
+  "HostedMcp": {
+    "Mode": "SelfHosted",
+    "Clients": [
+      { "ClientId": "umbraco-back-office-hosted-mcp", "Origins": [] }
+    ]
+  }
+}
+\`\`\`
+
+The \`ClientId\` must match \`UMBRACO_OAUTH_CLIENT_ID\` in \`.dev.vars\`.
+
+**Umbraco Cloud** (one Worker serving many projects via \`siteRouting\`) — no
+config needed. \`HostedMcp:Mode\` resolves to \`Cloud\` automatically from
+\`umbraco-cloud.json\`, and clients register themselves per product. See the
+package's README for the \`Products\` override block if a deployed Worker's
+client id doesn't follow the \`umbraco-{product}-{variant}-mcp-hosted\`
+convention.
 
 ## Publishing
 

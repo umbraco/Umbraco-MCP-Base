@@ -13,4 +13,10 @@ echo ""
 echo "First run will auto-install (unattended). This may take a minute."
 echo ""
 
+# Generated fresh each run so Umbraco doesn't generate one and write it into
+# the tracked appsettings.json on first boot. Only needs to be internally
+# consistent for the life of this process — this instance only ever holds
+# disposable local/CI test data.
+export Umbraco__CMS__Imaging__HMACSecretKey="$(openssl rand -base64 64)"
+
 dotnet run --project "$PROJECT_DIR"

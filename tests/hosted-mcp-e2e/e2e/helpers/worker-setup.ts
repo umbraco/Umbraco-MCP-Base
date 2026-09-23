@@ -10,8 +10,9 @@ let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
 // Use HTTP for both in CI to avoid self-signed cert issues.
-// The redirect_uri (http://127.0.0.1:8787/callback) matches the
-// registered URIs in McpOAuthComposer.
+// The redirect_uri (http://127.0.0.1:8787/callback) matches the origin
+// registered for this client id in tests/umbraco-instance's HostedMcp:Clients
+// config (Umbraco.Mcp.HostedAuth).
 const BASE_VARS = {
   UMBRACO_BASE_URL: process.env.CI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",

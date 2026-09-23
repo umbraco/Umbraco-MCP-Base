@@ -3,6 +3,7 @@ import {
   getLatestStableVersion,
   getLatestVersionForMajor,
   getLatestVersionByDependencyMajor,
+  getLatestPackageVersionForMajor,
 } from "../nuget-versions.js";
 
 // NuGet flatcontainer returns versions oldest-first; fetchUmbracoVersions
@@ -58,6 +59,50 @@ describe("getLatestVersionForMajor", () => {
   it("still resolves the overall latest stable", async () => {
     mockNuget(NUGET_VERSIONS);
     expect(await getLatestStableVersion()).toBe("17.4.2");
+  });
+});
+
+describe("getLatestPackageVersionForMajor", () => {
+  // Mirrors Umbraco.Mcp.HostedAuth today: only prereleases published for 18,
+  // stable for 17.
+  const PACKAGE_VERSIONS = ["17.0.0-beta.1", "17.0.0", "18.0.0-beta.3"];
+
+  it("returns the latest stable version for a major by default", async () => {
+    mockNuget(PACKAGE_VERSIONS);
+    expect(await getLatestPackageVersionForMajor("Some.Package", 17)).toBe("17.0.0");
+  });
+
+  it("returns undefined for a prerelease-only major when prerelease is excluded and no fallback is requested", async () => {
+    mockNuget(PACKAGE_VERSIONS);
+    expect(await getLatestPackageVersionForMajor("Some.Package", 18)).toBeUndefined();
+  });
+
+  it("falls back to the newest prerelease when preferStableFallbackToPrerelease is set and no stable exists", async () => {
+    mockNuget(PACKAGE_VERSIONS);
+    expect(
+      await getLatestPackageVersionForMajor("Some.Package", 18, {
+        preferStableFallbackToPrerelease: true,
+      }),
+    ).toBe("18.0.0-beta.3");
+  });
+
+  it("does not need the fallback when a stable version already exists for the major", async () => {
+    mockNuget(PACKAGE_VERSIONS);
+    expect(
+      await getLatestPackageVersionForMajor("Some.Package", 17, {
+        preferStableFallbackToPrerelease: true,
+      }),
+    ).toBe("17.0.0");
+  });
+
+  it("ignores the fallback when includePrerelease is already true", async () => {
+    mockNuget(PACKAGE_VERSIONS);
+    expect(
+      await getLatestPackageVersionForMajor("Some.Package", 18, {
+        includePrerelease: true,
+        preferStableFallbackToPrerelease: true,
+      }),
+    ).toBe("18.0.0-beta.3");
   });
 });
 
