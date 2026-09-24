@@ -22,14 +22,22 @@
  *    tracing backend. It rides the same `TENANT_HASH_KEY`-keyed hash as
  *    tenant, so the exported `login_session` attribute stays stable and
  *    distinct per login without being usable as that key outside the Worker.
- * 3. **Absent means absent.** No consent choice yet, no auth, no configured
- *    key — the value is simply not produced. Nothing is defaulted, stubbed or
- *    hashed from `undefined`.
+ * 3. **Absent means absent — for tenant and login-session.** No consent
+ *    choice yet, no auth, no configured key — those two are never defaulted,
+ *    stubbed or hashed from `undefined`.
  *
- * The region half is the exception to rules 1–2: `euwest01` is low-cardinality
- * infrastructure, shared by thousands of projects, and identifies nobody. It
- * goes out in plaintext so dashboards can break tenant spread down by region
- * without anyone needing to reverse a hash.
+ * The region half is the exception to rules 1–2, in two ways: it's
+ * low-cardinality infrastructure shared by thousands of projects and
+ * identifies nobody, so it goes out in plaintext; and, unlike tenant/
+ * login-session, it *is* defaulted for a Cloud site — `consentChoices.region`
+ * (set by the Cloud site-routing resolver, `cloud/index.ts`) carries the
+ * resolver's own default-region fallback for a bare-alias siteId, so a
+ * connection that works (resolves to a real Cloud host under that default)
+ * also reports the region it was actually resolved against, rather than
+ * silently omitting it. A site with no `consentChoices.region` at all — not
+ * Cloud-routed, e.g. self-hosted — still falls back to parsing an embedded
+ * region straight off `siteId`, and stays unset if there isn't one; nothing
+ * is guessed for those.
  *
  * Tenant and login-session are hashed under `TENANT_HASH_KEY` by default, but
  * `LOGIN_SESSION_HASH_KEY` (env.ts) can override the latter independently —
@@ -114,7 +122,11 @@ export async function resolveRequestTelemetry(
 
   const siteId = props?.consentChoices?.siteId;
   if (typeof siteId === "string" && siteId.length > 0) {
-    const region = regionOnly(siteId);
+    // Prefer the resolver's own resolved region (set for every Cloud-routed
+    // site, embedded-region or not — see the module doc) over parsing siteId
+    // directly, which only ever finds an *embedded* region and leaves a bare
+    // alias — Cloud-routed or not — unset.
+    const region = props?.consentChoices?.region ?? regionOnly(siteId);
     if (region) {
       telemetry.region = region;
     }

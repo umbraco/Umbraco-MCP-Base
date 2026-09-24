@@ -30,6 +30,15 @@ export interface SiteConfig {
    * redirect_uri Umbraco never registered, breaking the OAuth exchange.
    */
   callbackId?: string;
+  /**
+   * This site's effective Cloud region, for telemetry only — carried
+   * separately from `id` for the same reason as `callbackId`: a bare-alias
+   * `id` (no embedded region) still resolves to a real region internally
+   * (the resolver's own default), but `id` itself must stay untouched since
+   * it's what tenant/login-session hashing keys on. Unset for a site that
+   * isn't Cloud-hosted at all (no region concept applies).
+   */
+  region?: string;
   /** Optional server-side URL override (for local dev with HTTP proxy) */
   serverUrl?: string;
   /** OAuth client ID registered in this Umbraco instance */

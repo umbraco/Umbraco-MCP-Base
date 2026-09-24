@@ -41,6 +41,13 @@ export interface ConsentChoices {
    * on subsequent requests.
    */
   callbackId?: string;
+  /**
+   * This site's effective Cloud region (see `SiteConfig.region`), carried
+   * through the same way `callbackId` is — separately from `siteId` so
+   * telemetry can use a resolver-defaulted region without that default ever
+   * touching the value tenant/login-session hashing keys on.
+   */
+  region?: string;
   /** Selected modes for chained servers, keyed by server name */
   chainedModeSelections?: Record<string, string[]>;
   /** Selected collections for chained servers, keyed by server name */
