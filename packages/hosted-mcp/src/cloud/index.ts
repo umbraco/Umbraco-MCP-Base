@@ -32,7 +32,7 @@ import type {
   SiteRoutingConfig,
   SiteRoutingResolver,
 } from "../types/multi-site.js";
-import { aliasOnly, hasEmbeddedRegion, regionOnly } from "./site-id.js";
+import { aliasOnly, regionOnly } from "./site-id.js";
 
 export interface UmbracoCloudRoutingOptions {
   /**
@@ -153,9 +153,9 @@ export function umbracoCloudSiteRouting(
     // (e.g. siteId "abc.uksouth01" -> "abc.uksouth01.umbraco.io"), so no
     // region needs appending and no guessing happens. A bare alias (no
     // embedded region) gets the single default region appended instead.
-    const resolvedRegion =
-      regionOnly(siteId) ?? options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION;
-    const candidateUrl = hasEmbeddedRegion(siteId)
+    const embeddedRegion = regionOnly(siteId);
+    const resolvedRegion = embeddedRegion ?? options.region ?? env.UMBRACO_CLOUD_REGION ?? DEFAULT_REGION;
+    const candidateUrl = embeddedRegion
       ? `https://${siteId}.umbraco.io`
       : `https://${siteId}.${resolvedRegion}.umbraco.io`;
 
@@ -181,7 +181,7 @@ export function umbracoCloudSiteRouting(
       // bare alias (see `SiteConfig.callbackId` doc) — send that as the
       // callback path even though `id` carries the region for our own
       // routing/resolution purposes.
-      ...(hasEmbeddedRegion(siteId) ? { callbackId: aliasOnly(siteId) } : {}),
+      ...(embeddedRegion ? { callbackId: aliasOnly(siteId) } : {}),
       // Carried separately from `id` (see `SiteConfig.region` doc) — a bare
       // alias's *effective* region for telemetry, without changing `id`
       // itself, so tenant/login-session hashes (keyed on `id`) stay stable.
