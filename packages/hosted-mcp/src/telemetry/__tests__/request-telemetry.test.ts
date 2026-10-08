@@ -142,6 +142,29 @@ describe("resolveRequestTelemetry", () => {
     expect(telemetry).not.toHaveProperty("region");
   });
 
+  it("prefers consentChoices.region (the resolver's default) over parsing a bare siteId", async () => {
+    // A bare-alias Cloud login: the resolver (cloud/index.ts) still resolves
+    // a real region internally and carries it as `region`, separately from
+    // `siteId` — the tenant hash below must still key on the untouched bare
+    // siteId, not on siteId+region.
+    const telemetry = await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "plain-alias", region: "euwest01" } }),
+      makeEnv()
+    );
+
+    expect(telemetry.region).toBe("euwest01");
+    expect(telemetry.tenant).toBe(await hashWithKey("plain-alias", HASH_KEY));
+  });
+
+  it("falls back to parsing siteId when consentChoices.region is absent (non-Cloud-routed sites)", async () => {
+    const telemetry = await resolveRequestTelemetry(
+      makeProps({ consentChoices: { siteId: "example-project.euwest01" } }),
+      makeEnv()
+    );
+
+    expect(telemetry.region).toBe("euwest01");
+  });
+
   it("omits tenant and region entirely when no site has been chosen", async () => {
     const telemetry = await resolveRequestTelemetry(makeProps(), makeEnv());
 

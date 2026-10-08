@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { useDraft202012ToolSchemas } from "../strict-json-schema-tools.js";
+import { createToolResult } from "../tool-result.js";
 
 /**
  * Round-trips a real McpServer <-> Client over an in-memory transport and
@@ -154,5 +155,89 @@ describe("useDraft202012ToolSchemas", () => {
     // filtered out by consent) would fail to start entirely.
     const server = new McpServer({ name: "test-server", version: "1.0.0" });
     expect(() => useDraft202012ToolSchemas(server)).not.toThrow();
+  });
+});
+
+describe("output schemas through a validating Client (umbraco/Umbraco-MCP-Base#343)", () => {
+  /**
+   * Registers one tool, patches the server, then lists tools before calling —
+   * listing is what makes the v1.x Client cache output validators, as real
+   * clients (Claude Desktop, MCP Inspector, the chain client) do.
+   */
+  async function callOverTheWire(
+    outputSchema: z.ZodObject | z.ZodRawShape,
+    result: unknown,
+  ) {
+    const server = new McpServer({ name: "test-server", version: "1.0.0" });
+    server.registerTool("list-things", { outputSchema }, async () => result as never);
+    useDraft202012ToolSchemas(server);
+
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      const callResult = await client.callTool({ name: "list-things", arguments: {} });
+      return { tool: tools[0], callResult };
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  const thingsSchema = z.object({ items: z.array(z.object({ alias: z.string() })) });
+
+  it("accepts a response carrying a field the output schema doesn't list", async () => {
+    const things = { items: [{ alias: "a", visibleWhen: null }] };
+    const { tool, callResult } = await callOverTheWire(thingsSchema, createToolResult(things));
+
+    expect(callResult.structuredContent).toEqual(things);
+    expect(tool.outputSchema).not.toHaveProperty("additionalProperties");
+  });
+
+  it("keeps known fields typed and required when opening nested objects", async () => {
+    const { tool } = await callOverTheWire(thingsSchema, createToolResult({ items: [] }));
+
+    expect(tool.outputSchema).toMatchObject({
+      required: ["items"],
+      properties: {
+        items: { items: { required: ["alias"], properties: { alias: { type: "string" } } } },
+      },
+    });
+    expect((tool.outputSchema as any).properties.items.items).not.toHaveProperty("additionalProperties");
+  });
+
+  it("opens a raw ZodRawShape outputSchema too", async () => {
+    const { callResult } = await callOverTheWire(
+      { alias: z.string() },
+      createToolResult({ alias: "a", visibleWhen: null }),
+    );
+
+    expect(callResult.structuredContent).toEqual({ alias: "a", visibleWhen: null });
+  });
+
+  it("keeps a deliberate z.strictObject closed", async () => {
+    const { tool } = await callOverTheWire(
+      z.strictObject({ alias: z.string() }),
+      createToolResult({ alias: "a" }),
+    );
+
+    expect(tool.outputSchema).toHaveProperty("additionalProperties", false);
+  });
+
+  it("keeps input schemas closed", async () => {
+    const server = new McpServer({ name: "test-server", version: "1.0.0" });
+    server.registerTool("get-thing", { inputSchema: z.strictObject({ id: z.string() }) }, noopHandler);
+    useDraft202012ToolSchemas(server);
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools[0].inputSchema).toHaveProperty("additionalProperties", false);
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });

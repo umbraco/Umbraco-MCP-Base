@@ -210,6 +210,29 @@ describe("umbracoCloudSiteRouting", () => {
       const site = await config.resolveSite("plain-alias", env);
       expect(site?.callbackId).toBeUndefined();
     });
+
+    it("carries the embedded region as `region`, without touching `id`", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("abc.uksouth01", env);
+      expect(site?.region).toBe("uksouth01");
+      expect(site?.id).toBe("abc.uksouth01");
+    });
+
+    it("sets `region` to the resolved default for a bare alias, without touching `id`", async () => {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const site = await config.resolveSite("plain-alias", env);
+      expect(site?.region).toBe("euwest01");
+      expect(site?.id).toBe("plain-alias");
+    });
+
+    it("uses the `region` option, not the hardcoded default, for a bare alias' `region`", async () => {
+      const config = umbracoCloudSiteRouting({
+        oauthClientId: "mcp-cms-editor",
+        region: "useast01",
+      });
+      const site = await config.resolveSite("plain-alias", env);
+      expect(site?.region).toBe("useast01");
+    });
   });
 
   describe("UMBRACO_CLOUD_ROUTING_ENABLED gate", () => {

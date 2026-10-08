@@ -284,7 +284,8 @@ describe("withCursorPagination", () => {
       const response = await result.handler({ cursor: "garbage" }, {} as any);
 
       expect(response.isError).toBe(true);
-      expect(response.structuredContent).toMatchObject({
+      expect(response.structuredContent).toBeUndefined();
+      expect(JSON.parse((response.content[0] as { text: string }).text)).toMatchObject({
         title: "Invalid Cursor",
         status: 400,
       });

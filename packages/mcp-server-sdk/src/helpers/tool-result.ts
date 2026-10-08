@@ -13,6 +13,9 @@
  * Use this when your MCP client is known to support `structuredContent`
  * (e.g. Claude Code, Claude Desktop).
  *
+ * Error results are the exception: they always carry their payload as JSON
+ * text content and never set `structuredContent` (see createToolResultError).
+ *
  * @see https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1624
  */
 
@@ -74,16 +77,38 @@ export function createToolResult<T = unknown>(data?: T): ToolResult {
 }
 
 /**
- * Creates a tool result for error responses with structured content.
+ * Creates a tool result for error responses.
  *
- * @param errorData - The error data (typically ProblemDetails from API)
+ * The error data is returned as JSON in a text content block only — never as
+ * `structuredContent`, and regardless of compatibility mode. Error payloads
+ * (typically ProblemDetails) don't match the tool's outputSchema, and the
+ * v1.x MCP SDK `Client` validates `structuredContent` against it even when
+ * `isError` is set, throwing `-32602` and discarding the real error. Text
+ * content is never validated, and it's what the spec's error examples use.
+ *
+ * v2: the v2 MCP SDK Client skips output validation on `isError` results, so
+ * once the clients we support are on v2 this could revert to also sending
+ * the error as `structuredContent`. Our own SDK moving to v2 isn't enough on
+ * its own — the blocker is clients still built on the v1.x SDK Client,
+ * which the server can't detect.
+ *
+ * @param errorData - The error data (typically ProblemDetails from API).
+ *   Strings are sent as-is; anything else is JSON-stringified.
  * @returns A tool result with isError flag set to true
+ *
+ * @see https://github.com/umbraco/Umbraco-MCP-Base/issues/343
+ * @see https://github.com/modelcontextprotocol/typescript-sdk/issues/2748
  */
 export function createToolResultError<T = unknown>(
   errorData: T
 ): ToolResult & { isError: boolean } {
   return {
-    ...createToolResult(errorData),
+    content: [
+      {
+        type: "text" as const,
+        text: typeof errorData === "string" ? errorData : JSON.stringify(errorData),
+      },
+    ],
     isError: true,
   };
 }

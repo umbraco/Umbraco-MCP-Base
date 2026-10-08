@@ -13,7 +13,7 @@
  * import { extractChainedResult } from "@umbraco-cms/mcp-server-sdk";
  *
  * const result = await mcpClientManager.callTool("cms", "get-document-by-id", { id });
- * if (result.isError) return createToolResultError(result);
+ * if (result.isError) return createToolResultError(extractChainedResult(result));
  *
  * const doc = extractChainedResult(result);
  * // doc is now a plain object regardless of whether the chained server

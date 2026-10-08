@@ -397,6 +397,7 @@ export function createAuthorizeHandler(
           ...(consentChoices ?? {}),
           siteId: result.site.id,
           callbackId: result.site.callbackId,
+          region: result.site.region,
         };
       } else {
         site = resolveSite(consentChoices?.siteId, options?.sites);
