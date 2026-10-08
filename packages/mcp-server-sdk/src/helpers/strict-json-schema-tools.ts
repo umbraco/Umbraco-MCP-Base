@@ -20,6 +20,12 @@
  * `Server.setRequestHandler` ("this will replace any previous request
  * handler for the same method") and Zod v4's own correctly-defaulted
  * `toJSONSchema()`.
+ *
+ * v2: the v2 SDK (@modelcontextprotocol/server) converts every schema to
+ * draft 2020-12 itself (`JSON_SCHEMA_CONVERSION_TARGET`), so this ListTools
+ * override can be deleted when we migrate. Opening output schemas
+ * (`openPlainOutputObjects`) must NOT be dropped with it — see the v2 note
+ * there.
  */
 
 import { z } from "zod";
@@ -63,6 +69,13 @@ function isZodSchema(value: unknown): boolean {
  * result. Only objects with no explicit catchall are opened — a deliberate
  * `z.strictObject` (catchall `never`) stays closed. Input schemas are not
  * affected.
+ *
+ * v2: still needed. v2 converts output schemas through Standard Schema
+ * (`~standard.jsonSchema.output`), which emits the same
+ * `additionalProperties: false` for a plain `z.object`, and its converter
+ * takes no `override`. After migrating, keep this behaviour by wrapping each
+ * tool's output schema at registration so its `~standard.jsonSchema.output`
+ * applies this function, rather than overriding ListTools.
  *
  * @see https://github.com/umbraco/Umbraco-MCP-Base/issues/343
  */
