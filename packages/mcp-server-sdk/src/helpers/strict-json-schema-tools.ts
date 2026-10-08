@@ -20,6 +20,12 @@
  * `Server.setRequestHandler` ("this will replace any previous request
  * handler for the same method") and Zod v4's own correctly-defaulted
  * `toJSONSchema()`.
+ *
+ * v2: the v2 SDK (@modelcontextprotocol/server) converts every schema to
+ * draft 2020-12 itself (`JSON_SCHEMA_CONVERSION_TARGET`), so this ListTools
+ * override can be deleted when we migrate. Opening output schemas
+ * (`openPlainOutputObjects`) must NOT be dropped with it — see the v2 note
+ * there.
  */
 
 import { z } from "zod";
@@ -53,15 +59,53 @@ function isZodSchema(value: unknown): boolean {
   return !!(value as { _zod?: unknown } | null)?._zod;
 }
 
+/**
+ * Output-schema override: leaves plain `z.object`s open to unknown fields.
+ *
+ * With `io: "output"`, Zod emits `additionalProperties: false` for every
+ * plain `z.object` (whose runtime parse just strips unknown keys). Handlers
+ * pass API responses through unchanged, so a field added in an Umbraco or
+ * add-on minor release would make every validating client reject the
+ * result. Only objects with no explicit catchall are opened — a deliberate
+ * `z.strictObject` (catchall `never`) stays closed. Input schemas are not
+ * affected.
+ *
+ * v2: still needed. v2 converts output schemas through Standard Schema
+ * (`~standard.jsonSchema.output`), which emits the same
+ * `additionalProperties: false` for a plain `z.object`, and its converter
+ * takes no `override`. After migrating, keep this behaviour by wrapping each
+ * tool's output schema at registration so its `~standard.jsonSchema.output`
+ * applies this function, rather than overriding ListTools.
+ *
+ * @see https://github.com/umbraco/Umbraco-MCP-Base/issues/343
+ */
+function openPlainOutputObjects({
+  zodSchema,
+  jsonSchema,
+}: {
+  zodSchema: unknown;
+  jsonSchema: Record<string, unknown>;
+}): void {
+  const def = (zodSchema as { _zod?: { def?: { type?: string; catchall?: unknown } } })._zod?.def;
+  if (def?.type === "object" && def.catchall === undefined && jsonSchema.additionalProperties === false) {
+    delete jsonSchema.additionalProperties;
+  }
+}
+
 function toJsonSchema(schema: unknown, io: "input" | "output"): Record<string, unknown> | undefined {
   if (!schema) return undefined;
   const zodSchema = isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
-  return z.toJSONSchema(zodSchema, { target: "draft-2020-12", io }) as Record<string, unknown>;
+  return z.toJSONSchema(zodSchema, {
+    target: "draft-2020-12",
+    io,
+    ...(io === "output" ? { override: openPlainOutputObjects } : {}),
+  }) as Record<string, unknown>;
 }
 
 /**
  * Patches an `McpServer` instance so every tool it lists advertises JSON
- * Schema draft 2020-12 instead of draft-7.
+ * Schema draft 2020-12 instead of draft-7, with output schemas left open
+ * to additive response fields (see `openPlainOutputObjects`).
  *
  * Reads the server's own live tool registry on every `ListTools` request
  * (rather than snapshotting it), so it stays correct regardless of
