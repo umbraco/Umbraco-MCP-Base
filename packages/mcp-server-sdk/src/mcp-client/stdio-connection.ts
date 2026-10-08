@@ -10,6 +10,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection, McpStdioServerConfig, FilterConfig } from "./types.js";
 
 export class StdioConnection implements McpConnection {
@@ -60,7 +61,16 @@ export class StdioConnection implements McpConnection {
     structuredContent?: unknown;
     isError?: boolean;
   }> {
-    const result = await this.client.callTool({ name, arguments: args });
+    // Raw tools/call rather than client.callTool(): the v1.x Client validates
+    // structuredContent against the tool's outputSchema even on isError
+    // results, throwing -32602 and discarding the chained server's real error
+    // (servers on older SDKs still send errors as structuredContent). Callers
+    // handle isError themselves; extractChainedResult reads either format.
+    // See umbraco/Umbraco-MCP-Base#343 and typescript-sdk#2748.
+    const result = await this.client.request(
+      { method: "tools/call", params: { name, arguments: args } },
+      CallToolResultSchema,
+    );
     return result as {
       content: Array<{ type: string; text?: string }>;
       structuredContent?: unknown;

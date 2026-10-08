@@ -168,7 +168,7 @@ return createToolResult({ id: '123' }, true, [{ type: 'text', text: 'Created' }]
 
 #### `createToolResultError(errorData)`
 
-Creates an error tool result with ProblemDetails format.
+Creates an error tool result with ProblemDetails format. The payload is sent as JSON in a text `content` block with `isError: true`, never as `structuredContent`, because validating MCP clients would otherwise check it against the tool's success `outputSchema` and reject it. Strings are sent as-is.
 
 ```typescript
 import { createToolResultError } from '@umbraco-cms/mcp-server-sdk';

@@ -233,19 +233,28 @@ export function createSnapshotResult(result: any, idToReplace?: string) {
   return result;
 }
 
+const TRACE_ID_PATTERN = /00-[0-9a-f]{32}-[0-9a-f]{16}-00/g;
+
 /**
  * Normalizes error responses for snapshot testing.
- * Handles traceId normalization in structuredContent.
+ * Handles traceId normalization in text content (where createToolResultError
+ * puts the error payload) and in structuredContent (older results).
  */
 export function normalizeErrorResponse(result: CallToolResult): CallToolResult {
+  if (Array.isArray(result.content) && result.content.some((c) => c.type === "text")) {
+    result = {
+      ...result,
+      content: result.content.map((c) =>
+        c.type === "text" ? { ...c, text: c.text.replace(TRACE_ID_PATTERN, "normalized-trace-id") } : c
+      ),
+    };
+  }
+
   if (result.structuredContent && typeof result.structuredContent === "object") {
     const normalized = { ...result };
     const content = normalized.structuredContent as any;
     if (content.traceId && typeof content.traceId === "string") {
-      content.traceId = content.traceId.replace(
-        /00-[0-9a-f]{32}-[0-9a-f]{16}-00/g,
-        "normalized-trace-id"
-      );
+      content.traceId = content.traceId.replace(TRACE_ID_PATTERN, "normalized-trace-id");
     }
     return normalized;
   }
