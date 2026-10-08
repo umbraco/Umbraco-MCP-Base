@@ -11,6 +11,7 @@ import {
   normalizeObject,
 } from "../snapshot-result.js";
 import { BLANK_UUID } from "../constants.js";
+import { createToolResultError } from "../../helpers/tool-result.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 describe("createSnapshotResult", () => {
@@ -355,6 +356,19 @@ describe("normalizeObject", () => {
 });
 
 describe("normalizeErrorResponse", () => {
+  it("should normalize trace IDs in a createToolResultError text payload", () => {
+    const input = createToolResultError({
+      title: "Something went wrong",
+      status: 500,
+      traceId: "00-1234567890abcdef1234567890abcdef-1234567890abcdef-00",
+    }) as CallToolResult;
+
+    const result = normalizeErrorResponse(input);
+
+    expect(JSON.parse((result.content[0] as { text: string }).text).traceId).toBe("normalized-trace-id");
+    expect(result.isError).toBe(true);
+  });
+
   it("should normalize trace IDs in structuredContent error response", () => {
     const input: CallToolResult = {
       content: [],
