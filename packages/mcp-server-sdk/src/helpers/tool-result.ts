@@ -86,6 +86,12 @@ export function createToolResult<T = unknown>(data?: T): ToolResult {
  * `isError` is set, throwing `-32602` and discarding the real error. Text
  * content is never validated, and it's what the spec's error examples use.
  *
+ * v2: the v2 MCP SDK Client skips output validation on `isError` results, so
+ * once the clients we support are on v2 this could revert to also sending
+ * the error as `structuredContent`. Our own SDK moving to v2 isn't enough on
+ * its own — the blocker is clients still built on the v1.x SDK Client,
+ * which the server can't detect.
+ *
  * @param errorData - The error data (typically ProblemDetails from API).
  *   Strings are sent as-is; anything else is JSON-stringified.
  * @returns A tool result with isError flag set to true

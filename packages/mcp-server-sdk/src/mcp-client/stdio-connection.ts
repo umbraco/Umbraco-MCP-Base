@@ -67,6 +67,10 @@ export class StdioConnection implements McpConnection {
     // (servers on older SDKs still send errors as structuredContent). Callers
     // handle isError themselves; extractChainedResult reads either format.
     // See umbraco/Umbraco-MCP-Base#343 and typescript-sdk#2748.
+    //
+    // v2: the v2 Client (@modelcontextprotocol/client) skips output
+    // validation on isError results, so when we migrate to it this can
+    // revert to `this.client.callTool({ name, arguments: args })`.
     const result = await this.client.request(
       { method: "tools/call", params: { name, arguments: args } },
       CallToolResultSchema,
