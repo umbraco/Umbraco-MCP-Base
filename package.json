@@ -1,6 +1,6 @@
 {
   "name": "umbraco-mcp-server-sdk-monorepo",
-  "version": "1.0.0-beta.43",
+  "version": "1.0.0-beta.44",
   "private": true,
   "description": "Umbraco MCP Server SDK monorepo",
   "workspaces": [
@@ -42,6 +42,6 @@
   "license": "MIT",
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.22.0",
-    "wrangler": "^4.131.0"
+    "wrangler": "^4.149.0"
   }
 }

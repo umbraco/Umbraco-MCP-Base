@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-server-sdk",
-  "version": "1.0.0-beta.43",
+  "version": "1.0.0-beta.44",
   "type": "module",
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",
@@ -77,7 +77,7 @@
   },
   "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "json-schema-to-typescript": "^15.0.4",
     "zod": "^4.4.3"
   },
