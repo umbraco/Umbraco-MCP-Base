@@ -216,7 +216,9 @@ function normalizeVariants(variants: any[], idToReplace?: string): any[] {
 
 /**
  * Creates a normalized result suitable for snapshot testing.
- * Normalizes structuredContent responses from MCP tools.
+ * Normalizes structuredContent responses from MCP tools, and JSON error
+ * payloads in text content (where createToolResultError puts them).
+ * Text that isn't a JSON object/array is left unchanged.
  *
  * @param result - The tool result to normalize
  * @param idToReplace - Optional specific ID to replace (for single item responses)
@@ -229,8 +231,31 @@ export function createSnapshotResult(result: any, idToReplace?: string) {
     };
   }
 
-  // Pass through non-structuredContent results unchanged
+  if (Array.isArray(result?.content)) {
+    return {
+      ...result,
+      content: result.content.map((c: any) =>
+        c?.type === "text" && typeof c.text === "string"
+          ? { ...c, text: normalizeJsonText(c.text, idToReplace) }
+          : c
+      ),
+    };
+  }
+
   return result;
+}
+
+function normalizeJsonText(text: string, idToReplace?: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    return text;
+  }
+  return JSON.stringify(normalizeObject(parsed, idToReplace, true));
 }
 
 const TRACE_ID_PATTERN = /00-[0-9a-f]{32}-[0-9a-f]{16}-00/g;
