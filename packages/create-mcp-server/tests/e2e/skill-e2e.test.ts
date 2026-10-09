@@ -140,10 +140,11 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
         // instead of yielding a graceful "result" message when a turn/budget/length
         // ceiling is hit mid-run. Log and fall through with whatever partial
         // transcript was captured — the downstream file/compile assertions are the
-        // real pass/fail signal for this step.
+        // real pass/fail signal for this step. The Claude process can also exit
+        // with code 1 when it is cut off at the turn cap, so tolerate that too.
         const message = err instanceof Error ? err.message : String(err);
         console.log(`[Skill E2E] Result: query error — ${message}`);
-        if (!/^claude code returned an error result:/i.test(message)) {
+        if (!/^claude code (returned an error result:|process exited with code 1)/i.test(message)) {
           throw err;
         }
       }
@@ -161,8 +162,8 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     await runSkill(`/build-tools
 
 Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`, {
-      maxTurns: 30,
-      maxBudget: 2.0,
+      maxTurns: 50,
+      maxBudget: 3.0,
     });
 
     // Verify the collection directory exists
@@ -201,8 +202,8 @@ Build integration tests for the "${targetCollection}" collection. The Umbraco in
 3. Run the tests to verify they pass
 
 Only test the read/list tools — do not create tests for mutations.`, {
-      maxTurns: 30,
-      maxBudget: 2.0,
+      maxTurns: 50,
+      maxBudget: 3.0,
     });
 
     // Verify test directory exists with test files
