@@ -80,7 +80,11 @@ export function validateStructuredContent<T>(
 
 /**
  * Validates an error response against the ProblemDetails schema.
- * Asserts isError is true and structuredContent matches RFC 7807 format.
+ * Asserts isError is true and the ProblemDetails (RFC 7807) payload is valid.
+ *
+ * The payload is read from the first text content block (JSON), which is where
+ * createToolResultError puts it. Falls back to structuredContent when no text
+ * block holds JSON, so results from servers on 1.0.0-beta.42 or earlier still validate.
  *
  * @param result - The CallToolResult from a tool handler
  * @returns The validated ProblemDetails data
@@ -88,6 +92,18 @@ export function validateStructuredContent<T>(
 export function validateErrorResult(result: CallToolResult): z.infer<typeof problemDetailsSchema> {
   if (!result.isError) {
     throw new Error("Expected result.isError to be true");
+  }
+  const textBlock = result.content?.find(
+    (block): block is { type: "text"; text: string } => block.type === "text"
+  );
+  if (textBlock) {
+    try {
+      return problemDetailsSchema.parse(JSON.parse(textBlock.text));
+    } catch (error) {
+      if (result.structuredContent === undefined) {
+        throw error;
+      }
+    }
   }
   return problemDetailsSchema.parse(result.structuredContent);
 }
