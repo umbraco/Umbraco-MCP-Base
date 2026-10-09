@@ -145,6 +145,32 @@ describe("createSnapshotResult", () => {
   });
 });
 
+describe("createSnapshotResult - error results in text content", () => {
+  it("normalizes IDs in a createToolResultError payload", () => {
+    const key = "619ea3c0-312b-4ba9-b4a4-9ac32252c362";
+    const result = createSnapshotResult(
+      createToolResultError({ error: "block not found", availableBlocks: [{ key, type: "content" }] })
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.availableBlocks[0].key).toBe(BLANK_UUID);
+    expect(result.isError).toBe(true);
+  });
+
+  it("applies idToReplace inside the error payload", () => {
+    const id = "619ea3c0-312b-4ba9-b4a4-9ac32252c362";
+    const other = "11111111-1111-1111-1111-111111111111";
+    const result = createSnapshotResult(createToolResultError({ id, other: { id: other } }), id);
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.id).toBe(BLANK_UUID);
+    expect(payload.other.id).toBe(other);
+  });
+
+  it("passes non-JSON text errors through unchanged", () => {
+    const input = createToolResultError("Something went wrong");
+    expect(createSnapshotResult(input)).toEqual(input);
+  });
+});
+
 describe("normalizeObject", () => {
   it("should handle null values", () => {
     expect(normalizeObject(null)).toBeNull();
