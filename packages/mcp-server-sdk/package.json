@@ -77,7 +77,7 @@
   },
   "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "json-schema-to-typescript": "^15.0.4",
     "zod": "^4.4.3"
   },

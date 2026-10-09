@@ -336,7 +336,7 @@ exports[`template structure should produce expected package.json for sample proj
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.191",
     "@cloudflare/workers-oauth-provider": "^0.8.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@umbraco-cms/mcp-hosted": "^17.0.0",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0",
     "agents": "^0.6.0",
@@ -358,10 +358,10 @@ exports[`template structure should produce expected package.json for sample proj
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
     "tsup": "^8.4.0",
-    "undici": "^8.9.0",
+    "undici": "^8.10.2",
     "@playwright/test": "^1.61.1",
     "typescript": "^5.8.3",
-    "wrangler": "^4.131.0"
+    "wrangler": "^4.149.0"
   }
 }"
 `;
