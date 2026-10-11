@@ -196,6 +196,7 @@ export {
   isRequestContextStoreAvailable,
   requireRequestContext,
   resetRequireRequestContext,
+  isRequestContextRequired,
   type CarriedRequestContext,
   type RequestSessionContext,
   type RequestContextStore,

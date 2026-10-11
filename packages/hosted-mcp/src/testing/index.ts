@@ -18,3 +18,14 @@ export {
   callTool,
   callToolWithArgs,
 } from "./tools.js";
+
+export {
+  checkSessionIsolation,
+  assertSessionIsolation,
+  type IsolationToolCall,
+  type IsolationSession,
+  type SessionIsolationOptions,
+  type RecordedRequest,
+  type IsolationViolation,
+  type SessionIsolationReport,
+} from "./session-isolation.js";
