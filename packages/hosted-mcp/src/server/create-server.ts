@@ -43,7 +43,10 @@ import {
   type CollectionConfiguration,
   type ServerConfigForCollections,
   type RequestTelemetryContext,
+  withRequestUmbracoVersion,
+  UMBRACO_VERSION_CONTEXT_KEY,
   type RequestSessionContext,
+  type CarriedRequestContext,
   type RequestTransport,
 } from "@umbraco-cms/mcp-server-sdk";
 import { resolveRequestTelemetry } from "../telemetry/request-telemetry.js";
@@ -605,34 +608,60 @@ async function initPerRequestServer(
   // cross-request leakage — see umbraco/Umbraco-MCP-Base#224.
   const expectedUmbracoMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
 
+  // One `/server/information` request per server creation, shared by the
+  // version check and the version capture below, so the site is never asked
+  // twice. Memoised here, in this function's scope — never at module level,
+  // which every session (and site) in the isolate shares.
+  let serverInformationRequest: Promise<{ version: string }> | undefined;
+  function requestServerInformation(): Promise<{ version: string }> {
+    serverInformationRequest ??= client({
+      url: SERVER_INFORMATION_PATH,
+      method: "GET",
+    }).then((info) => ({ version: (info as { version: string }).version }));
+    return serverInformationRequest;
+  }
+
+  // The connected site's raw version (e.g. `17.1.0-rc.2+abc`) for
+  // `collection.tools` and the per-request store; parsing is the SDK's job.
+  // Never fails server creation: a 401, 5xx or network error resolves to
+  // `undefined`, which the SDK treats as "oldest".
+  async function fetchServerInformation(): Promise<{ version: string } | undefined> {
+    try {
+      const info = await requestServerInformation();
+      return typeof info.version === "string" && info.version.length > 0 ? info : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function checkVersion(): Promise<string | null> {
     const versionCheckService = new VersionCheckService();
     await checkUmbracoVersion({
       mcpVersion: options.version,
       expectedUmbracoMajor: expectedUmbracoMajor!,
       client: {
-        getServerInformation: async () => {
-          const info = (await client({
-            url: SERVER_INFORMATION_PATH,
-            method: "GET",
-          })) as { version: string };
-          return { version: info.version };
-        },
+        // The shared request, not `fetchServerInformation`: the check needs the
+        // rejection itself so its "Unable to verify" warning keeps the reason.
+        getServerInformation: requestServerInformation,
       },
       service: versionCheckService,
     });
     return versionCheckService.getMessage();
   }
 
-  // Run the version check alongside the current-user fetch below — both are
-  // independent reads through the same fetch client, so there's no reason to
-  // serialize the two extra round-trips this function makes per request.
-  const [versionCheckMessage, currentUser] = await Promise.all([
+  // Run the version check and the server-info fetch alongside the
+  // current-user fetch below — all independent reads through the same fetch
+  // client, so there's no reason to serialize the round-trips this function
+  // makes per request. The server-info fetch always runs; the check only when
+  // `expectedUmbracoMajor` is set.
+  const [versionCheckMessage, currentUser, serverInformation] = await Promise.all([
     expectedUmbracoMajor ? checkVersion() : Promise.resolve(null),
     fetchCurrentUser(fetchClient),
+    fetchServerInformation(),
   ]);
+  const umbracoVersion = serverInformation?.version;
 
-  // Those two round-trips are also this request's liveness probe. If either hit
+  // Those round-trips are also this request's liveness probe. If any hit
   // a 401 and the refresh came back with a definitive `invalid_grant`, KV still
   // holds an entry (so the guard above passed) but the session is over — hand
   // back the same degraded server rather than a toolset that 401s on every call.
@@ -646,8 +675,8 @@ async function initPerRequestServer(
   //
   // `getRefreshFailure()` only ever reports something after the fetch client
   // has actually made a request — `fetchCurrentUser` above is what does that
-  // here (the version check only runs when `expectedUmbracoMajor` is set, so
-  // it can't be relied on alone). If a future change removes or reorders
+  // here (the server-info fetch does too, but it is an implementation detail
+  // of version capture and shouldn't be relied on alone). If a future change removes or reorders
   // `fetchCurrentUser` so nothing exercises `fetchClient` before this point,
   // this check would silently stop firing. Keep something calling through
   // `fetchClient` ahead of this line.
@@ -686,7 +715,13 @@ async function initPerRequestServer(
   // outside the store `getApiClient()`, `getServerRef()` and
   // `UmbracoManagementClient` throw "outside a request context" instead of
   // silently using another session's value. See umbraco/Umbraco-MCP-Base#383.
-  const session: RequestSessionContext = {
+  //
+  // The connected Umbraco version rides the same entry (and the handler's
+  // `extra`, where `withTelemetry` stamps it on the span). It never goes on the
+  // tracing adapter's static attributes above: that adapter is module-scoped,
+  // so interleaved requests for different sites would see each other's
+  // version. Left off entirely when the fetch failed.
+  const session: HostedSessionContext = {
     transport: fetchClient as unknown as RequestTransport,
     server: server.server,
     umbracoAuth: () => fetchClient.getSessionAuth(),
@@ -695,6 +730,7 @@ async function initPerRequestServer(
     // to the module provider, i.e. whatever `configureApiClient` last set for
     // every session in the isolate, which is what the rule above forbids.
     apiClientProvider: options.clientFactory ?? missingClientFactoryProvider,
+    ...(umbracoVersion ? { [UMBRACO_VERSION_CONTEXT_KEY]: umbracoVersion } : {}),
   };
   sessionContexts.set(server, session);
 
@@ -737,6 +773,7 @@ async function initPerRequestServer(
     filterConfig,
     requestTelemetry,
     session,
+    umbracoVersion,
   );
 
   // Covers the common case (chaining disabled, or a consumer that
@@ -763,7 +800,15 @@ async function initPerRequestServer(
  * enter the same store around the proxied tools it adds to that server. A
  * `WeakMap` keyed by the per-request server: it dies with the session.
  */
-const sessionContexts = new WeakMap<McpServer, RequestSessionContext>();
+const sessionContexts = new WeakMap<McpServer, HostedSessionContext>();
+
+/**
+ * A hosted session's per-request store values: the SDK's session values plus
+ * the connected Umbraco's raw version, when `createPerRequestServer` could
+ * fetch it. One object, so a tool call enters a single store entry holding both.
+ */
+export type HostedSessionContext = RequestSessionContext &
+  Pick<CarriedRequestContext, typeof UMBRACO_VERSION_CONTEXT_KEY>;
 
 /** The `apiClientProvider` of a session whose server was built without a `clientFactory`. */
 function missingClientFactoryProvider(): never {
@@ -778,7 +823,7 @@ function missingClientFactoryProvider(): never {
  * The per-session store values `createPerRequestServer` built for `server`,
  * or `undefined` for a server it didn't build (or a degraded one).
  */
-export function getServerSessionContext(server: McpServer): RequestSessionContext | undefined {
+export function getServerSessionContext(server: McpServer): HostedSessionContext | undefined {
   return sessionContexts.get(server);
 }
 
@@ -838,18 +883,22 @@ function assertStoreActive(caller: string): void {
  * Applied innermost — inside `withRequestTelemetryContext` — so the telemetry
  * that wrapper attaches to `extra` is on it by the time this reads it.
  *
+ * When the session carries the connected Umbraco version, it is attached to
+ * `extra` too (via the SDK's `withRequestUmbracoVersion`), so the handler's
+ * `context` and the store hold the same value and `withTelemetry` stamps it.
+ *
  * @param callback - The tool callback being registered
  * @param session - This session's store values; a no-op wrapper when absent
  * @returns A callback with the same signature
  */
 export function withRequestSessionContext<Callback extends (...args: any[]) => any>(
   callback: Callback,
-  session: RequestSessionContext | undefined
+  session: HostedSessionContext | undefined
 ): Callback {
   if (!session) {
     return callback;
   }
-  return function enterSessionContext(this: unknown, ...params: any[]) {
+  const enterSessionContext = function (this: unknown, ...params: any[]) {
     // `extra` is `(args, extra)` with an input schema, `(extra)` without.
     // Only its carried, namespaced keys are picked.
     const extra = params[toolCallExtraIndex(params)];
@@ -858,6 +907,8 @@ export function withRequestSessionContext<Callback extends (...args: any[]) => a
       return callback.apply(this, params);
     });
   } as Callback;
+  // A no-op when the session has no version (the fetch failed).
+  return withRequestUmbracoVersion(enterSessionContext, session[UMBRACO_VERSION_CONTEXT_KEY]);
 }
 
 /**
@@ -882,7 +933,12 @@ export function withRequestSessionContext<Callback extends (...args: any[]) => a
  * each handler runs inside that store (see `withRequestSessionContext`), so
  * `UmbracoManagementClient`, `getApiClient()`, `getServerRef()` and
  * `getSessionUmbracoAuth()` resolve to this session even when sessions in the
- * same isolate interleave.
+ * same isolate interleave. When it carries the connected Umbraco version, that
+ * version is also on each handler's `extra`.
+ *
+ * `umbracoVersion` is the connected site's raw version, handed to each
+ * `collection.tools(currentUser, { umbracoVersion })` so a collection can pick
+ * version-gated tools. `undefined` (the fetch failed) means "oldest".
  */
 export function registerCollectionTools<TUser>(
   server: McpServer,
@@ -890,12 +946,13 @@ export function registerCollectionTools<TUser>(
   currentUser: TUser,
   filterConfig: CollectionConfiguration,
   requestTelemetry?: RequestTelemetryContext,
-  session?: RequestSessionContext,
+  session?: HostedSessionContext,
+  umbracoVersion?: string,
 ): number {
   let registered = 0;
   for (const collection of collections) {
     const collectionName = collection.metadata.name;
-    const tools = collection.tools(currentUser as any);
+    const tools = collection.tools(currentUser as any, { umbracoVersion });
 
     for (const tool of tools) {
       if (!shouldIncludeTool(tool, { collectionName, config: filterConfig })) {
