@@ -641,11 +641,26 @@ async function initPerRequestServer(
     // into a fresh sign-in. Not on `misconfigured` / `request_rejected`: a
     // fresh login replays the same broken client or request, so signing in
     // again can't help and the entry stays put for an administrator to fix.
-    if (refreshFailure!.reason === "expired") {
+    // Conditional on the rejected token: a concurrent refresh may already have
+    // rotated the entry, in which case the session is alive and must be kept.
+    const rejectedRefreshToken = fetchClient.getRejectedRefreshToken();
+    if (refreshFailure!.reason === "expired" && rejectedRefreshToken) {
       try {
-        await deleteStoredUmbracoToken(env.OAUTH_KV, props.umbracoTokenKey);
+        const deleted = await deleteStoredUmbracoToken(
+          env.OAUTH_KV,
+          props.umbracoTokenKey,
+          rejectedRefreshToken
+        );
+        if (!deleted) {
+          console.log(
+            `[mcp-hosted] createPerRequestServer id=${traceId} siteId=${safeSiteId} kept Umbraco token entry: rotated by a concurrent refresh`
+          );
+        }
       } catch (error) {
-        console.error("[mcp-hosted] failed to delete expired Umbraco token entry:", error);
+        console.error(
+          `[mcp-hosted] createPerRequestServer id=${traceId} siteId=${safeSiteId} failed to delete expired Umbraco token entry:`,
+          error
+        );
       }
     }
     const server = createAuthExpiredServer(options, baseInstructions, degradedRefresh.message);

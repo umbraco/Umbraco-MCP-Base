@@ -9,7 +9,13 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
-import { refreshUmbracoToken } from "../token-storage.js";
+import {
+  refreshUmbracoToken,
+  deleteStoredUmbracoToken,
+  getRejectedRefreshToken,
+  getStoredUmbracoToken,
+  type RefreshFailure,
+} from "../token-storage.js";
 import type { HostedMcpEnv } from "../../types/env.js";
 
 const originalFetch = globalThis.fetch;
@@ -417,5 +423,132 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     expect(message).not.toContain("s3cr3t-access");
     expect(message).not.toContain("s3cr3t-refresh");
     expect(message).not.toContain("s3cr3t-caller");
+  });
+});
+
+describe("getRejectedRefreshToken", () => {
+  let warnSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    postedRefreshTokens = [];
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    warnSpy.mockRestore();
+  });
+
+  it("reports the token actually posted for an expired failure", async () => {
+    respondWith(json({ error: "invalid_grant" }, 400));
+    const env = createEnv(createKv({ entries: [storedEntry("same")] }));
+
+    const result = await refreshUmbracoToken(env, "key-rejected-same", "caller-snapshot");
+
+    expect(getRejectedRefreshToken(result as RefreshFailure)).toBe("same");
+    // Kept off the failure object itself, so nothing that logs or spreads it
+    // can leak the token.
+    expect(JSON.stringify(result)).not.toContain("same\"");
+  });
+
+  it("reports the retried token when the bounded retry was also rejected", async () => {
+    respondWith(json({ error: "invalid_grant" }, 400));
+    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")] }));
+
+    const result = await refreshUmbracoToken(env, "key-rejected-retry", "caller-snapshot");
+
+    expect(getRejectedRefreshToken(result as RefreshFailure)).toBe("rotated");
+  });
+
+  it("reports nothing for a non-expired failure", async () => {
+    respondWith(json({ error: "invalid_client" }, 401));
+
+    const result = await refreshUmbracoToken(createEnv(createKv()), "key-rejected-client", "rt");
+
+    expect(getRejectedRefreshToken(result as RefreshFailure)).toBeUndefined();
+  });
+});
+
+describe("deleteStoredUmbracoToken", () => {
+  /** In-memory KV holding real values, shared by reads, writes and deletes. */
+  function memoryKv(initial: Record<string, string> = {}) {
+    const data = new Map(Object.entries(initial));
+    return {
+      data,
+      get: jest.fn(async (key: string) => data.get(key) ?? null),
+      put: jest.fn(async (key: string, value: string) => {
+        data.set(key, value);
+      }),
+      delete: jest.fn(async (key: string) => {
+        data.delete(key);
+      }),
+    };
+  }
+
+  it("deletes the entry when it still holds the rejected refresh token", async () => {
+    const kv = memoryKv({ "umbraco_token:k1": storedEntry("dead") });
+
+    const deleted = await deleteStoredUmbracoToken(kv as unknown as KVNamespace, "k1", "dead");
+
+    expect(deleted).toBe(true);
+    expect(kv.data.has("umbraco_token:k1")).toBe(false);
+  });
+
+  it("keeps an entry rotated by a concurrent refresh", async () => {
+    const kv = memoryKv({ "umbraco_token:k2": storedEntry("rotated-meanwhile") });
+
+    const deleted = await deleteStoredUmbracoToken(kv as unknown as KVNamespace, "k2", "dead");
+
+    expect(deleted).toBe(false);
+    expect(kv.delete).not.toHaveBeenCalled();
+    expect(kv.data.has("umbraco_token:k2")).toBe(true);
+  });
+
+  it("evicts a cached rotation for the deleted key", async () => {
+    // Populate the rotation cache: a successful refresh whose KV write fails
+    // leaves `rotated-1` cached as the only copy of the new token.
+    let putShouldThrow = true;
+    const kv = memoryKv();
+    kv.put.mockImplementation(async (key: string, value: string) => {
+      if (putShouldThrow) throw new Error("kv write quota exceeded");
+      kv.data.set(key, value);
+    });
+    const env = createEnv(kv as unknown as ReturnType<typeof createKv>);
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    postedRefreshTokens = [];
+    respondWith(json({ access_token: "access-1", refresh_token: "rotated-1" }, 200));
+    try {
+      await refreshUmbracoToken(env, "key-evict", "rt");
+      putShouldThrow = false;
+
+      await deleteStoredUmbracoToken(kv as unknown as KVNamespace, "key-evict", "rt");
+
+      // With the cache evicted, the next refresh posts the caller's token, not
+      // the cached `rotated-1`.
+      respondWith(json({ access_token: "access-2" }, 200));
+      await refreshUmbracoToken(env, "key-evict", "fresh-login-token");
+      expect(postedRefreshTokens).toEqual(["rt", "fresh-login-token"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+describe("getStoredUmbracoToken with a corrupt entry", () => {
+  it("returns null and logs without echoing the stored value", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const kv = { get: async () => "{not json s3cr3t" } as unknown as KVNamespace;
+
+    try {
+      expect(await getStoredUmbracoToken(kv, "corrupt-key")).toBeNull();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const line = String(warnSpy.mock.calls[0][0]);
+      expect(line).toContain("not valid JSON");
+      expect(line).not.toContain("s3cr3t");
+      expect(line).not.toContain("corrupt-key");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

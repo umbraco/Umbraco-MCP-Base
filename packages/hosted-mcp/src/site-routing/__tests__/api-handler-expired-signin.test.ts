@@ -58,14 +58,21 @@ const storedEntry = { [`umbraco_token:${TOKEN_KEY}`]: JSON.stringify({ tokens: {
 
 describe("createSiteRoutingApiHandler — expired Umbraco sign-in", () => {
   let errorSpy: ReturnType<typeof jest.spyOn>;
+  let warnSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
+
+  /** The reject-path warning line, if one was logged. */
+  const rejectWarning = () =>
+    warnSpy.mock.calls.map((args: unknown[]) => String(args[0])).find((l: string) => l.includes("sign-in gone"));
 
   it("passes through without revoking when the inner entry is present", async () => {
     const base = makeBase();
@@ -94,6 +101,19 @@ describe("createSiteRoutingApiHandler — expired Umbraco sign-in", () => {
     expect(auth).toMatch(/^Bearer /);
     expect(auth).toContain(`error="invalid_token"`);
     expect(auth).toContain(`resource_metadata="`);
+    expect(rejectWarning()).toContain("grant_parsed=true");
+  });
+
+  it("logs a hashed login reference, never the token key or bearer token", async () => {
+    const { env } = makeEnv(makeKv({}));
+    const hashedEnv = { ...env, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv;
+
+    await createSiteRoutingApiHandler(makeBase()).fetch(mcpRequest(), hashedEnv, ctxWithProps());
+
+    const line = rejectWarning()!;
+    expect(line).toMatch(/login=[0-9a-f]{12} /);
+    expect(line).not.toContain(TOKEN_KEY);
+    expect(line).not.toContain("secret-1");
   });
 
   it.each([
@@ -114,6 +134,7 @@ describe("createSiteRoutingApiHandler — expired Umbraco sign-in", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain(`error="invalid_token"`);
     expect(revokeGrant).not.toHaveBeenCalled();
+    expect(rejectWarning()).toContain("grant_parsed=false");
   });
 
   it("still returns 401 when revoking the grant throws", async () => {
@@ -195,10 +216,18 @@ describe("createSiteRoutingApiHandler — 401 resource_metadata matches OAuthPro
     };
   }
 
+  let afterTest: (() => void) | undefined;
+  afterEach(() => {
+    afterTest?.();
+    afterTest = undefined;
+  });
+
   const resourceMetadata = (response: Response) =>
     (response.headers.get("www-authenticate") ?? "").match(/resource_metadata="([^"]*)"/)?.[1];
 
   it("carries the same resource_metadata for the same tenant", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    afterTest = () => warnSpy.mockRestore();
     const { env } = makeEnv(makeKv({}));
     const apiHandler = createSiteRoutingApiHandler(makeBase());
 
@@ -217,5 +246,71 @@ describe("createSiteRoutingApiHandler — 401 resource_metadata matches OAuthPro
     expect(wrapper.status).toBe(401);
     expect(resourceMetadata(wrapper)).toBeDefined();
     expect(resourceMetadata(wrapper)).toBe(resourceMetadata(providerOwn));
+  });
+});
+
+describe("createSiteRoutingApiHandler — bare handler resource_metadata", () => {
+  /** Exactly what `@cloudflare/workers-oauth-provider` 0.8.x builds in `handleApiRequest`. */
+  const providerResourceMetadata = (requestUrl: string) => {
+    const url = new URL(requestUrl);
+    return `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
+  };
+
+  it.each([
+    ["a tenant path", "https://worker.example.com/at/abc/mcp"],
+    ["the single-site path", "https://worker.example.com/mcp"],
+  ])("equals the provider's exact string on %s", async (_label, requestUrl) => {
+    const { env } = makeEnv(makeKv({}));
+    const errorSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await createSiteRoutingApiHandler(makeBase()).fetch(
+        new Request(requestUrl, { method: "POST", headers: { Authorization: `Bearer ${BEARER}` } }),
+        env,
+        ctxWithProps()
+      );
+
+      const auth = response.headers.get("www-authenticate") ?? "";
+      expect(auth.match(/resource_metadata="([^"]*)"/)?.[1]).toBe(providerResourceMetadata(requestUrl));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});
+
+describe("expired sign-in round trip: Durable Object delete → wrapper 401", () => {
+  it("agrees on the KV key: once the DO deletes the entry, the wrapper 401s", async () => {
+    const { deleteStoredUmbracoToken, storeUmbracoToken } = await import("../../auth/token-storage.js");
+    const data = new Map<string, string>();
+    const kv = {
+      get: jest.fn(async (key: string) => data.get(key) ?? null),
+      put: jest.fn(async (key: string, value: string) => {
+        data.set(key, value);
+      }),
+      delete: jest.fn(async (key: string) => {
+        data.delete(key);
+      }),
+    };
+    const { env, revokeGrant } = makeEnv(kv as unknown as ReturnType<typeof makeKv>);
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = createSiteRoutingApiHandler(makeBase());
+
+    try {
+      // Login writes the entry through the real store path.
+      await storeUmbracoToken(env.OAUTH_KV, TOKEN_KEY, {
+        access_token: "access",
+        refresh_token: "dead-refresh",
+        token_type: "Bearer",
+      } as Parameters<typeof storeUmbracoToken>[2]);
+      expect((await handler.fetch(mcpRequest(), env, ctxWithProps())).status).toBe(200);
+
+      // The DO drops it after Umbraco rejects the refresh token.
+      expect(await deleteStoredUmbracoToken(env.OAUTH_KV, TOKEN_KEY, "dead-refresh")).toBe(true);
+
+      const response = await handler.fetch(mcpRequest(), env, ctxWithProps());
+      expect(response.status).toBe(401);
+      expect(revokeGrant).toHaveBeenCalledWith("grant-1", "user-1");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

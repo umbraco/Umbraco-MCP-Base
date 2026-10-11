@@ -10,6 +10,7 @@
 import { normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import {
+  getRejectedRefreshToken,
   getStoredUmbracoToken,
   refreshUmbracoToken,
   type RefreshFailure,
@@ -133,6 +134,12 @@ export interface UmbracoFetchClient {
    * than as a toolset that 401s on every call.
    */
   getRefreshFailure(): RefreshFailure | undefined;
+  /**
+   * The refresh token Umbraco rejected for the last `expired` refresh failure,
+   * or `undefined`. Lets `createPerRequestServer` delete the stored entry only
+   * if it still holds that token (see `deleteStoredUmbracoToken`). Never log it.
+   */
+  getRejectedRefreshToken(): string | undefined;
 }
 
 /**
@@ -314,6 +321,8 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
 
   return Object.assign(fetchClient, {
     getRefreshFailure: () => lastRefreshFailure,
+    getRejectedRefreshToken: () =>
+      lastRefreshFailure ? getRejectedRefreshToken(lastRefreshFailure) : undefined,
   }) as UmbracoFetchClient;
 }
 

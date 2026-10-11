@@ -14,6 +14,7 @@ import type { AuthProps } from "../types/auth.js";
 import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
 import { getStoredUmbracoToken } from "../auth/token-storage.js";
 import { resourceMetadataUrlFor } from "../server/resource-metadata.js";
+import { hashWithKey } from "../telemetry/request-telemetry.js";
 
 export interface SiteRouterOptions {
   /**
@@ -168,6 +169,11 @@ async function rejectIfUmbracoSignInGone(
   // OAuthProvider's access tokens are `{userId}:{grantId}:{secret}`. Parsed
   // defensively: whatever the header holds, the client still gets the 401.
   const grant = parseOuterAccessToken(request.headers.get("Authorization"));
+  // Never the raw token key (it's the KV lookup key for that login's Umbraco
+  // tokens) nor the bearer token: a keyed hash prefix when a hash key is set.
+  console.warn(
+    `[mcp-hosted] Umbraco sign-in gone; revoking outer grant and returning 401 login=${await loginRef(tokenKey, env)} grant_parsed=${grant !== null}`
+  );
   if (grant) {
     try {
       await env.OAUTH_PROVIDER.revokeGrant(grant.grantId, grant.userId);
@@ -187,6 +193,22 @@ async function rejectIfUmbracoSignInGone(
       },
     }
   );
+}
+
+/**
+ * A log-safe reference to a login: the first 12 hex chars of the same keyed
+ * hash `resolveRequestTelemetry` exports as `login_session`, or `<unhashed>`
+ * when no hash key is configured (or hashing fails).
+ */
+async function loginRef(tokenKey: string, env: HostedMcpEnv): Promise<string> {
+  const key = env.LOGIN_SESSION_HASH_KEY || env.TENANT_HASH_KEY;
+  if (!key) return "<unhashed>";
+  try {
+    return (await hashWithKey(tokenKey, key)).slice(0, 12);
+  } catch (err) {
+    console.warn("[mcp-hosted] failed to hash login reference for logging:", err);
+    return "<unhashed>";
+  }
 }
 
 /** Splits an OAuthProvider bearer token into its user and grant ids, or `null`. */
