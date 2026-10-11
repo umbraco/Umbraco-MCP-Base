@@ -6,12 +6,12 @@
  *
  * `getServerRef()` reads the active per-request store first
  * (`runWithRequestContext({ server })`, entered by the hosted wrapper around
- * each tool call) and falls back to the module-scoped ref only when no store
- * is active:
+ * each tool call) and falls back to the module-scoped ref whenever the active
+ * store has no `server` (or no store is active):
  * - Stdio mode: set in index.ts at startup via setServerRef(server.server)
  * - Hosted mode: the per-request store carries this session's server. Workers
  *   may still call setServerRef(this.server.server) in init(), but it is only
- *   the fallback and is never read inside a hosted tool call.
+ *   the fallback; inside a hosted tool call the store's server is used.
  *
  * A module-scoped ref is NOT safe per session in hosted mode: a Cloudflare
  * isolate can host several Durable Objects of the same class and they share
@@ -43,7 +43,7 @@ let _server: Server | null = null;
  * Call once during server initialization.
  *
  * Module-level fallback for stdio, CLI and tests; a `server` in the active
- * per-request store always wins. Hosted code must not rely on it — module
+ * per-request store wins, and this ref is used whenever the store has none. Hosted code must not rely on it — module
  * scope is shared by every session in a Cloudflare isolate.
  *
  * @param server - The underlying Server instance (McpServer.server)

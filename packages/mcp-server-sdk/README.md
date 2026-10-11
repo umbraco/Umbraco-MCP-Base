@@ -833,10 +833,33 @@ await fetch(`${baseUrl}/umbraco/management/api/v1/...`, {
 });
 ```
 
+Hosted servers must pass `clientFactory` to `createPerRequestServer`: it becomes
+the session's API client provider. Without one, `getApiClient()` throws "API
+client not configured" rather than falling back to a module-level client.
+
+Anything a worker registers directly on the server (`server.registerTool`,
+resources, prompts) runs outside the store. Wrap its body in
+`runInSessionContext(server, fn)` from `@umbraco-cms/mcp-hosted`:
+
+```typescript
+import { runInSessionContext } from "@umbraco-cms/mcp-hosted";
+
+server.registerResource("example", "example://x", {}, (uri) =>
+  runInSessionContext(server, async () => {
+    const client = getApiClient<MyClient>();
+    // ...
+  })
+);
+```
+
 `setCustomTransport`, `configureApiClient` and `setServerRef` are module-level
-fallbacks for stdio, CLI and tests only, and are read only when no store is
-active. Hosted servers no longer write them, so a hosted call made outside a
-tool call fails with "API client not configured".
+fallbacks for stdio, CLI and tests only. The fallback is per key: each reader
+uses the module value whenever the active store has no value for its key (or
+no store is active). Hosted servers no longer write them, so outside a hosted
+tool call `getApiClient()` throws "API client not configured" and
+`getServerRef()` throws "Server reference not set", while
+`UmbracoManagementClient` falls through to the default fetch transport (which
+fails unless `initializeUmbracoFetch()` was called).
 
 ## Subpath Exports
 

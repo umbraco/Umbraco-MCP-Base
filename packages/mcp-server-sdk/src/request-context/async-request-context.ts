@@ -25,9 +25,11 @@
  * several Durable Objects of the same class, sharing module scope, and each
  * MCP session is its own Durable Object. A module-level "current transport"
  * or "current server" is therefore last-session-wins across every session in
- * the isolate. `UmbracoManagementClient`, `getApiClient()`, `getServerRef()`
- * and `getSessionUmbracoAuth()` read the store first and only fall back to
- * their module value when no store is active (stdio, CLI, tests).
+ * the isolate. `UmbracoManagementClient`, `getApiClient()` and
+ * `getServerRef()` read the store first and, per key, fall back to their
+ * module value when the store has no value for that key or no store is active
+ * (the module values are for stdio, CLI, tests). `getSessionUmbracoAuth()`
+ * has no module fallback.
  *
  * **Rule for hosted code:** never keep per-session values (tokens, clients,
  * servers, token keys) in module scope. Put them in this store at the
@@ -37,12 +39,15 @@
  * (`InProcessConnection.callTool` re-enters it only to override
  * `apiClientProvider` for a chained server with its own `clientFactory`).
  *
- * Kept in its own file so `node:async_hooks` is only pulled in by the code
- * that actually uses it. Workers need `nodejs_compat` (or `nodejs_compat_v2`)
- * for this import.
+ * `node:async_hooks` is never imported statically: the store is created
+ * lazily on first use through `process.getBuiltinModule`, so importing the SDK
+ * works in runtimes without it (e.g. Workers lacking `nodejs_compat`). Where
+ * it is unavailable the store is simply absent — {@link runWithRequestContext}
+ * runs `fn` as-is and {@link getActiveRequestContext} returns `undefined`, so
+ * only the explicit `context` argument carries values.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
+import type { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   TELEMETRY_CONTEXT_KEY,
@@ -107,7 +112,23 @@ export interface RequestSessionContext {
 /** Everything the store holds: the carried values plus the session's own. */
 export interface RequestContextStore extends CarriedRequestContext, RequestSessionContext {}
 
-const store = new AsyncLocalStorage<Readonly<RequestContextStore>>();
+type Store = AsyncLocalStorage<Readonly<RequestContextStore>>;
+
+let store: Store | null | undefined;
+
+/** The store, created on first use; `null` when `node:async_hooks` is unavailable. */
+function getStore(): Store | null {
+  if (store === undefined) {
+    try {
+      const nodeProcess = (globalThis as { process?: NodeJS.Process }).process;
+      const hooks = nodeProcess?.getBuiltinModule?.("node:async_hooks");
+      store = hooks ? new hooks.AsyncLocalStorage() : null;
+    } catch {
+      store = null;
+    }
+  }
+  return store;
+}
 
 /**
  * Picks only the carried, namespaced values off a tool-call `context`.
@@ -172,7 +193,11 @@ function pickSessionContext(values: unknown): RequestSessionContext {
  * @returns Whatever `fn` returns
  */
 export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
-  return store.run(
+  const active = getStore();
+  if (!active) {
+    return fn();
+  }
+  return active.run(
     Object.freeze({ ...pickCarriedRequestContext(values), ...pickSessionContext(values) }),
     fn
   );
@@ -183,7 +208,7 @@ export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
  * `undefined` outside one.
  */
 export function getActiveRequestContext(): Readonly<RequestContextStore> | undefined {
-  return store.getStore();
+  return getStore()?.getStore();
 }
 
 /**
@@ -202,7 +227,7 @@ export function getActiveRequestContext(): Readonly<RequestContextStore> | undef
  *   the store (stdio, CLI, or outside a tool call)
  */
 export async function getSessionUmbracoAuth(): Promise<SessionUmbracoAuth> {
-  const resolve = store.getStore()?.umbracoAuth;
+  const resolve = getStore()?.getStore()?.umbracoAuth;
   if (!resolve) {
     throw new Error(
       "Session Umbraco auth not configured. getSessionUmbracoAuth() only works inside a hosted tool call, where the host puts the session's Umbraco auth in the request context."

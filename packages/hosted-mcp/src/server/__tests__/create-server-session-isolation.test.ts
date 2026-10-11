@@ -21,6 +21,7 @@ import {
   getApiClient,
   getServerRef,
   getSessionUmbracoAuth,
+  confirmAction,
   type ToolCollectionExport,
   type ToolDefinition,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -31,7 +32,7 @@ import type { AuthProps } from "../../types/auth.js";
 // One fetch client per session, keyed by the session's KV token key
 // ============================================================================
 
-type SessionName = "A" | "B";
+type SessionName = "A" | "B" | "C";
 
 function createSessionFetchClient(name: SessionName) {
   const client = jest.fn(async (config: { url: string }) => {
@@ -52,6 +53,7 @@ function createSessionFetchClient(name: SessionName) {
 const sessionClients: Record<string, ReturnType<typeof createSessionFetchClient>> = {
   "token-key-A": createSessionFetchClient("A"),
   "token-key-B": createSessionFetchClient("B"),
+  "token-key-C": createSessionFetchClient("C"),
 };
 
 jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
@@ -82,6 +84,9 @@ const propsFor = (name: SessionName): AuthProps => ({
  * the other session's call run in between.
  */
 let gate: Promise<void> = Promise.resolve();
+
+/** The session whose server each elicitation went to, in order. */
+const elicitedBy: string[] = [];
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
@@ -122,9 +127,19 @@ const chainedCollection: ToolCollectionExport = {
       return UmbracoManagementClient({ url: "/who", method: "GET" });
     }),
     tool("transport", async () => UmbracoManagementClient({ url: "/who", method: "GET" })),
+    tool("server-ref", async () => (getServerRef() as unknown as { __session: string }).__session),
+    tool("confirm", async () => confirmAction(undefined, "Proceed?")),
+    tool("confirm-slow", async () => {
+      await gate;
+      return confirmAction(undefined, "Proceed?");
+    }),
     tool("api-client", async () => {
       const client = getApiClient<{ who: () => Promise<unknown> }>();
       return client.who();
+    }),
+    tool("api-client-slow", async () => {
+      await gate;
+      return getApiClient<{ who: () => Promise<unknown> }>().who();
     }),
   ],
 };
@@ -192,6 +207,7 @@ async function interleave(
 describe("createPerRequestServer keeps per-session state per session", () => {
   let serverA: McpServer;
   let serverB: McpServer;
+  let serverC: McpServer;
   let logSpy: ReturnType<typeof jest.spyOn>;
 
   beforeAll(async () => {
@@ -209,6 +225,14 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     ] as const) {
       // Tag each session's underlying Server so getServerRef() is identifiable.
       (server.server as unknown as { __session: string }).__session = name;
+      // Record which session's server an elicitation went to.
+      Object.assign(server.server, {
+        getClientCapabilities: () => ({ elicitation: { form: {} } }),
+        elicitInput: async () => {
+          elicitedBy.push(name);
+          return { action: "accept", content: { confirm: true } };
+        },
+      });
 
       const props = propsFor(name);
       // Without its own clientFactory: inherits the caller's client.
@@ -225,7 +249,24 @@ describe("createPerRequestServer keeps per-session state per session", () => {
           clientFactory: () => ({ who: async () => ({ via: "own-client-factory" }) }),
         },
       });
+      // With its own clientFactory whose client goes through UmbracoManagementClient
+      // (an Orval client), so it must still use the session's transport.
+      await registerChainedTools({
+        server,
+        env,
+        props,
+        fetchUser: false,
+        chainedServer: {
+          ...chainedBase,
+          name: "orval",
+          clientFactory: () => ({ who: () => UmbracoManagementClient({ url: "/who", method: "GET" }) }),
+        },
+      });
     }
+
+    // Session C has no clientFactory at all.
+    const { clientFactory: _unused, ...optionsWithoutFactory } = options;
+    serverC = await createPerRequestServer(optionsWithoutFactory, env, propsFor("C"));
   });
 
   afterAll(() => {
@@ -262,6 +303,27 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     );
   });
 
+  it("leaves the module-level server ref unset after sessions start", () => {
+    expect(() => getServerRef()).toThrow("Server reference not set");
+  });
+
+  it("a chained clientFactory client that calls UmbracoManagementClient uses each session's own transport", async () => {
+    expect(await interleave(serverA, "orval--api-client-slow", serverB, "orval--api-client")).toEqual([
+      { via: "A" },
+      { via: "B" },
+    ]);
+  });
+
+  it("a session created without a clientFactory never gets another session's client", async () => {
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const pendingC = call(serverC, "api-client-slow");
+    // Session A (with a clientFactory) runs to completion in between.
+    expect(await call(serverA, "transport")).toEqual({ via: "A" });
+    release();
+    await expect(pendingC).rejects.toThrow("API client not configured");
+  });
+
   it("resolves the server ref per session", async () => {
     expect(await call(serverA, "server-ref")).toBe("A");
     expect(await call(serverB, "server-ref")).toBe("B");
@@ -286,6 +348,61 @@ describe("createPerRequestServer keeps per-session state per session", () => {
       { baseUrl: "https://a.example.com", accessToken: "token-A" },
       { baseUrl: "https://b.example.com", accessToken: "token-B" },
     ]);
+  });
+
+  it("an elicitation inside a chained call goes to the caller's own session", async () => {
+    elicitedBy.length = 0;
+    // A parks before eliciting; B elicits in between; then A resumes.
+    expect(await interleave(serverA, "inherit--confirm-slow", serverB, "inherit--confirm")).toEqual([true, true]);
+    expect(elicitedBy).toEqual(["B", "A"]);
+  });
+
+  it("a hosted path outside the session store fails loudly", async () => {
+    // Registered directly on the server, not through the wrapped registration.
+    serverA.registerTool("direct", { description: "direct" }, async () => ({
+      content: [{ type: "text" as const, text: JSON.stringify({ via: (getServerRef() as any).__session }) }],
+    }));
+    await expect(call(serverA, "direct")).rejects.toThrow("Server reference not set");
+    expect(() => getApiClient()).toThrow("API client not configured");
+    // The transport must not leak in from another session either.
+    await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow();
+  });
+
+  it("runInSessionContext enters the session's store for code registered directly on the server", async () => {
+    const { runInSessionContext } = await import("../create-server.js");
+    serverB.registerTool("direct-wrapped", { description: "direct" }, async () =>
+      runInSessionContext(serverB, async () => ({
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              server: (getServerRef() as any).__session,
+              transport: await UmbracoManagementClient({ url: "/who", method: "GET" }),
+              client: await getApiClient<{ who: () => Promise<unknown> }>().who(),
+              auth: await getSessionUmbracoAuth(),
+            }),
+          },
+        ],
+      }))
+    );
+    expect(await call(serverB, "direct-wrapped")).toEqual({
+      server: "B",
+      transport: { via: "B" },
+      client: { via: "B" },
+      auth: { baseUrl: "https://b.example.com", accessToken: "token-B" },
+    });
+  });
+
+  it("runInSessionContext throws for a server createPerRequestServer did not build", async () => {
+    const { runInSessionContext } = await import("../create-server.js");
+    const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+    expect(() => runInSessionContext(new McpServer({ name: "x", version: "1" }), () => 1)).toThrow(
+      "no session context"
+    );
+  });
+
+  it("a session without a clientFactory explains what is missing", async () => {
+    await expect(call(serverC, "api-client-slow")).rejects.toThrow("without a `clientFactory`");
   });
 
   it("getSessionUmbracoAuth throws outside a request", async () => {

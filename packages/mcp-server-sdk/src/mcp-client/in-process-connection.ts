@@ -99,8 +99,12 @@ export class InProcessConnection implements McpConnection {
       sendRequest: async () => ({}) as any,
     };
 
-    const run = async () =>
-      (await match.tool.handler(args, extra as any)) as {
+    const run = async (sessionValues: object) =>
+      // Re-enter the store with the merged values so a chain made from inside
+      // this handler sees them, not an outer store that may differ.
+      (await runWithRequestContext({ ...sessionValues, ...carried }, () =>
+        match.tool.handler(args, extra as any),
+      )) as {
         content: Array<{ type: string; text?: string }>;
         structuredContent?: unknown;
         isError?: boolean;
@@ -112,13 +116,11 @@ export class InProcessConnection implements McpConnection {
     // Everything else (transport, server, auth, carried values) is inherited
     // from the caller's store. Without a clientFactory the caller's store is
     // inherited unchanged, so the chained handler uses the caller's client.
+    const inherited = { ...getActiveRequestContext() };
     if (this.config.clientFactory) {
-      return runWithRequestContext(
-        { ...getActiveRequestContext(), apiClientProvider: this.config.clientFactory },
-        run,
-      );
+      return run({ ...inherited, apiClientProvider: this.config.clientFactory });
     }
-    return run();
+    return run(inherited);
   }
 
   async close(): Promise<void> {

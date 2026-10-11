@@ -77,7 +77,7 @@ export interface HostedMcpServerOptions {
   allModeNames: readonly string[];
   /** All valid slice names */
   allSliceNames: readonly string[];
-  /** Optional factory to create the API client (see CreateServerOptions.clientFactory) */
+  /** Factory to create the API client; required for hosted servers (see CreateServerOptions.clientFactory) */
   clientFactory?: () => unknown;
   /**
    * Optional server-level instructions sent to clients on `initialize`.
