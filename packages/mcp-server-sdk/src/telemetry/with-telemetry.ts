@@ -14,10 +14,14 @@
  *   tagged as such rather than hidden.
  *
  * What this decorator deliberately does *not* record: tool arguments, results,
- * or error messages. Argument values are customer content, and
- * `withErrorHandling` forwards `error.message` and ProblemDetails `detail`
- * verbatim — both routinely carry paths, ids and payloads. Only the error's
- * *category* leaves this module.
+ * error messages, or ProblemDetails `detail` and `type`. Argument values are
+ * customer content, and `withErrorHandling` forwards `error.message` and
+ * `detail` verbatim — both routinely carry paths, ids and payloads. Only the
+ * error's *category*, problem `title`, `status` and `operationStatus` leave
+ * this module. A chained or remote side can choose those three, so each is
+ * type-checked: `title` and `operationStatus` are capped at 100 characters,
+ * `status` must be a finite number, and `operationStatus` must also look like
+ * an enum name.
  */
 
 import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -55,6 +59,116 @@ function classifyThrown(error: unknown): ToolOutcome {
       : "handler_error";
   }
   return "unknown_error";
+}
+
+/** Longest error title / operationStatus value exported on a span. */
+const MAX_ERROR_VALUE_LENGTH = 100;
+
+/** Umbraco's `operationStatus` values are enum names; anything else is dropped. */
+const OPERATION_STATUS_PATTERN = /^[A-Za-z]+$/;
+
+interface ProblemFields {
+  title?: string;
+  status?: number;
+  operationStatus?: string;
+}
+
+/**
+ * Extracts the exportable problem fields from a thrown error or a parsed
+ * problem-details object. Never reads `detail`, `type`, the message or
+ * anything else — adding a field here is a privacy decision.
+ */
+function problemFields(value: unknown): ProblemFields {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+
+  let problem: Record<string, unknown> = value as Record<string, unknown>;
+  let fallbackTitle: string | undefined;
+  let fallbackStatus: unknown;
+
+  if (value instanceof ToolValidationError) {
+    // Flattens `extensions`, which is where a validation error carries
+    // `operationStatus`.
+    problem = value.toProblemDetails();
+  } else if (value instanceof UmbracoApiError) {
+    // A non-JSON upstream body (a proxy's HTML 502, say) arrives as a string.
+    problem =
+      typeof value.problemDetails === "object" && value.problemDetails !== null
+        ? (value.problemDetails as Record<string, unknown>)
+        : {};
+    fallbackTitle = value.name;
+  } else if (value instanceof Error) {
+    const response = (value as { response?: { data?: unknown; status?: unknown } }).response;
+    problem =
+      typeof response?.data === "object" && response.data !== null
+        ? (response.data as Record<string, unknown>)
+        : {};
+    fallbackTitle = value.name;
+    fallbackStatus = response?.status;
+  }
+
+  const fields: ProblemFields = {};
+
+  const title = typeof problem.title === "string" ? problem.title : fallbackTitle;
+  if (title) {
+    fields.title = title.slice(0, MAX_ERROR_VALUE_LENGTH);
+  }
+
+  const status = typeof problem.status === "number" ? problem.status : fallbackStatus;
+  if (typeof status === "number" && Number.isFinite(status)) {
+    fields.status = status;
+  }
+
+  const operationStatus = problem.operationStatus;
+  if (typeof operationStatus === "string" && OPERATION_STATUS_PATTERN.test(operationStatus)) {
+    fields.operationStatus = operationStatus.slice(0, MAX_ERROR_VALUE_LENGTH);
+  }
+
+  return fields;
+}
+
+/**
+ * Problem fields for a returned `isError` result. The text is whatever the
+ * inner decorators produced — e.g. a chained call whose upstream returned
+ * problem JSON, which `createToolResultError` stringifies — so a non-JSON body
+ * yields nothing.
+ */
+function problemFieldsFromResult(result: unknown): ProblemFields {
+  try {
+    const text = (result as { content?: Array<{ text?: unknown }> }).content?.[0]?.text;
+    // Only a JSON object can be problem details; skip parsing anything else.
+    return typeof text === "string" && text.trimStart().startsWith("{")
+      ? problemFields(JSON.parse(text))
+      : {};
+  } catch {
+    // Non-JSON text is the normal case for plain-string errors.
+    return {};
+  }
+}
+
+/**
+ * Runs span bookkeeping so that a failure in it (a malformed error object, a
+ * throwing getter) can never replace the handler's result or error.
+ */
+function observe(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    // Losing an attribute is acceptable; changing the call's outcome is not.
+  }
+}
+
+function setProblemAttributes(span: TelemetrySpan, fields: ProblemFields): void {
+  if (fields.title !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_TITLE, fields.title);
+  }
+  if (fields.status !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_STATUS, fields.status);
+  }
+  if (fields.operationStatus !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_OPERATION_STATUS, fields.operationStatus);
+  }
 }
 
 /**
@@ -124,16 +238,26 @@ export function withTelemetry<
       let handlerStarted = false;
       const run = async (span: TelemetrySpan) => {
         handlerStarted = true;
+        let result: unknown;
         try {
-          const result = await (originalHandler as (...a: any[]) => any)(...params);
-          span.setAttribute(TelemetryAttributes.OUTCOME, classifyResult(result));
-          return result;
+          result = await (originalHandler as (...a: any[]) => any)(...params);
         } catch (error) {
-          span.setAttribute(TelemetryAttributes.OUTCOME, classifyThrown(error));
+          observe(() => {
+            span.setAttribute(TelemetryAttributes.OUTCOME, classifyThrown(error));
+            setProblemAttributes(span, problemFields(error));
+          });
           // Rethrow untouched — `withErrorHandling` owns turning this into a
           // tool result. Telemetry observes; it never changes the outcome.
           throw error;
         }
+        observe(() => {
+          const outcome = classifyResult(result);
+          span.setAttribute(TelemetryAttributes.OUTCOME, outcome);
+          if (outcome === "error_result") {
+            setProblemAttributes(span, problemFieldsFromResult(result));
+          }
+        });
+        return result;
       };
 
       try {
