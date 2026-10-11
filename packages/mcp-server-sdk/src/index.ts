@@ -194,6 +194,7 @@ export {
   getSessionUmbracoAuth,
   isRequestContextStoreAvailable,
   requireRequestContext,
+  resetRequireRequestContext,
   type CarriedRequestContext,
   type RequestSessionContext,
   type RequestContextStore,

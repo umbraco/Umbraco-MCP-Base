@@ -218,4 +218,16 @@ describe("requireRequestContext", () => {
     );
     expect(via).toEqual({ via: "session" });
   });
+
+  it("resetRequireRequestContext restores the module fallback", () => {
+    configureApiClient(() => ({ via: "module" }));
+    setServerRef(fakeServer("module"));
+    requireRequestContext();
+    expect(() => getApiClient()).toThrow("outside a request context");
+
+    resetRequireRequestContext();
+
+    expect(getApiClient()).toEqual({ via: "module" });
+    expect(getServerRef()).toBeDefined();
+  });
 });

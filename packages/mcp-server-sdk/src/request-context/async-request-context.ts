@@ -158,7 +158,12 @@ export function requireRequestContext(): void {
   requestContextRequired = true;
 }
 
-/** Resets {@link requireRequestContext}. For tests. */
+/**
+ * Resets {@link requireRequestContext}, restoring the module-value fallback.
+ * Test-only: hosts must never call it. `requireRequestContext` sets a
+ * process-wide flag, so a suite that exercises the hosted path should call this
+ * in `afterEach` to keep later stdio / module-value tests working.
+ */
 export function resetRequireRequestContext(): void {
   requestContextRequired = false;
 }
