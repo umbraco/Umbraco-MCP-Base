@@ -364,6 +364,8 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     }));
     await expect(call(serverA, "direct")).rejects.toThrow("Server reference not set");
     expect(() => getApiClient()).toThrow("API client not configured");
+    // The transport must not leak in from another session either.
+    await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow();
   });
 
   it("runInSessionContext enters the session's store for code registered directly on the server", async () => {

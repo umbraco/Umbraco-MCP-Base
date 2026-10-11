@@ -761,7 +761,7 @@ export function getServerSessionContext(server: McpServer): RequestSessionContex
  * @param server - A server returned by `createPerRequestServer`
  * @param fn - The work to run in this session's store
  * @returns Whatever `fn` returns
- * @throws When `server` has no session context (not built by `createPerRequestServer`, or a degraded server)
+ * @throws When `server` has no session context: not built by `createPerRequestServer`, or the degraded auth-expired server. Check `isAuthExpiredServer(server)` before wrapping.
  */
 export function runInSessionContext<T>(server: McpServer, fn: () => T): T {
   const session = sessionContexts.get(server);
