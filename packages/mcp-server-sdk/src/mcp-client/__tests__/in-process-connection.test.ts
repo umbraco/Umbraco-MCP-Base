@@ -15,7 +15,10 @@ import {
   isAtLeast,
 } from "../../umbraco-version/request-context.js";
 import { TELEMETRY_CONTEXT_KEY } from "../../telemetry/request-context.js";
-import { runWithRequestContext } from "../../request-context/async-request-context.js";
+import {
+  getActiveRequestContext,
+  runWithRequestContext,
+} from "../../request-context/async-request-context.js";
 
 function createToolDef(
   overrides: Partial<ToolDefinition<any, any, any>> &
@@ -418,6 +421,36 @@ describe("InProcessConnection request-scoped context", () => {
     );
 
     expect(getUmbracoVersion(seen[0])).toBe("17.6.1");
+  });
+
+  it("re-enters the store with the merged values for the chained handler", async () => {
+    let activeInHandler: unknown;
+    const connection = new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [
+        {
+          metadata: { name: "probe", displayName: "Probe", description: "" },
+          tools: () => [
+            createToolDef({
+              name: "probe",
+              description: "Reads the active store",
+              slices: ["read"],
+              handler: async () => {
+                activeInHandler = getActiveRequestContext();
+                return { content: [{ type: "text" as const, text: "ok" }] };
+              },
+            }),
+          ],
+        },
+      ],
+    });
+
+    await runWithRequestContext({ [UMBRACO_VERSION_CONTEXT_KEY]: "17.5.0" }, () =>
+      connection.callTool("probe", {}, { [UMBRACO_VERSION_CONTEXT_KEY]: "17.6.1" }),
+    );
+
+    expect(getUmbracoVersion(activeInHandler)).toBe("17.6.1");
   });
 
   it("carries nothing outside a store with no explicit context", async () => {

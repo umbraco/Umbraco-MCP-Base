@@ -50,6 +50,7 @@
 import type { SpanAttributes } from "./adapter.js";
 import { TelemetryAttributes } from "./attributes.js";
 import { toolCallExtraIndex } from "../helpers/tool-call-params.js";
+import { getUmbracoVersion } from "../umbraco-version/request-context.js";
 
 /**
  * The property on the tool-call `context` (`RequestHandlerExtra`) under which
@@ -145,6 +146,10 @@ export function applyRequestTelemetryAttributes(
   attributes: SpanAttributes,
   context: unknown
 ): void {
+  const version = getUmbracoVersion(context);
+  if (version) {
+    attributes[TelemetryAttributes.UMBRACO_VERSION] = version;
+  }
   const carried = getRequestTelemetryContext(context);
   if (!carried) {
     return;
