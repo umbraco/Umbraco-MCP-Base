@@ -143,9 +143,36 @@ export function sanitizeStringInput(
  * Honored on any field at any depth — strings, objects, arrays. Marking an
  * object or array opts the whole subtree out (useful for host-injected payloads
  * like ChatGPT's `openai/fileParams` file references, where the wire shape is
- * the host's contract and must pass through verbatim).
+ * the host's contract and must pass through verbatim). Also the escape hatch
+ * for secret-like string fields whose names don't match the end-anchored
+ * `password` / `secret` name rule, which relaxes URL-shaped checks automatically.
  */
 export const RAW_FIELD_MARKER = "[raw]";
+
+/**
+ * Name rule for secret-bearing string fields: a key ending in `password` or
+ * `secret` (case-insensitive) holds free text, not a URL fragment, so the
+ * path-traversal, query-param and pre-encoded checks are skipped. The
+ * control-character check still runs. Anchored at the end of the key, so
+ * `passwordHint` is still fully checked. Use `[raw]` for secret fields whose
+ * names don't match.
+ */
+const SECRET_FIELD_NAME = /(password|secret)$/i;
+
+const SECRET_FIELD_OPTIONS: SanitizeStringOptions = {
+  allowPathTraversal: true,
+  allowQueryParams: true,
+  allowPreEncoded: true,
+};
+
+/**
+ * Sanitises a string leaf, relaxing the URL-shaped checks when the last
+ * segment of `fieldPath` (array indexes stripped) matches the secret-name rule.
+ */
+function sanitizeStringLeaf(value: string, fieldPath: string): void {
+  const key = fieldPath.replace(/\[\d+\]/g, "").split(".").pop() ?? fieldPath;
+  sanitizeStringInput(value, fieldPath, SECRET_FIELD_NAME.test(key) ? SECRET_FIELD_OPTIONS : undefined);
+}
 
 /**
  * Walks past wrappers like `ZodOptional` / `ZodDefault` / `ZodNullable` to the
@@ -262,7 +289,7 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
   if (!tag) return;
 
   if (tag === "string") {
-    if (typeof value === "string") sanitizeStringInput(value, fieldPath);
+    if (typeof value === "string") sanitizeStringLeaf(value, fieldPath);
     return;
   }
 
@@ -327,6 +354,10 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
  * `ZodArray` containers are descended into structurally — the handler receives
  * the input verbatim (no reshaping, no key reordering, no copies).
  *
+ * String leaves whose key ends in `password` or `secret` (case-insensitive)
+ * skip the path-traversal, query-param and pre-encoded checks but still get the
+ * control-character check. Use `[raw]` for secret fields the name rule misses.
+ *
  * Fields whose `.describe()` contains the `[raw]` marker are skipped:
  * - On a `ZodString` field → that string passes through unsanitised.
  * - On a `ZodObject` or `ZodArray` field → the whole subtree passes through.
@@ -366,7 +397,7 @@ export function withInputSanitization<
             // standalone-consumable (in-process MCP, tests). Fall back to
             // string sanitisation so a path-traversal/control-char value
             // can't reach the handler if the caller didn't run validation.
-            sanitizeStringInput(value, key);
+            sanitizeStringLeaf(value, key);
           }
         }
       }

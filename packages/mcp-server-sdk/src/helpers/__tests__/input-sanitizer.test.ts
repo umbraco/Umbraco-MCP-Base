@@ -263,6 +263,65 @@ describe("withInputSanitization", () => {
   // sanitiser is allowed to walk INTO the object to reject bad string content
   // at any depth, but is not allowed to reshape, reorder, or substitute it.
   // ---------------------------------------------------------------------------
+  describe("secret field name rule", () => {
+    const run = (schema: any, input: any) => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const tool = { name: "t", description: "t", inputSchema: schema, handler, slices: [] } as any;
+      const call = () => withInputSanitization(tool).handler(input, {} as any);
+      return { handler, call };
+    };
+    const nasty = "a?b&c%4a../x";
+
+    it.each(["password", "newPassword", "oldPassword", "resetPassword", "clientSecret"])(
+      "passes %s through unchanged",
+      (key) => {
+        const { handler, call } = run({ [key]: z.string() }, { [key]: nasty });
+        expect(call).not.toThrow();
+        expect(handler.mock.calls[0][0]).toEqual({ [key]: nasty });
+      }
+    );
+
+    it("still rejects control characters in a password", () => {
+      const { handler, call } = run({ password: z.string() }, { password: "ab\x00c" });
+      expect(call).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it.each(["a?b", "a&b", "a%4ab", "../x"])("still rejects %s in id and name", (bad) => {
+      expect(run({ id: z.string() }, { id: bad }).call).toThrow(ToolValidationError);
+      expect(run({ name: z.string() }, { name: bad }).call).toThrow(ToolValidationError);
+    });
+
+    it("still checks passwordHint (end-anchored)", () => {
+      expect(run({ passwordHint: z.string() }, { passwordHint: "a?b" }).call).toThrow(ToolValidationError);
+    });
+
+    it("ignores non-string fields like allowChangePassword", () => {
+      const { call } = run(
+        { allowChangePassword: z.boolean(), lastPasswordChangeDate: z.date() },
+        { allowChangePassword: true, lastPasswordChangeDate: new Date() }
+      );
+      expect(call).not.toThrow();
+    });
+
+    it("applies to nested keys and array elements", () => {
+      const nested = run({ user: z.object({ newPassword: z.string() }) }, { user: { newPassword: nasty } });
+      expect(nested.call).not.toThrow();
+      const arr = run({ password: z.array(z.string()) }, { password: [nasty] });
+      expect(arr.call).not.toThrow();
+    });
+
+    it("applies to the top-level fallback for keys not in the schema", () => {
+      expect(run({ other: z.string() }, { password: nasty }).call).not.toThrow();
+      expect(run({ other: z.string() }, { id: nasty }).call).toThrow(ToolValidationError);
+    });
+
+    it("rejects a secret-like field the name rule misses, unless marked [raw]", () => {
+      expect(run({ pin: z.string() }, { pin: nasty }).call).toThrow(ToolValidationError);
+      expect(run({ pin: z.string().describe(RAW_FIELD_MARKER) }, { pin: nasty }).call).not.toThrow();
+    });
+  });
+
   describe("nested object handling", () => {
     it("passes a nested object through to the handler structurally intact", () => {
       const handler = jest.fn().mockReturnValue({ content: [] });
