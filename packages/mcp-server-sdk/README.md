@@ -800,6 +800,44 @@ to the model, and the LLM has the same protocol access as the widget so
 tokens aren't securable. The host-native dialog turned out to be the
 right consent surface anyway.
 
+## Per-Session State in Hosted Workers
+
+**Hosted code must not keep per-session values — tokens, clients, servers,
+token keys — in module scope.** A Cloudflare isolate can host several Durable
+Objects of the same class, and they share module memory. Each MCP session is
+its own Durable Object, so a module-level slot is last-session-wins for every
+session in the isolate.
+
+`@umbraco-cms/mcp-hosted` puts each session's values in the SDK's per-request
+store (`runWithRequestContext`) around every tool call: its transport, API
+client provider, MCP `Server` and Umbraco auth. The SDK reads the store first:
+
+- `UmbracoManagementClient` uses the store's transport.
+- `getApiClient()` (behind `executeGetApiCall` and friends) uses the store's API client provider.
+- `getServerRef()` uses the store's server.
+- `getSessionUmbracoAuth()` returns the session's `{ baseUrl, accessToken }`,
+  refreshing the token first when it is expired or near expiry. Use it when you
+  have to `fetch` Umbraco directly (for example a streaming upload with
+  `duplex: "half"`). It does not retry on 401, because a streamed body can't be replayed.
+
+```typescript
+import { getSessionUmbracoAuth } from "@umbraco-cms/mcp-server-sdk";
+
+// Inside a hosted tool handler:
+const { baseUrl, accessToken } = await getSessionUmbracoAuth();
+await fetch(`${baseUrl}/umbraco/management/api/v1/...`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${accessToken}` },
+  body: stream,
+  duplex: "half",
+});
+```
+
+`setCustomTransport`, `configureApiClient` and `setServerRef` are module-level
+fallbacks for stdio, CLI and tests only, and are read only when no store is
+active. Hosted servers no longer write them, so a hosted call made outside a
+tool call fails with "API client not configured".
+
 ## Subpath Exports
 
 The SDK provides several subpath exports for tree-shaking:

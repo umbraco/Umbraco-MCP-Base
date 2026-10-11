@@ -19,8 +19,6 @@ import { z } from "zod";
 import {
   shouldIncludeTool,
   createToolAnnotations,
-  configureApiClient,
-  setCustomTransport,
   createCollectionConfigLoader,
   expandModesToCollections,
   checkUmbracoVersion,
@@ -30,6 +28,8 @@ import {
   getTelemetryAdapter,
   prepareRequestTelemetryContext,
   withRequestTelemetryContext,
+  runWithRequestContext,
+  pickCarriedRequestContext,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
   useDraft202012ToolSchemas,
@@ -39,6 +39,8 @@ import {
   type CollectionConfiguration,
   type ServerConfigForCollections,
   type RequestTelemetryContext,
+  type RequestSessionContext,
+  type RequestTransport,
 } from "@umbraco-cms/mcp-server-sdk";
 import { resolveRequestTelemetry } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../types/env.js";
@@ -124,11 +126,15 @@ export interface CreateServerOptions {
    * Optional factory to create the API client used by tool handlers.
    *
    * Tool handlers call `executeGetApiCall((client) => client.someMethod(...))`.
-   * The `client` is whatever this factory returns (via `configureApiClient`).
+   * The `client` is whatever this factory returns: it is put in the SDK's
+   * per-request store as this session's `apiClientProvider` around every tool
+   * call (never via the module-level `configureApiClient`, which every session
+   * in the isolate shares).
    *
-   * If not provided, the Orval-generated client is used automatically via
-   * `setCustomTransport()` so the Orval client's named methods (e.g.,
-   * `client.getTreeDataTypeRoot()`) work in the Workers runtime.
+   * Whether or not it's provided, the session's fetch client is put in the
+   * same store as the `transport` behind `UmbracoManagementClient`, so the
+   * Orval client's named methods (e.g. `client.getTreeDataTypeRoot()`) go out
+   * with this session's site URL and token.
    *
    * Only provide this if you need a custom client setup beyond the Orval client.
    */
@@ -625,18 +631,21 @@ async function initPerRequestServer(
     },
   );
 
-  // Set the fetch client as the transport for UmbracoManagementClient.
-  // This routes the Orval-generated API client (with named methods like
-  // client.getTreeDataTypeRoot()) through the Workers-compatible fetch
-  // transport configured by the host worker.
-  setCustomTransport(fetchClient as any);
-
-  // Configure the API client for tool handlers.
-  // If a custom clientFactory is provided, use it; otherwise use the
-  // Orval-generated client which now routes through our fetch transport.
-  if (options.clientFactory) {
-    configureApiClient(options.clientFactory);
-  }
+  // This session's values for the SDK's per-request store, entered around
+  // every tool call by `registerCollectionTools` (and `registerChainedTools`).
+  // Deliberately NOT written to the SDK's module-level slots
+  // (`setCustomTransport` / `configureApiClient`): module scope is shared by
+  // every Durable Object — i.e. every MCP session — in the isolate, so those
+  // would be last-session-wins. A hosted call made outside the store fails
+  // loudly with "API client not configured" instead of silently using another
+  // session's client. See umbraco/Umbraco-MCP-Base#383.
+  const session: RequestSessionContext = {
+    transport: fetchClient as unknown as RequestTransport,
+    server: server.server,
+    umbracoAuth: () => fetchClient.getSessionAuth(),
+    ...(options.clientFactory ? { apiClientProvider: options.clientFactory } : {}),
+  };
+  sessionContexts.set(server, session);
 
   // Load tool filtering config from Worker env
   let workerConfig = loadWorkerConfig(env);
@@ -677,6 +686,7 @@ async function initPerRequestServer(
     currentUser,
     filterConfig,
     requestTelemetry,
+    session,
   );
 
   // Covers the common case (chaining disabled, or a consumer that
@@ -699,6 +709,50 @@ async function initPerRequestServer(
 }
 
 /**
+ * Each full server's per-session store values, so `registerChainedTools` can
+ * enter the same store around the proxied tools it adds to that server. A
+ * `WeakMap` keyed by the per-request server: it dies with the session.
+ */
+const sessionContexts = new WeakMap<McpServer, RequestSessionContext>();
+
+/**
+ * The per-session store values `createPerRequestServer` built for `server`,
+ * or `undefined` for a server it didn't build (or a degraded one).
+ */
+export function getServerSessionContext(server: McpServer): RequestSessionContext | undefined {
+  return sessionContexts.get(server);
+}
+
+/**
+ * Wraps a registered tool callback so it runs inside the SDK's per-request
+ * store, holding this session's values (`session`) next to whatever carried
+ * values (telemetry, Umbraco version) are on the call's `extra`.
+ *
+ * Applied innermost — inside `withRequestTelemetryContext` — so the telemetry
+ * that wrapper attaches to `extra` is on it by the time this reads it.
+ *
+ * @param callback - The tool callback being registered
+ * @param session - This session's store values; a no-op wrapper when absent
+ * @returns A callback with the same signature
+ */
+export function withRequestSessionContext<Callback extends (...args: any[]) => any>(
+  callback: Callback,
+  session: RequestSessionContext | undefined
+): Callback {
+  if (!session) {
+    return callback;
+  }
+  return function enterSessionContext(this: unknown, ...params: any[]) {
+    // `extra` is the last argument: `(args, extra)` with an input schema,
+    // `(extra)` without. Only its carried, namespaced keys are picked.
+    const extra = params[params.length - 1];
+    return runWithRequestContext({ ...pickCarriedRequestContext(extra), ...session }, () =>
+      callback.apply(this, params)
+    );
+  } as Callback;
+}
+
+/**
  * Iterates collections, filters per the resolved `filterConfig`, and registers
  * each surviving tool on the McpServer.
  *
@@ -714,6 +768,13 @@ async function initPerRequestServer(
  * validated and frozen) rather than a raw value — every tool in this loop
  * shares the same reference, so preparing it once here instead of once per
  * tool (inside `withRequestTelemetryContext`) is the whole point.
+ *
+ * `session`, when supplied, is this session's values for the SDK's
+ * per-request store (transport, API client provider, server, Umbraco auth);
+ * each handler runs inside that store (see `withRequestSessionContext`), so
+ * `UmbracoManagementClient`, `getApiClient()`, `getServerRef()` and
+ * `getSessionUmbracoAuth()` resolve to this session even when sessions in the
+ * same isolate interleave.
  */
 export function registerCollectionTools<TUser>(
   server: McpServer,
@@ -721,6 +782,7 @@ export function registerCollectionTools<TUser>(
   currentUser: TUser,
   filterConfig: CollectionConfiguration,
   requestTelemetry?: RequestTelemetryContext,
+  session?: RequestSessionContext,
 ): number {
   let registered = 0;
   for (const collection of collections) {
@@ -750,7 +812,7 @@ export function registerCollectionTools<TUser>(
           ...(tool._meta ? { _meta: tool._meta } : {}),
         },
         withRequestTelemetryContext(
-          tool.handler as (...args: any[]) => any,
+          withRequestSessionContext(tool.handler as (...args: any[]) => any, session),
           requestTelemetry,
         ) as ToolCallback<typeof tool.inputSchema>
       );

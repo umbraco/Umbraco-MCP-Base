@@ -182,11 +182,20 @@ export {
   type WithUmbracoVersionContext,
 } from "./umbraco-version/request-context.js";
 
+// The per-request store. Hosted hosts also put the session's own values in it
+// (transport, API client provider, server, Umbraco auth) so nothing per
+// session lives in module scope, which every session in a Worker isolate
+// shares. `getSessionUmbracoAuth` is the accessor for raw `fetch` callers.
 export {
   runWithRequestContext,
   getActiveRequestContext,
   pickCarriedRequestContext,
+  getSessionUmbracoAuth,
   type CarriedRequestContext,
+  type RequestSessionContext,
+  type RequestContextStore,
+  type RequestTransport,
+  type SessionUmbracoAuth,
 } from "./request-context/async-request-context.js";
 
 // CLI Introspection & Context Generation

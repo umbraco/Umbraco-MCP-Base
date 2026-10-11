@@ -26,6 +26,7 @@
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { normalizeBaseUrl } from "../helpers/url.js";
+import { getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
  * Authentication configuration for Umbraco API.
@@ -252,6 +253,16 @@ let customTransport: CustomTransport | null = null;
  * the default fetch-based transport. This enables the same generated API client
  * to work in environments that need specialized request handling.
  *
+ * This is a **module-level fallback** for stdio, CLI and tests — one process,
+ * one Umbraco. A transport in the active per-request store
+ * (`runWithRequestContext({ transport })`) always wins over it.
+ *
+ * Hosted code must not call this: module scope is shared by every Durable
+ * Object (i.e. every MCP session) in a Cloudflare isolate, so the last session
+ * to set it would win for all of them. Hosted code keeps per-session values
+ * (tokens, clients, servers, token keys) in the per-request store and reads
+ * them through its accessors.
+ *
  * @param transport - Custom transport function, or null to revert to default
  */
 export function setCustomTransport(transport: CustomTransport | null): void {
@@ -397,8 +408,9 @@ async function doFetch<T>(
  * }
  * ```
  *
- * If a custom transport has been set via `setCustomTransport()`, it will be
- * used instead of the default fetch-based transport.
+ * Transport precedence: the active per-request store's `transport` (hosted
+ * sessions), then a module transport set via `setCustomTransport()` (stdio,
+ * CLI, tests), then the default fetch-based transport.
  *
  * @param config - Request config from Orval
  * @param options - Additional options including returnFullResponse
@@ -408,7 +420,14 @@ export const UmbracoManagementClient = <T>(
   config: { url: string; method: string; data?: unknown; params?: Record<string, unknown>; headers?: Record<string, string>; [key: string]: unknown },
   options?: UmbracoManagementClientOptions
 ): Promise<T> => {
-  // Use custom transport if configured
+  // The session's transport from the per-request store wins (hosted), read at
+  // call time so interleaved sessions each use their own.
+  const sessionTransport = getActiveRequestContext()?.transport;
+  if (sessionTransport) {
+    return sessionTransport<T>(config, options);
+  }
+
+  // Module-level custom transport (stdio, CLI, tests)
   if (customTransport) {
     return customTransport<T>(config, options);
   }

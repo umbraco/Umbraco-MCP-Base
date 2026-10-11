@@ -13,6 +13,7 @@ import {
   getStoredUmbracoToken,
   refreshUmbracoToken,
   type RefreshFailure,
+  type RefreshTokenResult,
   type StoredSiteContext,
 } from "../auth/token-storage.js";
 import { logAuth } from "../auth/log.js";
@@ -71,6 +72,11 @@ export interface UmbracoFetchClientConfig {
   baseUrl: string;
   /** The stored Umbraco Bearer token */
   accessToken: string;
+  /**
+   * Absolute expiry of `accessToken` (epoch ms), from the stored entry's
+   * `expires_at`. Absent for entries stored before that field existed.
+   */
+  expiresAt?: number;
   /** Optional: env and token key for automatic token refresh */
   refreshContext?: {
     env: HostedMcpEnv;
@@ -89,7 +95,8 @@ export interface UmbracoFetchClientConfig {
  * Creates a fetch-based Umbraco API client for use in Workers.
  *
  * The returned function matches the Orval mutator signature, so it can serve
- * as the transport behind UmbracoManagementClient (via setCustomTransport).
+ * as the transport behind UmbracoManagementClient (`createPerRequestServer`
+ * puts it in the SDK's per-request store as the session's `transport`).
  *
  * @param config - Client configuration with base URL and access token
  * @returns A mutator function compatible with Orval-generated API clients
@@ -133,7 +140,32 @@ export interface UmbracoFetchClient {
    * than as a toolset that 401s on every call.
    */
   getRefreshFailure(): RefreshFailure | undefined;
+  /**
+   * This session's resolved `{ baseUrl, accessToken }`, for callers that must
+   * `fetch` Umbraco directly (e.g. a streaming upload whose body can't be
+   * replayed after a 401). Refreshes first when the token is expired or within
+   * a minute of expiry, so the token is valid when it is handed over. When the
+   * expiry is unknown (an entry stored before `expires_at`), makes one cheap
+   * authenticated call first so the client's refresh-on-401 runs.
+   *
+   * Exposed to tool code through the SDK's `getSessionUmbracoAuth()`.
+   *
+   * @throws Error when the token is known to be unusable and could not be refreshed
+   */
+  getSessionAuth(): Promise<{ baseUrl: string; accessToken: string }>;
 }
+
+/**
+ * How close to expiry `getSessionAuth` refreshes ahead of time, so a token
+ * handed to a raw caller doesn't expire mid-request.
+ */
+const SESSION_AUTH_EXPIRY_SKEW_MS = 60_000;
+
+/**
+ * Cheap authenticated endpoint `getSessionAuth` probes when the stored entry
+ * has no absolute expiry (the same one `createPerRequestServer` already calls).
+ */
+const SESSION_AUTH_PROBE_PATH = "/umbraco/management/api/v1/user/current";
 
 /**
  * RFC 7807 problem body synthesised when a 401 could not be recovered by a
@@ -183,7 +215,36 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
   // specified refresh token has already been redeemed" on the second attempt).
   let currentRefreshToken = config.refreshContext?.refreshToken;
   let lastRefreshFailure: RefreshFailure | undefined;
+  let currentExpiresAt = config.expiresAt;
   const normalizedBaseUrl = normalizeBaseUrl(config.baseUrl);
+
+  /**
+   * Refreshes the token through `refreshUmbracoToken` and adopts the result:
+   * new access token, rotated refresh token, new expiry, or the failure.
+   * Only call when `config.refreshContext` and `currentRefreshToken` are set.
+   */
+  async function refresh(): Promise<RefreshTokenResult> {
+    const result = await refreshUmbracoToken(
+      config.refreshContext!.env,
+      config.refreshContext!.tokenKey,
+      currentRefreshToken!,
+      config.refreshContext!.site
+    );
+    if (result.ok) {
+      currentToken = result.accessToken;
+      // Adopt the rotated refresh token. Without this the next refresh on
+      // this same client replays a redeemed token and Umbraco answers
+      // `400 invalid_grant`.
+      if (result.refreshToken) {
+        currentRefreshToken = result.refreshToken;
+      }
+      currentExpiresAt = result.expiresAt;
+      lastRefreshFailure = undefined;
+    } else {
+      lastRefreshFailure = result;
+    }
+    return result;
+  }
 
   /**
    * The mutator function - compatible with Orval custom instance pattern.
@@ -229,22 +290,9 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
           env,
           `401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
         );
-        const result = await refreshUmbracoToken(
-          env,
-          config.refreshContext.tokenKey,
-          currentRefreshToken,
-          config.refreshContext.site
-        );
+        const result = await refresh();
 
         if (result.ok) {
-          currentToken = result.accessToken;
-          // Adopt the rotated refresh token. Without this the next refresh on
-          // this same client replays a redeemed token and Umbraco answers
-          // `400 invalid_grant`.
-          if (result.refreshToken) {
-            currentRefreshToken = result.refreshToken;
-          }
-          lastRefreshFailure = undefined;
           headers.Authorization = `Bearer ${currentToken}`;
           resp = await fetch(fullUrl, { ...fetchOptions, headers });
           logAuth(
@@ -252,7 +300,6 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
             `retry after refresh ${requestConfig.method} ${requestConfig.url} status=${resp.status}`
           );
         } else {
-          lastRefreshFailure = result;
           logAuth(
             env,
             `refresh failed (${result.reason}) — synthesizing problem details for ${requestConfig.method} ${requestConfig.url}`
@@ -312,8 +359,43 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     return data;
   }
 
+  async function getSessionAuth(): Promise<{ baseUrl: string; accessToken: string }> {
+    const canRefresh = Boolean(config.refreshContext && currentRefreshToken);
+
+    if (currentExpiresAt === undefined) {
+      // No absolute expiry (entry stored before `expires_at`): one cheap
+      // authenticated call, whose 401 — if the token is stale — runs the
+      // existing refresh-on-401 above and leaves `currentToken` refreshed.
+      const probe = (await fetchClient(
+        { url: SESSION_AUTH_PROBE_PATH, method: "GET" },
+        CAPTURE_RAW_HTTP_RESPONSE
+      )) as HttpResponse<unknown>;
+      if (probe.status === 401) {
+        throw new Error(
+          lastRefreshFailure
+            ? `The Umbraco access token could not be refreshed: ${lastRefreshFailure.message}`
+            : "Umbraco rejected this session's access token and it cannot be refreshed."
+        );
+      }
+    } else if (canRefresh && Date.now() >= currentExpiresAt - SESSION_AUTH_EXPIRY_SKEW_MS) {
+      if (config.refreshContext) {
+        logAuth(
+          config.refreshContext.env,
+          `getSessionAuth token expired or near expiry — refreshing up front (key=${config.refreshContext.tokenKey})`
+        );
+      }
+      const result = await refresh();
+      if (!result.ok) {
+        throw new Error(`The Umbraco access token could not be refreshed: ${result.message}`);
+      }
+    }
+
+    return { baseUrl: normalizedBaseUrl, accessToken: currentToken };
+  }
+
   return Object.assign(fetchClient, {
     getRefreshFailure: () => lastRefreshFailure,
+    getSessionAuth,
   }) as UmbracoFetchClient;
 }
 
@@ -354,6 +436,7 @@ export async function createFetchClientFromKV(
   return createUmbracoFetchClient({
     baseUrl: serverBaseUrl,
     accessToken: tokens.access_token,
+    expiresAt: typeof tokens.expires_at === "number" ? tokens.expires_at : undefined,
     refreshContext: tokens.refresh_token
       ? {
           env,

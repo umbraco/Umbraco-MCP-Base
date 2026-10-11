@@ -28,6 +28,10 @@ jest.unstable_mockModule("../../config/worker-config.js", () => ({
 const mockIsAuthExpiredServer = jest.fn<any>().mockReturnValue(false);
 jest.unstable_mockModule("../create-server.js", () => ({
   isAuthExpiredServer: mockIsAuthExpiredServer,
+  // The mock server was never built by `createPerRequestServer`, so it has no
+  // session store values; the wrapper is then a pass-through.
+  getServerSessionContext: jest.fn<any>().mockReturnValue(undefined),
+  withRequestSessionContext: (handler: unknown) => handler,
 }));
 
 // Track registered tools on the mock server

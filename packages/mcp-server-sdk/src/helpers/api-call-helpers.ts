@@ -37,6 +37,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
 import { pickFields, omitFields } from "./response-trimmer.js";
+import { getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
  * Transport-agnostic HTTP response interface.
@@ -75,6 +76,14 @@ let clientProvider: ClientProvider | null = null;
  * Configures the API client provider for all API call helpers.
  * Call this once at application startup.
  *
+ * This is a **module-level fallback** for stdio, CLI and tests. An
+ * `apiClientProvider` in the active per-request store
+ * (`runWithRequestContext`) always wins over it. Hosted code must not call
+ * this: module scope is shared by every MCP session (Durable Object) in a
+ * Cloudflare isolate. Hosted code keeps per-session values (tokens, clients,
+ * servers, token keys) in the per-request store and reads them through its
+ * accessors.
+ *
  * @param provider - Function that returns the API client instance
  *
  * @example
@@ -88,11 +97,17 @@ export function configureApiClient<TClient>(provider: ClientProvider<TClient>): 
 }
 
 /**
- * Gets the configured API client.
- * Throws if configureApiClient() hasn't been called.
+ * Gets the configured API client: the active per-request store's
+ * `apiClientProvider` when there is one, else the module provider from
+ * `configureApiClient()`.
+ * Throws if neither is set.
  * @internal
  */
 export function getApiClient<TClient>(): TClient {
+  const sessionProvider = getActiveRequestContext()?.apiClientProvider;
+  if (sessionProvider) {
+    return sessionProvider() as TClient;
+  }
   if (!clientProvider) {
     throw new Error(
       'API client not configured. Call configureApiClient() at application startup.'
