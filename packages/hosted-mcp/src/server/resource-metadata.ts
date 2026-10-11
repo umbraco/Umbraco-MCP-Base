@@ -37,12 +37,18 @@ export function rewriteResourceMetadataForTenant(value: string, requestUrl: stri
 }
 
 /**
- * The `resource_metadata` value a client sees on OAuthProvider's own 401 for
- * this request: the provider's formula (`<origin>/.well-known/oauth-protected-resource<pathname>`,
- * as `@cloudflare/workers-oauth-provider` builds it in `handleApiRequest`)
- * passed through the same tenant rewrite `createWorkerExport` applies.
+ * The `resource_metadata` value for a 401 the wrapper issues itself: the root
+ * PRM URL passed through the same tenant rewrite `createWorkerExport` applies
+ * to OAuthProvider's own 401s.
+ *
+ * Deliberately the root form, not the path-suffixed one 0.8.x providers emit
+ * (`<origin>/.well-known/oauth-protected-resource<pathname>`): the root form is
+ * what 0.2.4 providers emit (the version the Editor and Dev workers lock) and is
+ * the only one `createWorkerExport`'s rewrite recognises. On a tenant path it
+ * becomes the tenant PRM URL; on a non-tenant path the root PRM is served by
+ * every provider version.
  */
 export function resourceMetadataUrlFor(requestUrl: string | URL): string {
   const url = new URL(requestUrl);
-  return rewriteResourceMetadataForTenant(`${url.origin}${PRM_PATH}${url.pathname}`, url);
+  return rewriteResourceMetadataForTenant(rootPrmUrl(url), url);
 }

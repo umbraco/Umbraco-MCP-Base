@@ -196,16 +196,17 @@ describe("createSiteRoutingApiHandler — 401 resource_metadata matches OAuthPro
 
   /**
    * A stand-in for OAuthProvider: it builds `resource_metadata` the way
-   * `@cloudflare/workers-oauth-provider` 0.8.x does in `handleApiRequest`
-   * (`${url.origin}/.well-known/oauth-protected-resource${url.pathname}`), then
-   * either 401s itself or hands the request to the apiHandler.
+   * `@cloudflare/workers-oauth-provider` 0.2.4 does (the version the Editor and
+   * Dev workers lock): the root URL `${url.origin}/.well-known/oauth-protected-resource`,
+   * which `createWorkerExport` rewrites to the tenant URL. It then either 401s
+   * itself or hands the request to the apiHandler.
    */
   function makeProvider(apiHandler: { fetch: FetchHandler }, mode: "provider-401" | "api") {
     return {
       fetch: async (request: Request, env: HostedMcpEnv, ctx: ExecutionContext) => {
         if (mode === "api") return apiHandler.fetch(request, env, ctx);
         const url = new URL(request.url);
-        const resourceMetadataUrl = `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
+        const resourceMetadataUrl = `${url.origin}/.well-known/oauth-protected-resource`;
         return new Response(JSON.stringify({ error: "invalid_token" }), {
           status: 401,
           headers: {
@@ -247,19 +248,36 @@ describe("createSiteRoutingApiHandler — 401 resource_metadata matches OAuthPro
     expect(resourceMetadata(wrapper)).toBeDefined();
     expect(resourceMetadata(wrapper)).toBe(resourceMetadata(providerOwn));
   });
+
+  it("answers a dead sign-in with 401 + revoke end to end through createWorkerExport", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    afterTest = () => warnSpy.mockRestore();
+    const { env, revokeGrant } = makeEnv(makeKv({}));
+    const base = makeBase();
+    const apiHandler = createSiteRoutingApiHandler(base);
+
+    const response = await createWorkerExport(makeProvider(apiHandler, "api"), options).fetch(
+      mcpRequest(),
+      env,
+      ctxWithProps()
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain('error="invalid_token"');
+    expect(revokeGrant).toHaveBeenCalledTimes(1);
+    expect(revokeGrant).toHaveBeenCalledWith("grant-1", "user-1");
+    expect(base.fetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("createSiteRoutingApiHandler — bare handler resource_metadata", () => {
-  /** Exactly what `@cloudflare/workers-oauth-provider` 0.8.x builds in `handleApiRequest`. */
-  const providerResourceMetadata = (requestUrl: string) => {
-    const url = new URL(requestUrl);
-    return `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
-  };
+  const PRM = "https://worker.example.com/.well-known/oauth-protected-resource";
 
   it.each([
-    ["a tenant path", "https://worker.example.com/at/abc/mcp"],
-    ["the single-site path", "https://worker.example.com/mcp"],
-  ])("equals the provider's exact string on %s", async (_label, requestUrl) => {
+    // 0.2.4 emits the root URL; worker-entry rewrites it to the tenant URL.
+    ["a tenant path", "https://worker.example.com/at/abc/mcp", `${PRM}/at/abc`],
+    ["the single-site path", "https://worker.example.com/mcp", PRM],
+  ])("matches a 0.2.4 provider's rewritten string on %s", async (_label, requestUrl, expected) => {
     const { env } = makeEnv(makeKv({}));
     const errorSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -270,7 +288,7 @@ describe("createSiteRoutingApiHandler — bare handler resource_metadata", () =>
       );
 
       const auth = response.headers.get("www-authenticate") ?? "";
-      expect(auth.match(/resource_metadata="([^"]*)"/)?.[1]).toBe(providerResourceMetadata(requestUrl));
+      expect(auth.match(/resource_metadata="([^"]*)"/)?.[1]).toBe(expected);
     } finally {
       errorSpy.mockRestore();
     }

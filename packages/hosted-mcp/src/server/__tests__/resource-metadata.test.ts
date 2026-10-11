@@ -13,16 +13,16 @@ const ORIGIN = "https://worker.example.com";
 const ROOT_PRM = `${ORIGIN}/.well-known/oauth-protected-resource`;
 
 describe("resourceMetadataUrlFor", () => {
-  it("uses the provider's path-suffixed formula on a tenant path", () => {
-    expect(resourceMetadataUrlFor(`${ORIGIN}/at/abc/mcp`)).toBe(`${ROOT_PRM}/at/abc/mcp`);
+  it("uses the tenant PRM URL on a tenant path, as createWorkerExport rewrites a 0.2.4 provider's root URL", () => {
+    expect(resourceMetadataUrlFor(`${ORIGIN}/at/abc/mcp`)).toBe(`${ROOT_PRM}/at/abc`);
   });
 
-  it("uses the provider's path-suffixed formula on a non-tenant path", () => {
-    expect(resourceMetadataUrlFor(`${ORIGIN}/mcp`)).toBe(`${ROOT_PRM}/mcp`);
+  it("uses the root PRM URL (the 0.2.4 provider's form) on a non-tenant path", () => {
+    expect(resourceMetadataUrlFor(`${ORIGIN}/mcp`)).toBe(ROOT_PRM);
   });
 
-  it("ignores the query string, as the provider does", () => {
-    expect(resourceMetadataUrlFor(`${ORIGIN}/mcp?x=1`)).toBe(`${ROOT_PRM}/mcp`);
+  it("ignores the query string", () => {
+    expect(resourceMetadataUrlFor(`${ORIGIN}/mcp?x=1`)).toBe(ROOT_PRM);
   });
 
   it("throws on a malformed URL (a Request never carries one)", () => {
