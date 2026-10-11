@@ -164,15 +164,17 @@ export function resetRequireRequestContext(): void {
 }
 
 /**
- * Throws when a host has required the request context and none is active.
- * Called by the accessors before they fall back to a module-level value.
+ * Throws when a host has required the request context. Called by the
+ * accessors only after they found no session value for their own key, whether
+ * no store is active or the active one lacks that key (e.g. a chained call
+ * entered outside the session store), so a module-level value is never used.
  *
  * @param what - The accessor name, for the error message
  */
 export function assertModuleFallbackAllowed(what: string): void {
-  if (requestContextRequired && getActiveRequestContext() === undefined) {
+  if (requestContextRequired) {
     throw new Error(
-      `${what} was called outside a request context. This host requires a per-session request context, so module-level values are not used (they may belong to another session).`
+      `${what} was called outside a request context that carries this session's value. This host requires per-session values, so module-level values are not used (they may belong to another session).`
     );
   }
 }

@@ -205,6 +205,12 @@ describe("requireRequestContext", () => {
     );
   });
 
+  it("also refuses the fallback when the store lacks that key", async () => {
+    configureApiClient(() => ({ via: "module" }));
+    requireRequestContext();
+    expect(() => runWithRequestContext({}, () => getApiClient())).toThrow("outside a request context");
+  });
+
   it("still lets a store's own values through", async () => {
     requireRequestContext();
     const via = await runWithRequestContext({ transport: transportFor("session") }, () =>
