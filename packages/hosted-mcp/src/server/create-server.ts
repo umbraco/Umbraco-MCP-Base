@@ -489,15 +489,6 @@ async function initPerRequestServer(
   props: AuthProps,
   initSpan: TelemetrySpan
 ): Promise<McpServer> {
-  // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
-  // agents-mcp runtime is supposed to run `init()` (and therefore this
-  // function) on every Durable Object start, but it's easy to lose track
-  // of when that actually happens — particularly across hibernation wakes.
-  // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
-  //
-  // `siteId` may come from a user-submitted consent form in static
-  // multi-site mode; strip control characters before logging so it can't
-  // forge log lines on `wrangler tail`.
   // Per-session values live only in the request store; without it a handler
   // would read module slots that another session may own.
   if (!isRequestContextStoreAvailable()) {
@@ -507,6 +498,15 @@ async function initPerRequestServer(
   }
   requireRequestContext();
 
+  // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
+  // agents-mcp runtime is supposed to run `init()` (and therefore this
+  // function) on every Durable Object start, but it's easy to lose track
+  // of when that actually happens — particularly across hibernation wakes.
+  // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
+  //
+  // `siteId` may come from a user-submitted consent form in static
+  // multi-site mode; strip control characters before logging so it can't
+  // forge log lines on `wrangler tail`.
   const initStartedAt = Date.now();
   const traceId = Math.random().toString(36).slice(2, 8);
   const safeSiteId = sanitizeForLog(props.consentChoices?.siteId);
@@ -649,10 +649,10 @@ async function initPerRequestServer(
   // Deliberately NOT written to the SDK's module-level slots
   // (`setCustomTransport` / `configureApiClient`): module scope is shared by
   // every Durable Object — i.e. every MCP session — in the isolate, so those
-  // would be last-session-wins. Outside the store, `getApiClient()` fails
-  // loudly with "API client not configured" and `UmbracoManagementClient`
-  // falls through to the SDK's default (uninitialised) transport, instead of
-  // silently using another session's client. See umbraco/Umbraco-MCP-Base#383.
+  // would be last-session-wins. Hosted turns on `requireRequestContext()`, so
+  // outside the store `getApiClient()`, `getServerRef()` and
+  // `UmbracoManagementClient` throw "outside a request context" instead of
+  // silently using another session's value. See umbraco/Umbraco-MCP-Base#383.
   const session: RequestSessionContext = {
     transport: fetchClient as unknown as RequestTransport,
     server: server.server,
