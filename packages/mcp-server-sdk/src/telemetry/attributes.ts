@@ -70,6 +70,16 @@ export const TelemetryAttributes = {
   SLICES: "umbraco.mcp.slices",
   /** How the call ended — see `ToolOutcome`. */
   OUTCOME: "umbraco.mcp.outcome",
+  /**
+   * Problem `title` (or the error class name) of a failed call. Exported as
+   * received, capped in length. Searchable in Tempo only — must never become a
+   * span-metrics dimension (cardinality).
+   */
+  ERROR_TITLE: "umbraco.mcp.error.title",
+  /** Problem `status` (or HTTP status) of a failed call. Same dimension rule as `ERROR_TITLE`. */
+  ERROR_STATUS: "umbraco.mcp.error.status",
+  /** Umbraco's `operationStatus` enum name, when present and well-formed. Same dimension rule as `ERROR_TITLE`. */
+  ERROR_OPERATION_STATUS: "umbraco.mcp.error.operation_status",
   /** Mirrors `annotations.readOnlyHint`. */
   READ_ONLY: "umbraco.mcp.read_only",
   /** Mirrors `annotations.destructiveHint`. */

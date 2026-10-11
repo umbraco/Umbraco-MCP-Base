@@ -14,10 +14,13 @@
  *   tagged as such rather than hidden.
  *
  * What this decorator deliberately does *not* record: tool arguments, results,
- * or error messages. Argument values are customer content, and
- * `withErrorHandling` forwards `error.message` and ProblemDetails `detail`
- * verbatim — both routinely carry paths, ids and payloads. Only the error's
- * *category* leaves this module.
+ * error messages, or ProblemDetails `detail` and `type`. Argument values are
+ * customer content, and `withErrorHandling` forwards `error.message` and
+ * `detail` verbatim — both routinely carry paths, ids and payloads. Only the
+ * error's *category*, problem `title`, `status` and `operationStatus` leave
+ * this module. The last three are exported as received (a chained or remote
+ * side chooses them), so each is type-checked and length-capped, and
+ * `operationStatus` must also look like an enum name.
  */
 
 import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -55,6 +58,92 @@ function classifyThrown(error: unknown): ToolOutcome {
       : "handler_error";
   }
   return "unknown_error";
+}
+
+/** Longest error title / operationStatus value exported on a span. */
+const MAX_ERROR_VALUE_LENGTH = 100;
+
+/** Umbraco's `operationStatus` values are enum names; anything else is dropped. */
+const OPERATION_STATUS_PATTERN = /^[A-Za-z]+$/;
+
+interface ProblemFields {
+  title?: string;
+  status?: number;
+  operationStatus?: string;
+}
+
+/**
+ * Extracts the exportable problem fields from a thrown error or a parsed
+ * problem-details object. Never reads `detail`, `type`, the message or
+ * anything else — adding a field here is a privacy decision.
+ */
+function problemFields(value: unknown): ProblemFields {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+
+  let problem: Record<string, unknown> = value as Record<string, unknown>;
+  let fallbackTitle: string | undefined;
+  let fallbackStatus: unknown;
+
+  if (value instanceof ToolValidationError) {
+    problem = value.details as unknown as Record<string, unknown>;
+  } else if (value instanceof UmbracoApiError) {
+    problem = value.problemDetails as Record<string, unknown>;
+  } else if (value instanceof Error) {
+    const response = (value as { response?: { data?: unknown; status?: unknown } }).response;
+    problem =
+      typeof response?.data === "object" && response.data !== null
+        ? (response.data as Record<string, unknown>)
+        : {};
+    fallbackTitle = value.name;
+    fallbackStatus = response?.status;
+  }
+
+  const fields: ProblemFields = {};
+
+  const title = typeof problem.title === "string" ? problem.title : fallbackTitle;
+  if (title) {
+    fields.title = title.slice(0, MAX_ERROR_VALUE_LENGTH);
+  }
+
+  const status = typeof problem.status === "number" ? problem.status : fallbackStatus;
+  if (typeof status === "number" && Number.isFinite(status)) {
+    fields.status = status;
+  }
+
+  const operationStatus = problem.operationStatus;
+  if (typeof operationStatus === "string" && OPERATION_STATUS_PATTERN.test(operationStatus)) {
+    fields.operationStatus = operationStatus.slice(0, MAX_ERROR_VALUE_LENGTH);
+  }
+
+  return fields;
+}
+
+/**
+ * Problem fields for a returned `isError` result. The text is whatever the
+ * inner decorators produced — for a chained Umbraco 400 it is the
+ * JSON-stringified problem details — so a non-JSON body yields nothing.
+ */
+function problemFieldsFromResult(result: unknown): ProblemFields {
+  try {
+    const text = (result as { content?: Array<{ text?: unknown }> }).content?.[0]?.text;
+    return typeof text === "string" ? problemFields(JSON.parse(text)) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setProblemAttributes(span: TelemetrySpan, fields: ProblemFields): void {
+  if (fields.title !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_TITLE, fields.title);
+  }
+  if (fields.status !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_STATUS, fields.status);
+  }
+  if (fields.operationStatus !== undefined) {
+    span.setAttribute(TelemetryAttributes.ERROR_OPERATION_STATUS, fields.operationStatus);
+  }
 }
 
 /**
@@ -126,10 +215,15 @@ export function withTelemetry<
         handlerStarted = true;
         try {
           const result = await (originalHandler as (...a: any[]) => any)(...params);
-          span.setAttribute(TelemetryAttributes.OUTCOME, classifyResult(result));
+          const outcome = classifyResult(result);
+          span.setAttribute(TelemetryAttributes.OUTCOME, outcome);
+          if (outcome === "error_result") {
+            setProblemAttributes(span, problemFieldsFromResult(result));
+          }
           return result;
         } catch (error) {
           span.setAttribute(TelemetryAttributes.OUTCOME, classifyThrown(error));
+          setProblemAttributes(span, problemFields(error));
           // Rethrow untouched — `withErrorHandling` owns turning this into a
           // tool result. Telemetry observes; it never changes the outcome.
           throw error;
