@@ -37,6 +37,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
 import { pickFields, omitFields } from "./response-trimmer.js";
+import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
  * Transport-agnostic HTTP response interface.
@@ -57,9 +58,45 @@ export interface HttpResponse<T = unknown> {
  */
 export class UmbracoApiError extends Error {
   constructor(public readonly problemDetails: ProblemDetails) {
-    super(problemDetails.detail || `API error: ${problemDetails.status}`);
+    super(UmbracoApiError.formatMessage(problemDetails));
     this.name = 'UmbracoApiError';
   }
+
+  /** `detail`, else `<title> (HTTP <status>)`, else `HTTP <status>` — never contains `undefined`. */
+  private static formatMessage({ detail, title, status }: ProblemDetails): string {
+    if (detail) return detail;
+    if (title) return status === undefined ? title : `${title} (HTTP ${status})`;
+    return `HTTP ${status ?? 'error'}`;
+  }
+}
+
+/** Longest string body kept as `detail`, so an HTML error page can't flood the tool result. */
+const MAX_STRING_DETAIL_LENGTH = 500;
+
+/**
+ * Builds ProblemDetails from an error response, always carrying the HTTP status.
+ * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
+ * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText` as the `title`, so the message keeps the status.
+ * Use this wherever you construct an `UmbracoApiError` from a raw response.
+ */
+export function toProblemDetails(
+  response: Pick<HttpResponse<unknown>, 'status' | 'statusText' | 'data'>
+): ProblemDetails {
+  const body = response.data;
+  if (typeof body === 'string' && body.trim()) {
+    return { status: response.status, detail: body.trim().slice(0, MAX_STRING_DETAIL_LENGTH) };
+  }
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const problem = body as ProblemDetails;
+    const status = typeof problem.status === 'number' ? problem.status : response.status;
+    if (!problem.detail && !problem.title && response.statusText) {
+      return { ...problem, status, title: response.statusText };
+    }
+    return { ...problem, status };
+  }
+  return response.statusText
+    ? { status: response.status, title: response.statusText }
+    : { status: response.status };
 }
 
 /**
@@ -75,6 +112,15 @@ let clientProvider: ClientProvider | null = null;
  * Configures the API client provider for all API call helpers.
  * Call this once at application startup.
  *
+ * This is a **module-level fallback** for stdio, CLI and tests. An
+ * `apiClientProvider` in the active per-request store
+ * (`runWithRequestContext`) wins over it; this provider is used whenever the
+ * active store has no `apiClientProvider` (or no store is active). Hosted code must not call
+ * this: module scope is shared by every MCP session (Durable Object) in a
+ * Cloudflare isolate. Hosted code keeps per-session values (tokens, clients,
+ * servers, token keys) in the per-request store and reads them through its
+ * accessors.
+ *
  * @param provider - Function that returns the API client instance
  *
  * @example
@@ -88,11 +134,18 @@ export function configureApiClient<TClient>(provider: ClientProvider<TClient>): 
 }
 
 /**
- * Gets the configured API client.
- * Throws if configureApiClient() hasn't been called.
+ * Gets the configured API client: the active per-request store's
+ * `apiClientProvider` when there is one, else the module provider from
+ * `configureApiClient()`.
+ * Throws if neither is set.
  * @internal
  */
 export function getApiClient<TClient>(): TClient {
+  const sessionProvider = getActiveRequestContext()?.apiClientProvider;
+  if (sessionProvider) {
+    return sessionProvider() as TClient;
+  }
+  assertModuleFallbackAllowed("getApiClient()");
   if (!clientProvider) {
     throw new Error(
       'API client not configured. Call configureApiClient() at application startup.'
@@ -247,10 +300,7 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
   }
 
   // Error - throw for decorator to handle
-  let errorData: ProblemDetails = (response.data as ProblemDetails) || {
-    status: response.status,
-    detail: response.statusText,
-  };
+  let errorData: ProblemDetails = toProblemDetails(response);
 
   if (options?.transformError) {
     errorData = options.transformError(errorData);
@@ -284,11 +334,7 @@ export function processVoidResponse(
   }
 
   // Error status codes (400+, 500+, etc.) - throw for decorator to handle
-  const errorData: ProblemDetails = response.data || {
-    status: response.status,
-    detail: response.statusText,
-  };
-  throw new UmbracoApiError(errorData);
+  throw new UmbracoApiError(toProblemDetails(response));
 }
 
 /**

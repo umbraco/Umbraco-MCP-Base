@@ -23,7 +23,11 @@ import type { AuthProps } from "../types/auth.js";
 import type { ChainedServerConsentConfig } from "./worker-entry.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
-import { isAuthExpiredServer } from "./create-server.js";
+import {
+  isAuthExpiredServer,
+  getServerSessionContext,
+  withRequestSessionContext,
+} from "./create-server.js";
 
 /**
  * Options for registering chained tools from another MCP server.
@@ -159,6 +163,13 @@ export async function registerChainedTools(
     // Discover and register proxied tools
     const proxiedTools = await discoverProxiedTools(manager);
 
+    // The session's per-request store values `createPerRequestServer` built
+    // for this server. Each proxied handler runs inside that store, so the
+    // chained handler's API calls go out through *this* session's transport
+    // (and the chained server's `clientFactory`, when it has one, is scoped
+    // to the call by `InProcessConnection`).
+    const session = getServerSessionContext(server);
+
     for (const pt of proxiedTools) {
       const handler = createProxyHandler(
         manager,
@@ -175,7 +186,7 @@ export async function registerChainedTools(
           // requires the MCP SDK to support raw JSON Schema for outputSchema,
           // or tools to define Zod outputSchema directly.
         },
-        handler as any,
+        withRequestSessionContext(handler, session) as any,
       );
     }
 

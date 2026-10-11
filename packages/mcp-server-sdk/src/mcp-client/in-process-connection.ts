@@ -16,6 +16,10 @@
  * handler's `extra` from the caller's explicit `context` when given, else
  * from the active `runWithRequestContext` store. Only those two namespaced
  * keys are copied — never the caller's abort signal or request id.
+ *
+ * A chained server with its own `clientFactory` runs its handler inside a
+ * nested `runWithRequestContext` whose `apiClientProvider` is that factory;
+ * otherwise the handler inherits the caller's store (and so its client).
  */
 
 import { z, type ZodRawShape } from "zod";
@@ -24,7 +28,6 @@ import type { CollectionConfiguration } from "../types/collection-configuration.
 import { DEFAULT_COLLECTION_CONFIG } from "../types/collection-configuration.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 import { createCollectionConfigLoader } from "../tool-filtering/collection-config-loader.js";
-import { configureApiClient, getApiClient } from "../helpers/api-call-helpers.js";
 import type { McpConnection, McpInProcessServerConfig, FilterConfig } from "./types.js";
 import { getUmbracoVersion } from "../umbraco-version/request-context.js";
 import {
@@ -96,37 +99,28 @@ export class InProcessConnection implements McpConnection {
       sendRequest: async () => ({}) as any,
     };
 
-    // If this server has its own clientFactory, temporarily swap the global
-    // API client so the chained tool's handler gets the right Orval client.
-    let previousClient: unknown = null;
-    let hadPreviousClient = false;
-    if (this.config.clientFactory) {
-      try {
-        previousClient = getApiClient();
-        hadPreviousClient = true;
-      } catch {
-        // No previous client configured — that's fine
-      }
-      configureApiClient(this.config.clientFactory);
-    }
-
-    try {
+    const run = async (sessionValues: object) =>
       // Re-enter the store with the merged values so a chain made from inside
       // this handler sees them, not an outer store that may differ.
-      const result = await runWithRequestContext(carried, () =>
+      (await runWithRequestContext({ ...sessionValues, ...carried }, () =>
         match.tool.handler(args, extra as any),
-      );
-      return result as {
+      )) as {
         content: Array<{ type: string; text?: string }>;
         structuredContent?: unknown;
         isError?: boolean;
       };
-    } finally {
-      // Restore the previous API client
-      if (this.config.clientFactory && hadPreviousClient) {
-        configureApiClient(() => previousClient);
-      }
+
+    // A chained server with its own clientFactory gets that client through a
+    // nested store scoped to this one call — never by swapping the module
+    // client, which would race across an `await` and leak across sessions.
+    // Everything else (transport, server, auth, carried values) is inherited
+    // from the caller's store. Without a clientFactory the caller's store is
+    // inherited unchanged, so the chained handler uses the caller's client.
+    const inherited = { ...getActiveRequestContext() };
+    if (this.config.clientFactory) {
+      return run({ ...inherited, apiClientProvider: this.config.clientFactory });
     }
+    return run(inherited);
   }
 
   async close(): Promise<void> {

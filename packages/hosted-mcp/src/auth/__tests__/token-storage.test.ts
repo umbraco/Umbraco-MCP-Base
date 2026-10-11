@@ -12,6 +12,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals
 import {
   refreshUmbracoToken,
   deleteStoredUmbracoToken,
+  storeUmbracoToken,
   getRejectedRefreshToken,
   getStoredUmbracoToken,
   type RefreshFailure,
@@ -550,5 +551,36 @@ describe("getStoredUmbracoToken with a corrupt entry", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+// Umbraco-MCP-Base#383: `expires_in` alone can't say whether a stored token is
+// still valid (there's no issue time), so storing stamps an absolute expiry.
+describe("storeUmbracoToken expires_at", () => {
+  function captureKv() {
+    const puts: string[] = [];
+    return {
+      puts,
+      kv: {
+        put: async (_key: string, value: string) => {
+          puts.push(value);
+        },
+      } as unknown as KVNamespace,
+    };
+  }
+
+  it("stamps an absolute expires_at from expires_in", async () => {
+    const { kv, puts } = captureKv();
+    const before = Date.now();
+    await storeUmbracoToken(kv, "key", { access_token: "a", token_type: "Bearer", expires_in: 600 });
+    const stored = JSON.parse(puts[0]);
+    expect(stored.tokens.expires_at).toBeGreaterThanOrEqual(before + 600_000);
+    expect(stored.tokens.expires_at).toBeLessThanOrEqual(Date.now() + 600_000);
+  });
+
+  it("leaves expires_at absent when Umbraco sent no expires_in", async () => {
+    const { kv, puts } = captureKv();
+    await storeUmbracoToken(kv, "key", { access_token: "a", token_type: "Bearer" });
+    expect(JSON.parse(puts[0]).tokens).not.toHaveProperty("expires_at");
   });
 });

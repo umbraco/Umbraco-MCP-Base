@@ -46,6 +46,7 @@ export {
   createPerRequestServer,
   mergeConsentChoices,
   resolveRequestSite,
+  runInSessionContext,
   isAuthExpiredServer,
   type CreateServerOptions,
   type InstructionsResolver,

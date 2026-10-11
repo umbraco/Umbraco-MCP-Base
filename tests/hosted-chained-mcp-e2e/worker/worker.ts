@@ -23,10 +23,7 @@ import {
   type ChainedServerConsentConfig,
 } from "@umbraco-cms/mcp-hosted";
 
-import {
-  initializeUmbracoFetch,
-  isUmbracoFetchInitialized,
-} from "@umbraco-cms/mcp-server-sdk";
+import { getExampleUmbracoAddOnAPI } from "../../../template/src/umbraco-api/api/generated/exampleApi.js";
 
 // Main server collections (from template)
 import { collections, allModes, allModeNames, allSliceNames } from "../../../template/src/collections.js";
@@ -61,6 +58,8 @@ const options = {
   allModeNames,
   allSliceNames,
   chainedServers: [demoChainedServer],
+  // Required for hosted servers: the API client is carried per session, not in a module global
+  clientFactory: () => getExampleUmbracoAddOnAPI(),
   authOptions: { showReauthButton: true },
 };
 
@@ -74,17 +73,6 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
   server!: McpServer;
 
   async init() {
-    // Initialize the SDK fetch client so chained tools can call the real Umbraco API.
-    // Uses client_credentials auth with env vars from wrangler config.
-    const env = (this as any).env;
-    if (!isUmbracoFetchInitialized() && env.UMBRACO_API_CLIENT_ID && env.UMBRACO_API_CLIENT_SECRET) {
-      initializeUmbracoFetch({
-        baseUrl: env.UMBRACO_BASE_URL || env.UMBRACO_SERVER_URL,
-        clientId: env.UMBRACO_API_CLIENT_ID,
-        clientSecret: env.UMBRACO_API_CLIENT_SECRET,
-      });
-    }
-
     // Create the main server with template tools
     this.server = await createPerRequestServer(
       serverOptions,
