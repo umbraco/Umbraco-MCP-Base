@@ -119,17 +119,19 @@ export function parseProxiedToolName(prefixedName: string): {
  * @param manager - The MCP client manager
  * @param serverName - The server to forward calls to
  * @param originalToolName - The original tool name on the chained server
- * @returns An async handler function
+ * @returns An async handler function. Pass the parent call's `extra` as the
+ *   second argument so its carried request values (Umbraco version, telemetry)
+ *   reach in-process chained handlers.
  */
 export function createProxyHandler(
   manager: McpClientManager,
   serverName: string,
   originalToolName: string
-): (args: Record<string, unknown>) => Promise<{
+): (args: Record<string, unknown>, extra?: unknown) => Promise<{
   content: Array<{ type: string; text?: string }>;
 }> {
-  return async (args: Record<string, unknown>) => {
-    return manager.callTool(serverName, originalToolName, args);
+  return async (args: Record<string, unknown>, extra?: unknown) => {
+    return manager.callTool(serverName, originalToolName, args, extra);
   };
 }
 

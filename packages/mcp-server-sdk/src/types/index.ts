@@ -19,6 +19,7 @@ export {
 export type {
   ToolCollectionMetadata,
   ToolCollectionExport,
+  ToolCollectionToolsOptions,
 } from "./tool-collection.js";
 
 export type {

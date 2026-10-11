@@ -2,7 +2,8 @@
 import { describe, it, expect, beforeAll } from "@jest/globals";
 import { z } from "zod";
 import type { ToolCollectionExport } from "../../types/tool-collection.js";
-import { runCodegen } from "../generate-tool-types.js";
+import { runCodegen, CODEGEN_NEWEST_UMBRACO_VERSION } from "../generate-tool-types.js";
+import { isAtLeast } from "../../umbraco-version/request-context.js";
 
 function makeCollections(): ToolCollectionExport[] {
   const getThing: any = {
@@ -143,9 +144,85 @@ describe("runCodegen", () => {
     ];
 
     const result = await runCodegen({ collections, registryName: "X" });
-    expect(seen).toHaveLength(1);
+    // Called once with no version and once with the newest version — both
+    // times with the permissive user.
+    expect(seen).toHaveLength(2);
+    expect((seen[0] as any).allowedSections.includes("Umb.Section.MadeUp")).toBe(true);
+    expect((seen[1] as any).allowedSections.includes("Umb.Section.MadeUp")).toBe(true);
     expect(result.toolsProcessed).toBe(1);
     expect(result.output).toContain('"gated-tool"');
+  });
+
+  describe("version-gated collections", () => {
+    // Mirrors `@umbraco-cms/mcp-dev`: `update-and-publish-document` only
+    // exists on 17.6+, and `get-document` swaps a legacy variant for a newer
+    // one with an extra field.
+    function makeVersionGatedCollections(): ToolCollectionExport[] {
+      const tool = (name: string, inputSchema: Record<string, z.ZodTypeAny>): any => ({
+        name,
+        description: "",
+        inputSchema,
+        slices: [],
+        handler: async () => ({ content: [] }),
+      });
+      return [
+        {
+          metadata: { name: "document", displayName: "Document", description: "" },
+          tools: (_user, options) => {
+            const atLeast176 = isAtLeast(options?.umbracoVersion, 17, 6);
+            const tools = [
+              atLeast176
+                ? tool("get-document", { id: z.string(), includeVariants: z.boolean() })
+                : tool("get-document", { id: z.string() }),
+              tool("delete-document", { id: z.string() }),
+            ];
+            if (atLeast176) {
+              tools.push(tool("update-and-publish-document", { id: z.string(), culture: z.string() }));
+            }
+            return tools;
+          },
+        },
+      ];
+    }
+
+    it("describes tools that are only listed on newer Umbraco versions", async () => {
+      const result = await runCodegen({
+        collections: makeVersionGatedCollections(),
+        registryName: "CmsTools",
+      });
+
+      expect(result.output).toContain("export interface UpdateAndPublishDocumentInput");
+      expect(result.output).toContain('"update-and-publish-document": {');
+      expect(result.output).toContain('"delete-document": {');
+    });
+
+    it("emits each tool once, using the newest variant on a name clash", async () => {
+      const result = await runCodegen({
+        collections: makeVersionGatedCollections(),
+        registryName: "CmsTools",
+      });
+
+      expect(result.toolsProcessed).toBe(3);
+      expect(result.output.match(/export interface GetDocumentInput\b/g)).toHaveLength(1);
+      expect(result.output).toMatch(/interface GetDocumentInput \{[^}]*includeVariants/);
+    });
+
+    it("passes the newest codegen version to tools()", async () => {
+      const versions: Array<string | undefined> = [];
+      const collections: ToolCollectionExport[] = [
+        {
+          metadata: { name: "x", displayName: "x", description: "" },
+          tools: (_user, options) => {
+            versions.push(options?.umbracoVersion);
+            return [];
+          },
+        },
+      ];
+
+      await runCodegen({ collections, registryName: "X" });
+
+      expect(versions).toEqual([undefined, CODEGEN_NEWEST_UMBRACO_VERSION]);
+    });
   });
 });
 

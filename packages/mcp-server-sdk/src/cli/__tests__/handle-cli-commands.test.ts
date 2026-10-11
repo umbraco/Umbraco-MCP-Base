@@ -7,6 +7,7 @@ import type { ToolDefinition } from "../../types/tool-definition.js";
 import type { CollectionConfiguration } from "../../types/collection-configuration.js";
 import { DEFAULT_COLLECTION_CONFIG } from "../../types/collection-configuration.js";
 import { handleCliCommands } from "../handle-cli-commands.js";
+import { isAtLeast } from "../../umbraco-version/request-context.js";
 
 // ============================================================================
 // Test fixtures
@@ -78,6 +79,61 @@ afterEach(() => {
 // ============================================================================
 // Tests
 // ============================================================================
+
+describe("handleCliCommands with a connected site's Umbraco version", () => {
+  const gated: ToolCollectionExport = {
+    metadata: { name: "docs", displayName: "docs", description: "docs collection" },
+    tools: (_user, options) => {
+      const tools = [makeTool({ name: "get-doc" })];
+      if (isAtLeast(options?.umbracoVersion, 17, 6)) {
+        tools.push(makeTool({ name: "publish-doc" }));
+      }
+      return tools;
+    },
+  };
+
+  it("--list-tools lists the site's version-gated tools", async () => {
+    await expect(
+      handleCliCommands([gated], {
+        cliFlags: { listTools: true, generateContext: false, debugConfig: false },
+        umbracoVersion: "17.6.0",
+      }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(consoleOutput).toContain("publish-doc");
+  });
+
+  it("--list-tools lists the oldest variants with no site", async () => {
+    await expect(
+      handleCliCommands([gated], {
+        cliFlags: { listTools: true, generateContext: false, debugConfig: false },
+      }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(consoleOutput).toContain("get-doc");
+    expect(consoleOutput).not.toContain("publish-doc");
+  });
+
+  it("--describe-tool finds a tool gated on the site's version", async () => {
+    await expect(
+      handleCliCommands([gated], {
+        cliFlags: { listTools: false, describeTool: "publish-doc", generateContext: false, debugConfig: false },
+        umbracoVersion: "17.6.0",
+      }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(JSON.parse(consoleOutput).name).toBe("publish-doc");
+  });
+
+  it("--describe-tool does not find it on an older site", async () => {
+    await expect(
+      handleCliCommands([gated], {
+        cliFlags: { listTools: false, describeTool: "publish-doc", generateContext: false, debugConfig: false },
+        umbracoVersion: "17.5.0",
+      }),
+    ).rejects.toThrow("process.exit(1)");
+  });
+});
 
 describe("handleCliCommands", () => {
   const tool1 = makeTool({ name: "get-item", description: "Gets an item", slices: ["read"] });

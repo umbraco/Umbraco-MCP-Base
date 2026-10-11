@@ -207,6 +207,14 @@ describe("withTelemetry reading the carrier", () => {
     expect(spans[0].attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("sess-1");
   });
 
+  it("stamps the connected Umbraco version when one was attached", async () => {
+    const { withTelemetry, TelemetryAttributes, spans } = await setup();
+
+    await withTelemetry(makeTool()).handler({} as any, { umbracoVersion: "17.6.0-rc.1" } as any);
+
+    expect(spans[0].attributes[TelemetryAttributes.UMBRACO_VERSION]).toBe("17.6.0-rc.1");
+  });
+
   it("omits every attribute when no host attached a carrier", async () => {
     const { withTelemetry, TelemetryAttributes, spans } = await setup();
 
@@ -215,6 +223,7 @@ describe("withTelemetry reading the carrier", () => {
     expect(spans[0].attributes).not.toHaveProperty(TelemetryAttributes.TENANT);
     expect(spans[0].attributes).not.toHaveProperty(TelemetryAttributes.REGION);
     expect(spans[0].attributes).not.toHaveProperty(TelemetryAttributes.LOGIN_SESSION);
+    expect(spans[0].attributes).not.toHaveProperty(TelemetryAttributes.UMBRACO_VERSION);
   });
 
   it("omits the individual attributes whose values are missing", async () => {

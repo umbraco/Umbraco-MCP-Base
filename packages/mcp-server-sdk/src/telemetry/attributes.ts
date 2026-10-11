@@ -30,7 +30,7 @@
  *   host's `TelemetryAdapter`. They must be constant for the lifetime of the
  *   host process/isolate — the adapter lives in module scope, so anything it
  *   closes over is shared by every span the isolate records.
- * - **Request-scoped** keys (`TENANT`, `REGION`, `LOGIN_SESSION`) reach
+ * - **Request-scoped** keys (`TENANT`, `REGION`, `LOGIN_SESSION`, `UMBRACO_VERSION`) reach
  *   `withTelemetry` on the tool call's own `context` argument, exactly as
  *   `MCP_SESSION_ID` does. See `request-context.ts` for why a closure would
  *   be wrong here.
@@ -111,6 +111,12 @@ export const TelemetryAttributes = {
    * next to the hashed `TENANT`. Request-scoped, same carrier as `TENANT`.
    */
   REGION: "umbraco.mcp.region",
+  /**
+   * Raw version of the connected Umbraco, e.g. `17.6.0-rc.1`. Low cardinality
+   * and not customer-identifying. Request-scoped: read from the tool call's
+   * `context` via `getUmbracoVersion`, like `TENANT`.
+   */
+  UMBRACO_VERSION: "umbraco.mcp.umbraco_version",
 } as const;
 
 /** The only `mcp.method.name` value this module emits. Also the span-name prefix. */

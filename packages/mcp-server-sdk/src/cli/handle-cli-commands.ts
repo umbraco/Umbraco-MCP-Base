@@ -31,6 +31,7 @@ import type { CollectionConfiguration } from "../types/collection-configuration.
 import { toolToJsonSchema, toolToSummary, formatToolTable } from "./introspection.js";
 import { generateContextFile } from "./context-generator.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
+import { UMBRACO_VERSION_CONTEXT_KEY } from "../umbraco-version/request-context.js";
 
 /**
  * Options for handleCliCommands.
@@ -48,6 +49,13 @@ export interface HandleCliCommandsOptions {
   filterConfig?: CollectionConfiguration;
   /** Optional server config — used by --debug-config to show resolved values and sources */
   serverConfig?: UmbracoServerConfig;
+  /**
+   * Raw version string of the connected Umbraco site, when there is one.
+   * Passed to collection `tools()` (and attached to `--call`'s handler
+   * context) so version-gated tools match that site. Omit when no site is
+   * connected — collections then list their oldest variants.
+   */
+  umbracoVersion?: string;
 }
 
 /**
@@ -55,9 +63,13 @@ export interface HandleCliCommandsOptions {
  * Falls back to undefined and catches errors from collections that
  * require a valid user object.
  */
-function getToolsForCli(col: ToolCollectionExport<any>, user?: unknown): ReturnType<ToolCollectionExport<any>["tools"]> {
+function getToolsForCli(
+  col: ToolCollectionExport<any>,
+  user?: unknown,
+  umbracoVersion?: string,
+): ReturnType<ToolCollectionExport<any>["tools"]> {
   try {
-    return col.tools(user);
+    return col.tools(user, { umbracoVersion });
   } catch {
     return [];
   }
@@ -67,7 +79,7 @@ export async function handleCliCommands(
   collections: ToolCollectionExport<any>[],
   options: HandleCliCommandsOptions,
 ): Promise<void> {
-  const { cliFlags, serverName, serverVersion, user, filterConfig, serverConfig } = options;
+  const { cliFlags, serverName, serverVersion, user, filterConfig, serverConfig, umbracoVersion } = options;
 
   if (cliFlags?.debugConfig) {
     const debug: Record<string, unknown> = {};
@@ -109,7 +121,7 @@ export async function handleCliCommands(
 
   if (cliFlags?.listTools) {
     const summaries = collections.flatMap((col) =>
-      getToolsForCli(col, user)
+      getToolsForCli(col, user, umbracoVersion)
         .filter((tool) => !filterConfig || shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig }))
         .map((tool) => toolToSummary(tool, col.metadata.name)),
     );
@@ -120,7 +132,7 @@ export async function handleCliCommands(
   if (cliFlags?.describeTool) {
     const toolName = cliFlags.describeTool;
     for (const col of collections) {
-      const tool = getToolsForCli(col, user).find((t) => t.name === toolName);
+      const tool = getToolsForCli(col, user, umbracoVersion).find((t) => t.name === toolName);
       if (tool) {
         if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
           break; // Tool exists but is filtered out — fall through to "not found"
@@ -155,6 +167,7 @@ export async function handleCliCommands(
       serverVersion,
       user,
       filterConfig,
+      umbracoVersion,
     });
     console.log(context);
     process.exit(0);
@@ -165,7 +178,7 @@ export async function handleCliCommands(
 
     // Find the tool across all collections
     for (const col of collections) {
-      const tool = getToolsForCli(col, user).find((t) => t.name === toolName);
+      const tool = getToolsForCli(col, user, umbracoVersion).find((t) => t.name === toolName);
       if (tool) {
         if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
           break; // Tool exists but is filtered out
@@ -210,7 +223,10 @@ export async function handleCliCommands(
         }
 
         // Call the tool handler and print result
-        const extra = { signal: new AbortController().signal } as any;
+        const extra = {
+          signal: new AbortController().signal,
+          ...(umbracoVersion ? { [UMBRACO_VERSION_CONTEXT_KEY]: umbracoVersion } : {}),
+        } as any;
         let result: any;
         try {
           result = await Promise.resolve(tool.handler(args as any, extra));

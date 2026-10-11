@@ -165,6 +165,31 @@ export {
   type WithTelemetryContext,
 } from "./telemetry/index.js";
 
+// ============================================================================
+// Request-Scoped Umbraco Version
+// ============================================================================
+//
+// The connected Umbraco's version, carried per request on the tool call's
+// `extra` (never a module global — one Worker isolate serves many sites).
+// Hosts attach it with `withRequestUmbracoVersion` and enter the async store
+// with `runWithRequestContext`; tools and collections read it with
+// `getUmbracoVersion` and gate with `isAtLeast`.
+export {
+  UMBRACO_VERSION_CONTEXT_KEY,
+  getUmbracoVersion,
+  withRequestUmbracoVersion,
+  isAtLeast,
+  type WithUmbracoVersionContext,
+} from "./umbraco-version/request-context.js";
+
+export {
+  runWithRequestContext,
+  getActiveRequestContext,
+  pickCarriedRequestContext,
+  isRequestContextStoreAvailable,
+  type CarriedRequestContext,
+} from "./request-context/async-request-context.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,
@@ -194,6 +219,7 @@ export {
 export {
   type ToolCollectionMetadata,
   type ToolCollectionExport,
+  type ToolCollectionToolsOptions,
 } from "./types/tool-collection.js";
 
 export {

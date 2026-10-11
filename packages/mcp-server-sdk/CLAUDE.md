@@ -35,6 +35,8 @@ src/
 ├── testing/           # Test utilities (setupTestEnvironment, snapshot helpers)
 ├── evals/             # LLM eval framework (runScenarioTest, agent-runner)
 ├── version-check/     # Umbraco version compatibility
+├── umbraco-version/   # Per-request connected Umbraco version (getUmbracoVersion, isAtLeast)
+├── request-context/   # AsyncLocalStorage store for carried request values (hosts enter, SDK reads)
 ├── file/              # File extension detection
 └── constants/         # Umbraco well-known IDs
 ```
