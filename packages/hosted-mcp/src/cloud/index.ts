@@ -27,7 +27,6 @@
  */
 
 import type { HostedMcpEnv } from "../types/env.js";
-import { buildMcpHeader } from "../http/mcp-header.js";
 import type {
   SiteConfig,
   SiteRoutingConfig,
@@ -205,6 +204,10 @@ export function umbracoCloudSiteRouting(
  * Default validator — GETs `/umbraco` on the Cloud host. Any 2xx/3xx is
  * "exists"; 4xx/5xx and network failures are "missing". (HEAD looks tempting
  * but Cloud's edge returns 404 for HEAD on this path.)
+ *
+ * Deliberately sends no `X-Umbraco-Mcp` header: the host is derived from the
+ * request-supplied siteId, so attaching the secret would leak it to any
+ * attacker-registered Cloud project.
  */
 async function defaultValidateProject(
   _siteId: string,
@@ -215,7 +218,6 @@ async function defaultValidateProject(
     const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
       method: "GET",
       redirect: "manual",
-      headers: buildMcpHeader(env),
       signal: AbortSignal.timeout(5_000),
     });
     response.body?.cancel();
