@@ -428,12 +428,16 @@ const DEGRADED_REFRESH_REASONS: Record<
  * @param options - Server configuration (constant across requests)
  * @param env - Cloudflare Worker environment bindings
  * @param props - Auth props from the OAuthProvider (per-request, user-specific)
+ * @param sessionId - Optional MCP session id (from `McpAgent.getSessionId()`),
+ *   recorded as `mcp.session.id` on the init span so a degraded start can be
+ *   tied back to the session that hit it
  * @returns Configured McpServer ready to handle the request
  */
 export async function createPerRequestServer(
   options: CreateServerOptions,
   env: HostedMcpEnv,
-  props: AuthProps
+  props: AuthProps,
+  sessionId?: string
 ): Promise<McpServer> {
   // Install the tracing adapter first: it has to be in place before the init
   // span below is opened, let alone before any tool can run. Only static facts
@@ -465,8 +469,28 @@ export async function createPerRequestServer(
   // no `spanContext()`), so deleting the hand-rolled correlation id would leave
   // `wrangler tail` with nothing to tie `:start` to `:done`.
   return getTelemetryAdapter().startSpan(SERVER_INIT_SPAN, {}, (span) =>
-    initPerRequestServer(options, env, props, span)
+    initPerRequestServer(options, env, props, span, sessionId)
   );
+}
+
+/**
+ * Stamps the request-scoped identity attributes on the init span — the MCP
+ * session id plus the already-hashed tenant/login-session and plaintext region
+ * from `resolveRequestTelemetry`. Done before any early return, so a degraded
+ * start is attributable to a session and tenant just like a full one. Absent
+ * values stay absent, matching `resolveRequestTelemetry`'s own rule.
+ */
+function stampInitIdentity(
+  initSpan: TelemetrySpan,
+  sessionId: string | undefined,
+  telemetry: RequestTelemetryContext
+): void {
+  if (sessionId) initSpan.setAttribute(TelemetryAttributes.MCP_SESSION_ID, sessionId);
+  if (telemetry.tenant) initSpan.setAttribute(TelemetryAttributes.TENANT, telemetry.tenant);
+  if (telemetry.region) initSpan.setAttribute(TelemetryAttributes.REGION, telemetry.region);
+  if (telemetry.loginSession) {
+    initSpan.setAttribute(TelemetryAttributes.LOGIN_SESSION, telemetry.loginSession);
+  }
 }
 
 /**
@@ -477,7 +501,8 @@ async function initPerRequestServer(
   options: CreateServerOptions,
   env: HostedMcpEnv,
   props: AuthProps,
-  initSpan: TelemetrySpan
+  initSpan: TelemetrySpan,
+  sessionId?: string
 ): Promise<McpServer> {
   // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
   // agents-mcp runtime is supposed to run `init()` (and therefore this
@@ -494,6 +519,14 @@ async function initPerRequestServer(
   console.log(
     `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
   );
+
+  // Request-scoped span enrichment: which tenant, which region, which login.
+  // Resolved here — the only layer that holds both `props` and `env` — and
+  // before either degraded early return below, so a `degraded-auth-expired`
+  // start carries the same session/tenant identity as a full one. Never
+  // throws (see `resolveRequestTelemetry`).
+  const rawRequestTelemetry = await resolveRequestTelemetry(props, env);
+  stampInitIdentity(initSpan, sessionId, rawRequestTelemetry);
 
   const baseInstructions =
     typeof options.instructions === "function"
@@ -657,8 +690,7 @@ async function initPerRequestServer(
   const filterConfig: CollectionConfiguration =
     configLoader.loadFromConfig(effectiveConfig);
 
-  // Request-scoped span enrichment: which tenant, which region, which login.
-  // Resolved here — the only layer that holds both `props` and `env` — and
+  // The request-scoped telemetry resolved at the top of this function is
   // handed to tool registration so each handler carries *this* request's
   // values. Deliberately not folded into the tracing adapter's static
   // attributes: that adapter is module-scoped and shared by every Durable
@@ -668,7 +700,7 @@ async function initPerRequestServer(
   // `registerCollectionTools`'s per-tool loop — every tool in this request
   // wraps the same reference, so there's no reason to re-check emptiness or
   // re-freeze a copy once per tool.
-  const requestTelemetry = prepareRequestTelemetryContext(await resolveRequestTelemetry(props, env));
+  const requestTelemetry = prepareRequestTelemetryContext(rawRequestTelemetry);
 
   // Register tools from all collections (with filtering)
   const registeredCount = registerCollectionTools(

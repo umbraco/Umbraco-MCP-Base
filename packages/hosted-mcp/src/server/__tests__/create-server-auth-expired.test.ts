@@ -245,6 +245,86 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(doneLine(logSpy)).toContain("mode=full");
   });
 
+  it("stamps the session id and tenant on the init span of a refresh-failure degraded start", async () => {
+    // Regression for #371: the refresh-rejected branch must carry the same
+    // session/tenant identity as the no-token-in-kv branch (spans.test.ts).
+    refreshFailure = {
+      ok: false,
+      reason: "expired",
+      status: 400,
+      error: "invalid_grant",
+      message: "rejected",
+    };
+    const { setTelemetryAdapter, clearTelemetryAdapter, TelemetryAttributes } = await import(
+      "@umbraco-cms/mcp-server-sdk"
+    );
+    const { SERVER_INIT_SPAN, HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
+    const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
+    setTelemetryAdapter({
+      startSpan: (name, attributes, fn) => {
+        const span = { name, attributes: { ...attributes } as Record<string, unknown> };
+        recorded.push(span);
+        return fn({ setAttribute: (key, value) => { span.attributes[key] = value; } });
+      },
+    });
+
+    try {
+      const { createPerRequestServer } = await import("../create-server.js");
+      await createPerRequestServer(
+        baseOptions,
+        { ...env, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
+        { ...props, consentChoices: { siteId: "my-site" } },
+        "session-xyz",
+      );
+    } finally {
+      clearTelemetryAdapter();
+    }
+
+    const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
+    expect(doneLine(logSpy)).toContain("cause=refresh-rejected-expired");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(init.attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-xyz");
+    expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("stamps the tenant but no session id on a refresh-failure degraded start without a session id", async () => {
+    refreshFailure = {
+      ok: false,
+      reason: "expired",
+      status: 400,
+      error: "invalid_grant",
+      message: "rejected",
+    };
+    const { setTelemetryAdapter, clearTelemetryAdapter, TelemetryAttributes } = await import(
+      "@umbraco-cms/mcp-server-sdk"
+    );
+    const { SERVER_INIT_SPAN, HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
+    const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
+    setTelemetryAdapter({
+      startSpan: (name, attributes, fn) => {
+        const span = { name, attributes: { ...attributes } as Record<string, unknown> };
+        recorded.push(span);
+        return fn({ setAttribute: (key, value) => { span.attributes[key] = value; } });
+      },
+    });
+
+    try {
+      const { createPerRequestServer } = await import("../create-server.js");
+      await createPerRequestServer(
+        baseOptions,
+        { ...env, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
+        { ...props, consentChoices: { siteId: "my-site" } },
+      );
+    } finally {
+      clearTelemetryAdapter();
+    }
+
+    const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
+    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
+    expect(TelemetryAttributes.MCP_SESSION_ID in init.attributes).toBe(false);
+  });
+
   it("isAuthExpiredServer recognises a real degraded server and rejects a real full one", async () => {
     // Every other test of `isAuthExpiredServer` (register-chained-tools.test.ts)
     // mocks it away entirely, so nothing exercises the real WeakSet-based
