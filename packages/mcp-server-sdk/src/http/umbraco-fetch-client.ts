@@ -37,6 +37,10 @@ export interface UmbracoFetchAuthConfig {
   clientId: string;
   /** OAuth client secret */
   clientSecret?: string;
+  /** Optional name of an identifying header sent on every request (default `X-Umbraco-Mcp`) */
+  headerName?: string;
+  /** Optional value of the identifying header. Unset = no header is sent. */
+  headerValue?: string;
 }
 
 /**
@@ -67,6 +71,17 @@ export interface UmbracoManagementClientOptions {
 // reads this env var when establishing TLS connections.
 if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
+export const DEFAULT_MCP_HEADER_NAME = "X-Umbraco-Mcp";
+
+/**
+ * Builds the optional identifying header (e.g. for firewall allow-rules).
+ * Returns an empty object when no value is configured.
+ */
+function buildMcpHeader(config: { headerName?: string; headerValue?: string } | null | undefined): Record<string, string> {
+  if (!config?.headerValue) return {};
+  return { [config.headerName || DEFAULT_MCP_HEADER_NAME]: config.headerValue };
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
@@ -119,6 +134,10 @@ export const requestClientCredentialsToken = async (config: {
   clientId: string;
   clientSecret?: string;
   tokenPath?: string;
+  /** Optional identifying header name (default `X-Umbraco-Mcp`) */
+  headerName?: string;
+  /** Optional identifying header value. Unset = no header. */
+  headerValue?: string;
   /** Forwarded to `fetch`, so callers can impose their own deadline. */
   signal?: AbortSignal;
 }): Promise<{ accessToken: string; expiresIn: number }> => {
@@ -134,6 +153,7 @@ export const requestClientCredentialsToken = async (config: {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      ...buildMcpHeader(config),
     },
     body: new URLSearchParams({
       client_id: clientId,
@@ -298,6 +318,7 @@ async function doFetch<T>(
     Authorization: `Bearer ${token}`,
     ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
     Accept: "application/json",
+    ...buildMcpHeader(authConfig),
     ...config.headers,
     ...options?.headers,
   };
@@ -514,6 +535,7 @@ export function createUmbracoFetchClient(
       Authorization: `Bearer ${token}`,
       ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
+      ...buildMcpHeader(instanceAuthConfig),
       ...config.headers,
     };
 

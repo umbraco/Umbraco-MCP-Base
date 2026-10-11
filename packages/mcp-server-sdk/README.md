@@ -108,6 +108,16 @@ initializeUmbracoFetch({
 });
 ```
 
+Optional identifying header (e.g. for IP allow-list firewall rules): pass `headerValue` (and optionally `headerName`, default `X-Umbraco-Mcp`) and it is sent on every request to Umbraco, including the OAuth token request. Unset `headerValue` = no header. The generated template reads these from `UMBRACO_MCP_HEADER_NAME` / `UMBRACO_MCP_HEADER_VALUE`. Treat the value as a secret.
+
+```typescript
+initializeUmbracoFetch({
+  baseUrl, clientId, clientSecret,
+  headerName: process.env.UMBRACO_MCP_HEADER_NAME,   // optional, default "X-Umbraco-Mcp"
+  headerValue: process.env.UMBRACO_MCP_HEADER_VALUE, // unset = no header sent
+});
+```
+
 Features:
 - Automatic OAuth token refresh
 - Self-signed certificate support in development

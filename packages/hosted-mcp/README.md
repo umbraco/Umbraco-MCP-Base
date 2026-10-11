@@ -124,6 +124,10 @@ wrangler secret put UMBRACO_BASE_URL
 wrangler secret put UMBRACO_OAUTH_CLIENT_ID
 wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 
+# Optional - identifying header on every server-side request to Umbraco (e.g. for an IP allow-list firewall rule).
+# Name defaults to X-Umbraco-Mcp (override with UMBRACO_MCP_HEADER_NAME). Unset value = no header.
+wrangler secret put UMBRACO_MCP_HEADER_VALUE
+
 # Always required
 wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
 

@@ -22,6 +22,7 @@
  */
 
 import type { HostedMcpEnv, OAuthAuthRequest } from "../types/env.js";
+import { buildMcpHeader } from "../http/mcp-header.js";
 import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { consentResponse, type ConsentScreenOptions, type ConsentToolConfig } from "./consent.js";
@@ -628,7 +629,10 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     const tokenResp = await fetch(endpoints.token_endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...buildMcpHeader(env),
+      },
       body: tokenParams.toString(),
     });
 

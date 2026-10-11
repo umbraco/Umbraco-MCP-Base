@@ -16,6 +16,7 @@ import {
   type StoredSiteContext,
 } from "../auth/token-storage.js";
 import { logAuth } from "../auth/log.js";
+import { buildMcpHeader } from "./mcp-header.js";
 
 /**
  * Options for the fetch-based Umbraco management client.
@@ -71,6 +72,10 @@ export interface UmbracoFetchClientConfig {
   baseUrl: string;
   /** The stored Umbraco Bearer token */
   accessToken: string;
+  /** Optional identifying header name (default `X-Umbraco-Mcp`) */
+  headerName?: string;
+  /** Optional identifying header value. Unset = no header is sent. */
+  headerValue?: string;
   /** Optional: env and token key for automatic token refresh */
   refreshContext?: {
     env: HostedMcpEnv;
@@ -205,6 +210,10 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
       Authorization: `Bearer ${currentToken}`,
       ...(isWebFormData ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
+      ...buildMcpHeader({
+        UMBRACO_MCP_HEADER_NAME: config.headerName,
+        UMBRACO_MCP_HEADER_VALUE: config.headerValue,
+      }),
       ...requestConfig.headers,
     };
 
@@ -354,6 +363,8 @@ export async function createFetchClientFromKV(
   return createUmbracoFetchClient({
     baseUrl: serverBaseUrl,
     accessToken: tokens.access_token,
+    headerName: env.UMBRACO_MCP_HEADER_NAME,
+    headerValue: env.UMBRACO_MCP_HEADER_VALUE,
     refreshContext: tokens.refresh_token
       ? {
           env,

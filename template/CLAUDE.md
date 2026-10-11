@@ -70,6 +70,8 @@ tests/
 | `UMBRACO_CLIENT_ID` | `--umbraco-client-id` | OAuth client ID |
 | `UMBRACO_CLIENT_SECRET` | `--umbraco-client-secret` | OAuth client secret |
 | `UMBRACO_BASE_URL` | `--umbraco-base-url` | Umbraco instance URL |
+| `UMBRACO_MCP_HEADER_NAME` | - | Optional name of the identifying header sent on every request to Umbraco (default `X-Umbraco-Mcp`) |
+| `UMBRACO_MCP_HEADER_VALUE` | - | Optional header value (treat as a secret, e.g. for a firewall allow-rule). Unset = no header sent |
 | `UMBRACO_TOOL_MODES` | `--umbraco-tool-modes` | Comma-separated modes |
 | `UMBRACO_INCLUDE_SLICES` | `--umbraco-include-slices` | Include only these slices |
 | `UMBRACO_EXCLUDE_SLICES` | `--umbraco-exclude-slices` | Exclude these slices |

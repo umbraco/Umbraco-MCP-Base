@@ -88,6 +88,14 @@ describe("umbracoCloudSiteRouting", () => {
     expect(site?.oauthClientSecret).toBe("secret-for-abc");
   });
 
+  it("does not send the MCP header on the discovery probe (host is request-derived)", async () => {
+    fetchSpy.mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await config.resolveSite("abc", { ...env, UMBRACO_MCP_HEADER_VALUE: "secret" });
+    const init = fetchSpy.mock.calls[0][1] as RequestInit | undefined;
+    expect(new Headers(init?.headers).has("X-Umbraco-Mcp")).toBe(false);
+  });
+
   it("returns null when the project's discovery probe is non-2xx", async () => {
     fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
