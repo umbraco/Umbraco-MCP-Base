@@ -196,7 +196,7 @@ describe("checkSessionIsolation", () => {
     const midCall = sequential.violations.filter((v) => v.phase === "session-started-mid-call");
     expect(sequential.violations.filter((v) => v.phase === "after-other-session-started")).toEqual([]);
     // ...but A's second request goes out with C's auth once C's call ran while A was paused.
-    expect(midCall.length).toBeGreaterThanOrEqual(1);
+    expect(midCall.map((v) => v.pausePoint)).toEqual([1]);
     expect(midCall[0]).toMatchObject({ session: "A", sentToSession: expect.stringMatching(/^C\d+$/), tokenOfSession: expect.stringMatching(/^C\d+$/) });
   });
 
@@ -234,6 +234,14 @@ describe("checkSessionIsolation", () => {
     expect(report.toolsWithoutMidCallCheck).toEqual(["no-umbraco-call"]);
     const checked = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] });
     expect(checked.toolsWithoutMidCallCheck).toEqual([]);
+  });
+
+  it("caps the pause points per tool and reports tools over the cap", async () => {
+    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-lazy-call-slot" }], maxPausePoints: 1 });
+    expect(report.toolsOverPausePointCap).toEqual(["via-lazy-call-slot"]);
+    const uncapped = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-lazy-call-slot" }] });
+    expect(uncapped.toolsOverPausePointCap).toEqual([]);
+    expect(uncapped.unreachedPausePoints).toEqual([]);
   });
 
   it("doesn't flag a request to its own site that carries no token", async () => {

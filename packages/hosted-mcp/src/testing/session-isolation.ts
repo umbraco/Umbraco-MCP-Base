@@ -100,6 +100,13 @@ export interface SessionIsolationOptions {
   exerciseRefresh?: boolean;
   /** Per-session `props` and `env` overrides, e.g. `consentChoices.siteId` or site routing. */
   sessionOverrides?: (label: string) => { props?: Partial<AuthProps>; env?: Partial<HostedMcpEnv> };
+  /**
+   * Most I/O points to pause a call at, per tool. Each point costs a full call
+   * from the first session plus one from a new session, so a tool with `n`
+   * points costs about `n²` requests. Tools over the cap are listed in
+   * `toolsOverPausePointCap`. Defaults to 20.
+   */
+  maxPausePoints?: number;
 }
 
 /** An outgoing request, as the fake Umbraco saw it. */
@@ -143,6 +150,14 @@ export interface SessionIsolationReport {
    * so concurrent calls weren't checked for them.
    */
   toolsWithoutMidCallCheck: string[];
+  /** Tools with more I/O points than `maxPausePoints`: only the first `maxPausePoints` were paused at. */
+  toolsOverPausePointCap: string[];
+  /**
+   * Pause points that never fired because the repeated call made fewer I/O
+   * points than the baseline (cached tokens skip KV reads; a refresh happens
+   * only on the first call), so nothing was checked at them.
+   */
+  unreachedPausePoints: { tool: string; point: number }[];
 }
 
 const HOST_SUFFIX = ".isolation-check.invalid";
@@ -346,6 +361,9 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
   let checkedRequests = 0;
   const midCallPauses = new Map<string, number>();
   let midCallSessions = 0;
+  const maxPausePoints = options.maxPausePoints ?? 20;
+  const toolsOverPausePointCap: string[] = [];
+  const unreachedPausePoints: { tool: string; point: number }[] = [];
 
   async function callFrom(
     label: string,
@@ -370,6 +388,7 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
         .run(bucket, () => clients.get(label)!.callTool({ name: toolCall.name, arguments: toolCall.arguments ?? {} }))
         .catch(() => undefined);
     } finally {
+      if (pauseAt !== undefined && bucket.onPause) unreachedPausePoints.push({ tool: toolCall.name, point: pauseAt });
       const umbracoRequests = bucket.requests.filter(isUmbracoRequest);
       requestsByTool.set(toolCall.name, (requestsByTool.get(toolCall.name) ?? 0) + umbracoRequests.length);
       for (const request of umbracoRequests) {
@@ -413,7 +432,8 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
       const ioPoints = await callFrom("A", toolCall, "after-other-session-started");
       await callFrom("B", toolCall, "after-other-session-started");
       // A third session starts and calls the tool while A's call is paused at each I/O point in turn.
-      for (let point = 1; point <= ioPoints; point++) {
+      if (ioPoints > maxPausePoints) toolsOverPausePointCap.push(toolCall.name);
+      for (let point = 1; point <= Math.min(ioPoints, maxPausePoints); point++) {
         await callFrom("A", toolCall, "session-started-mid-call", point);
       }
     }
@@ -428,6 +448,8 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
     checkedRequests,
     toolsWithoutRequests: options.toolCalls.map((t) => t.name).filter((name) => !requestsByTool.get(name)),
     toolsWithoutMidCallCheck: options.toolCalls.map((t) => t.name).filter((name) => !midCallPauses.get(name)),
+    toolsOverPausePointCap,
+    unreachedPausePoints,
   };
 }
 
@@ -456,6 +478,12 @@ export async function assertSessionIsolation(
   const unpaused = report.toolsWithoutMidCallCheck.filter((name) => !report.toolsWithoutRequests.includes(name));
   if (unpaused.length > 0) {
     problems.push(`- no session was started mid-call, so concurrent calls weren't checked: ${unpaused.join(", ")}`);
+  }
+  if (report.toolsOverPausePointCap.length > 0) {
+    problems.push(
+      `- more I/O points than maxPausePoints, so later points weren't checked: ${report.toolsOverPausePointCap.join(", ")} ` +
+        `(raise maxPausePoints)`,
+    );
   }
   if (problems.length > 0) {
     throw new Error(
