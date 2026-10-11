@@ -23,6 +23,11 @@ export interface GenerateContextOptions {
   user?: unknown;
   /** Optional filter configuration — when provided, only matching tools are included */
   filterConfig?: CollectionConfiguration;
+  /**
+   * Raw version string of the connected Umbraco site, passed to collection
+   * `tools()` so version-gated tools match it. Omit when no site is connected.
+   */
+  umbracoVersion?: string;
 }
 
 /**
@@ -53,7 +58,7 @@ export function generateContextFile(
 
     let tools: ReturnType<typeof collection.tools>;
     try {
-      tools = collection.tools(options?.user);
+      tools = collection.tools(options?.user, { umbracoVersion: options?.umbracoVersion });
     } catch {
       tools = [];
     }

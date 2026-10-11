@@ -12,7 +12,12 @@ import type { ToolModeDefinition } from "../types/tool-mode.js";
  * Implemented by StdioConnection (child process) and InProcessConnection (direct handler calls).
  */
 export interface McpConnection {
-  listTools(): Promise<{
+  /**
+   * @param context - Optional caller tool-call `context`/`extra`. In-process
+   *   connections read the carried Umbraco version from it to decide which
+   *   tools to list; stdio connections ignore it.
+   */
+  listTools(context?: unknown): Promise<{
     tools: Array<{
       name: string;
       description?: string;
@@ -20,9 +25,16 @@ export interface McpConnection {
     }>;
   }>;
 
+  /**
+   * @param context - Optional caller tool-call `context`/`extra`. In-process
+   *   connections forward only the carried request values (Umbraco version and
+   *   telemetry) into the chained handler's `extra`, falling back to the active
+   *   `runWithRequestContext` store when omitted; stdio connections ignore it.
+   */
   callTool(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    context?: unknown
   ): Promise<{
     content: Array<{ type: string; text?: string }>;
     structuredContent?: unknown;

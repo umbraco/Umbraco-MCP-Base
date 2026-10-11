@@ -36,7 +36,9 @@ export class StdioConnection implements McpConnection {
     await this.client.connect(transport);
   }
 
-  async listTools(): Promise<{
+  // `context` is accepted for interface symmetry and ignored: nothing
+  // request-scoped crosses the process boundary.
+  async listTools(_context?: unknown): Promise<{
     tools: Array<{
       name: string;
       description?: string;
@@ -56,6 +58,7 @@ export class StdioConnection implements McpConnection {
   async callTool(
     name: string,
     args: Record<string, unknown>,
+    _context?: unknown,
   ): Promise<{
     content: Array<{ type: string; text?: string }>;
     structuredContent?: unknown;
