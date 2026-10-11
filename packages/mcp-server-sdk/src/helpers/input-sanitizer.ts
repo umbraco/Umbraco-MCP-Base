@@ -365,6 +365,7 @@ function sanitizeAgainstSchema(
  * String leaves whose key ends in `password` or `secret` (case-insensitive)
  * skip the path-traversal, query-param and pre-encoded checks but still get the
  * control-character check. Use `[raw]` for secret fields the name rule misses.
+ * Don't route such a field into a URL path — it would lose the URL-shaped checks.
  *
  * Fields whose `.describe()` contains the `[raw]` marker are skipped:
  * - On a `ZodString` field → that string passes through unsanitised.
@@ -405,7 +406,8 @@ export function withInputSanitization<
             // standalone-consumable (in-process MCP, tests). Fall back to
             // string sanitisation so a path-traversal/control-char value
             // can't reach the handler if the caller didn't run validation.
-            sanitizeStringLeaf(value, key, key);
+            // The key is caller-chosen, so it never relaxes the checks.
+            sanitizeStringLeaf(value, key, undefined);
           }
         }
       }

@@ -303,9 +303,33 @@ describe("withInputSanitization", () => {
       expect(arr.call).not.toThrow();
     });
 
-    it("applies to the top-level fallback for keys not in the schema", () => {
-      expect(run({ other: z.string() }, { password: nasty }).call).not.toThrow();
+    it("does not relax undeclared top-level keys, whatever their name", () => {
+      expect(run({ other: z.string() }, { password: nasty }).call).toThrow(ToolValidationError);
+      expect(run({ other: z.string() }, { secret: "../x" }).call).toThrow(ToolValidationError);
       expect(run({ other: z.string() }, { id: nasty }).call).toThrow(ToolValidationError);
+    });
+
+    it("relaxes optional and nullable password fields (Orval shapes)", () => {
+      expect(run({ password: z.string().optional() }, { password: nasty }).call).not.toThrow();
+      expect(run({ password: z.string().nullable() }, { password: nasty }).call).not.toThrow();
+    });
+
+    it("relaxes a password field typed as a union containing a string", () => {
+      const schema = { password: z.union([z.string(), z.number()]) };
+      expect(run(schema, { password: nasty }).call).not.toThrow();
+    });
+
+    it("relaxes password inside objects in an array", () => {
+      const schema = { users: z.array(z.object({ password: z.string() })) };
+      expect(run(schema, { users: [{ password: nasty }] }).call).not.toThrow();
+    });
+
+    it("matches the name case-insensitively", () => {
+      expect(run({ PASSWORD: z.string() }, { PASSWORD: nasty }).call).not.toThrow();
+    });
+
+    it("still checks secretary (secret is not a suffix)", () => {
+      expect(run({ secretary: z.string() }, { secretary: "a?b" }).call).toThrow(ToolValidationError);
     });
 
     it("does not let caller-chosen z.record keys opt out of the checks", () => {
