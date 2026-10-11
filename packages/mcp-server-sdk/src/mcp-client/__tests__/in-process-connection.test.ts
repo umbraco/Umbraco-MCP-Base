@@ -453,6 +453,42 @@ describe("InProcessConnection request-scoped context", () => {
     expect(getUmbracoVersion(activeInHandler)).toBe("17.6.1");
   });
 
+  it("lets a nested chain made with no context inherit the outer call's explicit version", async () => {
+    let innerVersion: string | undefined;
+    const connection: InProcessConnection = new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [
+        {
+          metadata: { name: "nested", displayName: "Nested", description: "" },
+          tools: () => [
+            createToolDef({
+              name: "outer",
+              description: "Chains to inner with no context",
+              slices: ["read"],
+              handler: async () => connection.callTool("inner", {}) as any,
+            }),
+            createToolDef({
+              name: "inner",
+              description: "Records the version it sees",
+              slices: ["read"],
+              handler: async (_args: unknown, extra: unknown) => {
+                innerVersion = getUmbracoVersion(extra);
+                return { content: [{ type: "text" as const, text: "ok" }] };
+              },
+            }),
+          ],
+        },
+      ],
+    });
+
+    await runWithRequestContext({ [UMBRACO_VERSION_CONTEXT_KEY]: "17.5.0" }, () =>
+      connection.callTool("outer", {}, { [UMBRACO_VERSION_CONTEXT_KEY]: "17.6.1" }),
+    );
+
+    expect(innerVersion).toBe("17.6.1");
+  });
+
   it("carries nothing outside a store with no explicit context", async () => {
     const seen: unknown[] = [];
     const connection = new InProcessConnection({

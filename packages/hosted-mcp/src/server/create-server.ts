@@ -31,6 +31,9 @@ import {
   runWithRequestContext,
   getActiveRequestContext,
   pickCarriedRequestContext,
+  isRequestContextStoreAvailable,
+  requireRequestContext,
+  toolCallExtraIndex,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
   useDraft202012ToolSchemas,
@@ -486,6 +489,15 @@ async function initPerRequestServer(
   props: AuthProps,
   initSpan: TelemetrySpan
 ): Promise<McpServer> {
+  // Per-session values live only in the request store; without it a handler
+  // would read module slots that another session may own.
+  if (!isRequestContextStoreAvailable()) {
+    throw new Error(
+      "mcp-hosted requires AsyncLocalStorage (nodejs_compat_v2 on Cloudflare Workers) to keep per-session state separate."
+    );
+  }
+  requireRequestContext();
+
   // Trace logging so `wrangler tail` makes wake-vs-cold visible. The
   // agents-mcp runtime is supposed to run `init()` (and therefore this
   // function) on every Durable Object start, but it's easy to lose track
@@ -637,10 +649,10 @@ async function initPerRequestServer(
   // Deliberately NOT written to the SDK's module-level slots
   // (`setCustomTransport` / `configureApiClient`): module scope is shared by
   // every Durable Object — i.e. every MCP session — in the isolate, so those
-  // would be last-session-wins. Outside the store, `getApiClient()` fails
-  // loudly with "API client not configured" and `UmbracoManagementClient`
-  // falls through to the SDK's default (uninitialised) transport, instead of
-  // silently using another session's client. See umbraco/Umbraco-MCP-Base#383.
+  // would be last-session-wins. Hosted turns on `requireRequestContext()`, so
+  // outside the store `getApiClient()`, `getServerRef()` and
+  // `UmbracoManagementClient` throw "outside a request context" instead of
+  // silently using another session's value. See umbraco/Umbraco-MCP-Base#383.
   const session: RequestSessionContext = {
     transport: fetchClient as unknown as RequestTransport,
     server: server.server,
@@ -772,8 +784,18 @@ export function runInSessionContext<T>(server: McpServer, fn: () => T): T {
   }
   return runWithRequestContext(
     { ...pickCarriedRequestContext(getActiveRequestContext()), ...session },
-    fn
+    () => {
+      assertStoreActive("runInSessionContext");
+      return fn();
+    }
   );
+}
+
+/** Fails hard when the store did not take, instead of running on module scope. */
+function assertStoreActive(caller: string): void {
+  if (getActiveRequestContext() === undefined) {
+    throw new Error(`${caller}: no request context is active, so this session's state cannot be entered.`);
+  }
 }
 
 /**
@@ -796,12 +818,13 @@ export function withRequestSessionContext<Callback extends (...args: any[]) => a
     return callback;
   }
   return function enterSessionContext(this: unknown, ...params: any[]) {
-    // `extra` is the last argument: `(args, extra)` with an input schema,
-    // `(extra)` without. Only its carried, namespaced keys are picked.
-    const extra = params[params.length - 1];
-    return runWithRequestContext({ ...pickCarriedRequestContext(extra), ...session }, () =>
-      callback.apply(this, params)
-    );
+    // `extra` is `(args, extra)` with an input schema, `(extra)` without.
+    // Only its carried, namespaced keys are picked.
+    const extra = params[toolCallExtraIndex(params)];
+    return runWithRequestContext({ ...pickCarriedRequestContext(extra), ...session }, () => {
+      assertStoreActive("tool call");
+      return callback.apply(this, params);
+    });
   } as Callback;
 }
 

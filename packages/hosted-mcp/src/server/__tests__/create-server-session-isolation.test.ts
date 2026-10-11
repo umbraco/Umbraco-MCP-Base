@@ -21,6 +21,10 @@ import {
   getApiClient,
   getServerRef,
   getSessionUmbracoAuth,
+  configureApiClient,
+  setCustomTransport,
+  setServerRef,
+  clearServerRef,
   confirmAction,
   type ToolCollectionExport,
   type ToolDefinition,
@@ -295,16 +299,16 @@ describe("createPerRequestServer keeps per-session state per session", () => {
   });
 
   it("leaves the module-level transport and API client unset after two sessions start", async () => {
-    // Outside any tool call there is no store, so these read the module
-    // fallbacks — which hosted must never write.
-    expect(() => getApiClient()).toThrow("API client not configured");
+    // Outside any tool call there is no store, and hosted has required one,
+    // so the module fallbacks (which hosted must never write) are not read.
+    expect(() => getApiClient()).toThrow("outside a request context");
     await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow(
-      "UmbracoFetch not initialized"
+      "outside a request context"
     );
   });
 
   it("leaves the module-level server ref unset after sessions start", () => {
-    expect(() => getServerRef()).toThrow("Server reference not set");
+    expect(() => getServerRef()).toThrow("outside a request context");
   });
 
   it("a chained clientFactory client that calls UmbracoManagementClient uses each session's own transport", async () => {
@@ -362,10 +366,47 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     serverA.registerTool("direct", { description: "direct" }, async () => ({
       content: [{ type: "text" as const, text: JSON.stringify({ via: (getServerRef() as any).__session }) }],
     }));
-    await expect(call(serverA, "direct")).rejects.toThrow("Server reference not set");
-    expect(() => getApiClient()).toThrow("API client not configured");
+    await expect(call(serverA, "direct")).rejects.toThrow("outside a request context");
+    expect(() => getApiClient()).toThrow("outside a request context");
     // The transport must not leak in from another session either.
     await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow();
+  });
+
+  it("never reads module slots that belong to no session, even when they are filled", async () => {
+    const stray = jest.fn(async () => ({ via: "stray-module-slot" }));
+    configureApiClient(() => ({ who: stray }));
+    setCustomTransport(stray as any);
+    setServerRef({ __session: "stray" } as any);
+    try {
+      serverA.registerTool("direct-stray", { description: "direct" }, async () => ({
+        content: [{ type: "text" as const, text: JSON.stringify({ via: (getServerRef() as any).__session }) }],
+      }));
+      await expect(call(serverA, "direct-stray")).rejects.toThrow("outside a request context");
+      expect(() => getApiClient()).toThrow("outside a request context");
+      await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow(
+        "outside a request context"
+      );
+      expect(stray).not.toHaveBeenCalled();
+    } finally {
+      setCustomTransport(null as any);
+      configureApiClient(null as any);
+      clearServerRef();
+    }
+  });
+
+  it("server start-up fails when the request store cannot be created", async () => {
+    const original = process.getBuiltinModule;
+    (process as any).getBuiltinModule = () => undefined;
+    try {
+      await jest.isolateModulesAsync(async () => {
+        const { createPerRequestServer } = await import("../create-server.js");
+        await expect(createPerRequestServer(options, env, propsFor("A"))).rejects.toThrow(
+          "requires AsyncLocalStorage"
+        );
+      });
+    } finally {
+      (process as any).getBuiltinModule = original;
+    }
   });
 
   it("runInSessionContext enters the session's store for code registered directly on the server", async () => {

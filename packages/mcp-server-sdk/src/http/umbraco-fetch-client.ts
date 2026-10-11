@@ -26,7 +26,7 @@
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { normalizeBaseUrl } from "../helpers/url.js";
-import { getActiveRequestContext } from "../request-context/async-request-context.js";
+import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
  * Authentication configuration for Umbraco API.
@@ -428,7 +428,13 @@ export const UmbracoManagementClient = <T>(
     return sessionTransport<T>(config, options);
   }
 
-  // Module-level custom transport (stdio, CLI, tests)
+  // Module-level values (stdio, CLI, tests); hosts that require a request
+  // context never reach them.
+  try {
+    assertModuleFallbackAllowed("UmbracoManagementClient");
+  } catch (error) {
+    return Promise.reject(error);
+  }
   if (customTransport) {
     return customTransport<T>(config, options);
   }

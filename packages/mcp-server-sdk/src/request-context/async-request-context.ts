@@ -115,6 +115,7 @@ export interface RequestContextStore extends CarriedRequestContext, RequestSessi
 type Store = AsyncLocalStorage<Readonly<RequestContextStore>>;
 
 let store: Store | null | undefined;
+let warnedMissingStore = false;
 
 /** The store, created on first use; `null` when `node:async_hooks` is unavailable. */
 function getStore(): Store | null {
@@ -128,6 +129,59 @@ function getStore(): Store | null {
     }
   }
   return store;
+}
+
+/**
+ * Whether the request-context store could be created in this runtime.
+ *
+ * When it is `false`, only an explicit `context` carries the version and
+ * tenant into chained calls; a call made by a helper that never received
+ * `extra` falls back to the oldest tool variants. Hosts that depend on the
+ * store can check this at start-up and fail hard.
+ */
+export function isRequestContextStoreAvailable(): boolean {
+  return getStore() !== null;
+}
+
+let requestContextRequired = false;
+
+/**
+ * Makes `getApiClient()`, `getServerRef()` and `UmbracoManagementClient` throw
+ * instead of falling back to their module-level values (`configureApiClient`,
+ * `setServerRef`, `setCustomTransport`) whenever no store is active.
+ *
+ * Hosts that run several sessions in one isolate turn this on: a module value
+ * there may belong to a different session, so reading it would cross sessions.
+ * Stdio, CLI and tests leave it off.
+ */
+export function requireRequestContext(): void {
+  requestContextRequired = true;
+}
+
+/**
+ * Resets {@link requireRequestContext}, restoring the module-value fallback.
+ * Test-only: hosts must never call it. `requireRequestContext` sets a
+ * process-wide flag, so a suite that exercises the hosted path should call this
+ * in `afterEach` to keep later stdio / module-value tests working.
+ */
+export function resetRequireRequestContext(): void {
+  requestContextRequired = false;
+}
+
+/**
+ * Throws when a host has required the request context. Called by the
+ * accessors only after they found no session value for their own key, whether
+ * no store is active or the active one lacks that key (e.g. a chained call
+ * entered outside the session store), so a module-level value is never used.
+ *
+ * @param what - The accessor name, for the error message
+ */
+export function assertModuleFallbackAllowed(what: string): void {
+  if (requestContextRequired) {
+    throw new Error(
+      `${what} was called outside a request context that carries this session's value. This host requires per-session values, so module-level values are not used (they may belong to another session).`
+    );
+  }
 }
 
 /**
@@ -195,6 +249,13 @@ function pickSessionContext(values: unknown): RequestSessionContext {
 export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
   const active = getStore();
   if (!active) {
+    if (!warnedMissingStore) {
+      warnedMissingStore = true;
+      console.warn(
+        "[umbraco-mcp] AsyncLocalStorage is unavailable (needs Node 22.3+ or nodejs_compat); " +
+          "chained calls will not inherit the Umbraco version or tenant unless an explicit context is passed.",
+      );
+    }
     return fn();
   }
   return active.run(
