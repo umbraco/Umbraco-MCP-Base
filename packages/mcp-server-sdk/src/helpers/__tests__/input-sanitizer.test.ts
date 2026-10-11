@@ -255,14 +255,6 @@ describe("withInputSanitization", () => {
     expect(handler).toHaveBeenCalled();
   });
 
-  // ---------------------------------------------------------------------------
-  // Nested-object handling (issue umbraco/Umbraco-MCP-Base#133)
-  //
-  // Hosts like ChatGPT inject structured payloads via `_meta.openai/fileParams`
-  // — the handler MUST receive the object exactly as the host sent it. The
-  // sanitiser is allowed to walk INTO the object to reject bad string content
-  // at any depth, but is not allowed to reshape, reorder, or substitute it.
-  // ---------------------------------------------------------------------------
   describe("secret field name rule", () => {
     const run = (schema: any, input: any) => {
       const handler = jest.fn().mockReturnValue({ content: [] });
@@ -316,11 +308,31 @@ describe("withInputSanitization", () => {
       expect(run({ other: z.string() }, { id: nasty }).call).toThrow(ToolValidationError);
     });
 
+    it("does not let caller-chosen z.record keys opt out of the checks", () => {
+      const schema = { headers: z.record(z.string(), z.string()) };
+      expect(run(schema, { headers: { password: "a?b" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { headers: { "x.secret": "../x" } }).call).toThrow(ToolValidationError);
+    });
+
+    it("still relaxes a declared secret field nested under a record value", () => {
+      const schema = { users: z.record(z.string(), z.object({ password: z.string() })) };
+      expect(run(schema, { users: { bob: { password: nasty } } }).call).not.toThrow();
+    });
+
     it("rejects a secret-like field the name rule misses, unless marked [raw]", () => {
       expect(run({ pin: z.string() }, { pin: nasty }).call).toThrow(ToolValidationError);
       expect(run({ pin: z.string().describe(RAW_FIELD_MARKER) }, { pin: nasty }).call).not.toThrow();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Nested-object handling (issue umbraco/Umbraco-MCP-Base#133)
+  //
+  // Hosts like ChatGPT inject structured payloads via `_meta.openai/fileParams`
+  // — the handler MUST receive the object exactly as the host sent it. The
+  // sanitiser is allowed to walk INTO the object to reject bad string content
+  // at any depth, but is not allowed to reshape, reorder, or substitute it.
+  // ---------------------------------------------------------------------------
 
   describe("nested object handling", () => {
     it("passes a nested object through to the handler structurally intact", () => {
