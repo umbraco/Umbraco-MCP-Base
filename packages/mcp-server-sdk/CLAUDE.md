@@ -69,7 +69,7 @@ src/
 - `configureApiClient` - Set up the API client provider
 
 **HTTP Client:**
-- `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
+- `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret (optional `headerName`/`headerValue`: identifying header, default name `X-Umbraco-Mcp`, sent on every Umbraco request incl. token request; unset value = no header; template env vars `UMBRACO_MCP_HEADER_NAME` / `UMBRACO_MCP_HEADER_VALUE`)
 - `UmbracoManagementClient` - Orval mutator for generated API clients
 - `createUmbracoFetchClient` - Factory for custom client instances (advanced)
 

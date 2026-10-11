@@ -61,8 +61,12 @@ import {
 const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:44391";
 const clientId = process.env.UMBRACO_CLIENT_ID || "";
 const clientSecret = process.env.UMBRACO_CLIENT_SECRET || "";
+// Optional identifying header sent on every request to Umbraco (e.g. so a firewall
+// allow-rule can recognise MCP traffic). Unset value = no header.
+const headerName = process.env.UMBRACO_MCP_HEADER_NAME || undefined;
+const headerValue = process.env.UMBRACO_MCP_HEADER_VALUE || undefined;
 if (clientId) {
-  initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+  initializeUmbracoFetch({ baseUrl, clientId, clientSecret, headerName, headerValue });
 }
 
 // Configure the API client for use with toolkit helpers

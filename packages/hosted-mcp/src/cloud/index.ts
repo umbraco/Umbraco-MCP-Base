@@ -27,6 +27,7 @@
  */
 
 import type { HostedMcpEnv } from "../types/env.js";
+import { buildMcpHeader } from "../http/mcp-header.js";
 import type {
   SiteConfig,
   SiteRoutingConfig,
@@ -208,12 +209,13 @@ export function umbracoCloudSiteRouting(
 async function defaultValidateProject(
   _siteId: string,
   baseUrl: string,
-  _env: HostedMcpEnv
+  env: HostedMcpEnv
 ): Promise<boolean> {
   try {
     const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
       method: "GET",
       redirect: "manual",
+      headers: buildMcpHeader(env),
       signal: AbortSignal.timeout(5_000),
     });
     response.body?.cancel();

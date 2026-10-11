@@ -10,6 +10,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 import { logAuth } from "./log.js";
 import { AUTH_REFRESH_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
 import { sanitizeForLog } from "../util/log-sanitize.js";
+import { buildMcpHeader } from "../http/mcp-header.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -587,7 +588,10 @@ async function performRefresh(
         try {
           resp = await fetch(endpoints.token_endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              ...buildMcpHeader(env),
+            },
             body: params.toString(),
           });
         } catch (error) {

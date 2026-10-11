@@ -90,6 +90,8 @@ src/
 
 ## Security
 
+**Optional identifying header:** set `UMBRACO_MCP_HEADER_VALUE` (and optionally `UMBRACO_MCP_HEADER_NAME`, default `X-Umbraco-Mcp`) to send a fixed header on every server-side request to Umbraco (API calls, OAuth token exchange, token refresh, `/umbraco` reachability check), so an IP allow-list firewall can recognise MCP traffic. Unset value = no header. The value is a firewall bypass token: set it with `wrangler secret put UMBRACO_MCP_HEADER_VALUE`, not `[vars]`. One value per Worker (no per-site override). The browser-driven `/authorize` redirect cannot carry it and needs its own allow rule. Implemented by `buildMcpHeader` in `src/http/mcp-header.ts`.
+
 The package implements the MCP Authorization spec's Third-Party Authorization Flow:
 - Token passthrough forbidden (Worker issues its own tokens)
 - Per-client consent screen before Umbraco redirect (with optional tool selection)

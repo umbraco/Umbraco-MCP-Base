@@ -77,6 +77,12 @@ export interface HostedMcpEnv {
   /** OAuth client secret (optional, only needed for confidential clients) */
   UMBRACO_OAUTH_CLIENT_SECRET?: string;
 
+  // Optional identifying header on server-side requests to Umbraco
+  /** Header name sent on every server-side Umbraco request (default `X-Umbraco-Mcp`) */
+  UMBRACO_MCP_HEADER_NAME?: string;
+  /** Header value (sensitive - set via `wrangler secret put`). Unset = no header is sent. */
+  UMBRACO_MCP_HEADER_VALUE?: string;
+
   // Cookie/session encryption
   /** Encryption key for session cookies (hex string, 32 bytes) */
   COOKIE_ENCRYPTION_KEY: string;
