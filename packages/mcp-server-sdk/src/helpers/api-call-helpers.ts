@@ -57,9 +57,28 @@ export interface HttpResponse<T = unknown> {
  */
 export class UmbracoApiError extends Error {
   constructor(public readonly problemDetails: ProblemDetails) {
-    super(problemDetails.detail || `API error: ${problemDetails.status}`);
+    super(problemDetails.detail || problemDetails.title || `HTTP ${problemDetails.status}`);
     this.name = 'UmbracoApiError';
   }
+}
+
+const MAX_STRING_BODY_DETAIL = 500;
+
+/**
+ * Builds ProblemDetails from an error response so the HTTP status is never lost.
+ * A string body (e.g. an HTML 502 from a proxy) becomes `detail`, capped in length;
+ * an object body keeps its own `status` if it supplies one; an empty body falls back
+ * to the status text.
+ */
+function toProblemDetails(response: HttpResponse<unknown>): ProblemDetails {
+  const body = response.data;
+  if (typeof body === 'string' && body.trim()) {
+    return { status: response.status, detail: body.trim().slice(0, MAX_STRING_BODY_DETAIL) };
+  }
+  if (body && typeof body === 'object') {
+    return { status: response.status, ...(body as ProblemDetails) };
+  }
+  return { status: response.status, detail: response.statusText };
 }
 
 /**
@@ -247,10 +266,7 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
   }
 
   // Error - throw for decorator to handle
-  let errorData: ProblemDetails = (response.data as ProblemDetails) || {
-    status: response.status,
-    detail: response.statusText,
-  };
+  let errorData: ProblemDetails = toProblemDetails(response);
 
   if (options?.transformError) {
     errorData = options.transformError(errorData);
@@ -284,11 +300,7 @@ export function processVoidResponse(
   }
 
   // Error status codes (400+, 500+, etc.) - throw for decorator to handle
-  const errorData: ProblemDetails = response.data || {
-    status: response.status,
-    detail: response.statusText,
-  };
-  throw new UmbracoApiError(errorData);
+  throw new UmbracoApiError(toProblemDetails(response));
 }
 
 /**
