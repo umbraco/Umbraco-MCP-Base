@@ -18,6 +18,7 @@ import {
   withStandardDecorators,
   createToolResult,
   UmbracoApiError,
+  toProblemDetails,
   CAPTURE_RAW_HTTP_RESPONSE,
   getApiClient,
   ToolDefinition,
@@ -78,12 +79,8 @@ const createExampleTool: ToolDefinition<typeof inputSchema, typeof outputSchema>
     // Check for success (201 Created)
     if (response.status !== 201) {
       // Throw UmbracoApiError - caught by withStandardDecorators
-      // Cast response.data since it may contain ProblemDetails on error
-      const errorData = response.data as Record<string, unknown> | undefined;
-      throw new UmbracoApiError(errorData || {
-        status: response.status,
-        detail: response.statusText,
-      });
+      // toProblemDetails keeps the HTTP status even when the body has none (or isn't JSON)
+      throw new UmbracoApiError(toProblemDetails(response));
     }
 
     // Extract the location header to get the created item's ID

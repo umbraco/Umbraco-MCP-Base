@@ -57,9 +57,45 @@ export interface HttpResponse<T = unknown> {
  */
 export class UmbracoApiError extends Error {
   constructor(public readonly problemDetails: ProblemDetails) {
-    super(problemDetails.detail || `API error: ${problemDetails.status}`);
+    super(UmbracoApiError.formatMessage(problemDetails));
     this.name = 'UmbracoApiError';
   }
+
+  /** `detail`, else `<title> (HTTP <status>)`, else `HTTP <status>` — never contains `undefined`. */
+  private static formatMessage({ detail, title, status }: ProblemDetails): string {
+    if (detail) return detail;
+    if (title) return status === undefined ? title : `${title} (HTTP ${status})`;
+    return `HTTP ${status ?? 'error'}`;
+  }
+}
+
+/** Longest string body kept as `detail`, so an HTML error page can't flood the tool result. */
+const MAX_STRING_DETAIL_LENGTH = 500;
+
+/**
+ * Builds ProblemDetails from an error response, always carrying the HTTP status.
+ * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
+ * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText` as the `title`, so the message keeps the status.
+ * Use this wherever you construct an `UmbracoApiError` from a raw response.
+ */
+export function toProblemDetails(
+  response: Pick<HttpResponse<unknown>, 'status' | 'statusText' | 'data'>
+): ProblemDetails {
+  const body = response.data;
+  if (typeof body === 'string' && body.trim()) {
+    return { status: response.status, detail: body.trim().slice(0, MAX_STRING_DETAIL_LENGTH) };
+  }
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const problem = body as ProblemDetails;
+    const status = typeof problem.status === 'number' ? problem.status : response.status;
+    if (!problem.detail && !problem.title && response.statusText) {
+      return { ...problem, status, title: response.statusText };
+    }
+    return { ...problem, status };
+  }
+  return response.statusText
+    ? { status: response.status, title: response.statusText }
+    : { status: response.status };
 }
 
 /**
@@ -247,10 +283,7 @@ async function executeApiCallInternal<T = unknown, TClient = any>(
   }
 
   // Error - throw for decorator to handle
-  let errorData: ProblemDetails = (response.data as ProblemDetails) || {
-    status: response.status,
-    detail: response.statusText,
-  };
+  let errorData: ProblemDetails = toProblemDetails(response);
 
   if (options?.transformError) {
     errorData = options.transformError(errorData);
@@ -284,11 +317,7 @@ export function processVoidResponse(
   }
 
   // Error status codes (400+, 500+, etc.) - throw for decorator to handle
-  const errorData: ProblemDetails = response.data || {
-    status: response.status,
-    detail: response.statusText,
-  };
-  throw new UmbracoApiError(errorData);
+  throw new UmbracoApiError(toProblemDetails(response));
 }
 
 /**
