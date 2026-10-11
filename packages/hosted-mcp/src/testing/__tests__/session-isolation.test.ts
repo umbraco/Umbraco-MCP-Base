@@ -19,6 +19,8 @@ let lazyCallSlot: { baseUrl: string; accessToken: string } | null = null;
 
 /** Written, then read after awaits that aren't Umbraco requests or after a later request. */
 let slotAfterKv: { baseUrl: string; accessToken: string } | null = null;
+/** The check's KV, captured from `init` so a tool can await a read from it. */
+let probeKv: KVNamespace | null = null;
 let slotAfterFetch: { baseUrl: string; accessToken: string } | null = null;
 
 const collection: ToolCollectionExport = {
@@ -64,11 +66,11 @@ const collection: ToolCollectionExport = {
     },
     {
       name: "write-kv-read",
-      description: "Writes a module slot, awaits a KV read, then reads the slot.",
+      description: "Writes a module slot, awaits a read from the check's KV, then uses the slot for its only request.",
       slices: ["read"],
       handler: async () => {
         slotAfterKv = await getSessionUmbracoAuth();
-        await UmbracoManagementClient({ url: "/umbraco/management/api/v1/probe", method: "GET" });
+        await probeKv!.get("probe");
         const res = await fetch(`${slotAfterKv.baseUrl}/umbraco/management/api/v1/second`, {
           headers: { authorization: `Bearer ${slotAfterKv.accessToken}` },
         });
@@ -203,9 +205,18 @@ describe("checkSessionIsolation", () => {
     expect(report.violations.filter((v) => v.phase === "session-started-mid-call").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("catches a slot written, then read after another await (write -> KV await -> read)", async () => {
-    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "write-kv-read" }] });
-    expect(report.violations.some((v) => v.phase === "session-started-mid-call")).toBe(true);
+  it("catches a slot written, then read after a KV await (write -> KV await -> read)", async () => {
+    const report = await checkSessionIsolation(serverOptions, {
+      toolCalls: [{ name: "write-kv-read" }],
+      init: ({ env }) => {
+        probeKv = env.OAUTH_KV;
+      },
+    });
+    // The only request is made after the KV read, so only a pause at the KV read can see the leak.
+    const midCall = report.violations.filter((v) => v.phase === "session-started-mid-call");
+    expect(midCall.length).toBeGreaterThanOrEqual(1);
+    const lastPoint = Math.max(...midCall.map((v) => v.pausePoint ?? 0));
+    expect(midCall.every((v) => v.pausePoint === lastPoint)).toBe(true);
     expect(report.violations.filter((v) => v.phase === "after-other-session-started")).toEqual([]);
   });
 
