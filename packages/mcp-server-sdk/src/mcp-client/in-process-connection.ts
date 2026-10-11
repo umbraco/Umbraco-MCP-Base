@@ -188,8 +188,11 @@ export class InProcessConnection implements McpConnection {
  * nothing. Always a fresh object holding only the namespaced keys.
  */
 function resolveCarriedRequestContext(context: unknown): CarriedRequestContext {
-  if (context !== undefined) {
-    return pickCarriedRequestContext(context);
-  }
-  return pickCarriedRequestContext(getActiveRequestContext());
+  // Per key: an explicit value wins, the store fills whatever it lacks. A
+  // proxy handler always forwards the parent `extra`, which may carry neither
+  // key when the host only entered the store.
+  return {
+    ...pickCarriedRequestContext(getActiveRequestContext()),
+    ...pickCarriedRequestContext(context),
+  };
 }

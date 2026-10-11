@@ -405,6 +405,21 @@ describe("InProcessConnection request-scoped context", () => {
     expect(getUmbracoVersion(seen[0])).toBe("17.5.0");
   });
 
+  it("fills keys the explicit context lacks from the store", async () => {
+    const seen: unknown[] = [];
+    const connection = new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [createVersionedCollection(seen)],
+    });
+
+    await runWithRequestContext({ [UMBRACO_VERSION_CONTEXT_KEY]: "17.6.1" }, () =>
+      connection.callTool("report", {}, { requestId: "outer" }),
+    );
+
+    expect(getUmbracoVersion(seen[0])).toBe("17.6.1");
+  });
+
   it("carries nothing outside a store with no explicit context", async () => {
     const seen: unknown[] = [];
     const connection = new InProcessConnection({

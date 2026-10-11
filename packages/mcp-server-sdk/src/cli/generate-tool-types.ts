@@ -93,11 +93,18 @@ export async function runCodegen(
       continue;
     }
     const byName = new Map<string, ToolDefinition>();
-    for (const t of collection.tools(permissiveUser)) byName.set(t.name, t);
-    for (const t of collection.tools(permissiveUser, {
-      umbracoVersion: CODEGEN_NEWEST_UMBRACO_VERSION,
-    })) {
-      byName.set(t.name, t);
+    for (const list of [
+      collection.tools(permissiveUser),
+      collection.tools(permissiveUser, { umbracoVersion: CODEGEN_NEWEST_UMBRACO_VERSION }),
+    ]) {
+      const seenInList = new Set<string>();
+      for (const t of list) {
+        if (seenInList.has(t.name)) {
+          throw new Error(`Duplicate tool name "${t.name}" within one collection`);
+        }
+        seenInList.add(t.name);
+        byName.set(t.name, t);
+      }
     }
     for (const t of byName.values()) tools.push(t);
   }
