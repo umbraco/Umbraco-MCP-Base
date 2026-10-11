@@ -71,9 +71,9 @@ export const TelemetryAttributes = {
   /** How the call ended — see `ToolOutcome`. */
   OUTCOME: "umbraco.mcp.outcome",
   /**
-   * Problem `title` (or the error class name) of a failed call. Exported as
-   * received, capped in length. Searchable in Tempo only — must never become a
-   * span-metrics dimension (cardinality).
+   * Problem `title` (or the error class name) of a failed call, truncated to
+   * 100 characters. High-cardinality: for trace search only, never a
+   * span-metrics dimension.
    */
   ERROR_TITLE: "umbraco.mcp.error.title",
   /** Problem `status` (or HTTP status) of a failed call. Same dimension rule as `ERROR_TITLE`. */

@@ -18,9 +18,10 @@
  * customer content, and `withErrorHandling` forwards `error.message` and
  * `detail` verbatim — both routinely carry paths, ids and payloads. Only the
  * error's *category*, problem `title`, `status` and `operationStatus` leave
- * this module. The last three are exported as received (a chained or remote
- * side chooses them), so each is type-checked and length-capped, and
- * `operationStatus` must also look like an enum name.
+ * this module. A chained or remote side can choose those three, so each is
+ * type-checked: `title` and `operationStatus` are capped at 100 characters,
+ * `status` must be a finite number, and `operationStatus` must also look like
+ * an enum name.
  */
 
 import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -122,15 +123,29 @@ function problemFields(value: unknown): ProblemFields {
 
 /**
  * Problem fields for a returned `isError` result. The text is whatever the
- * inner decorators produced — for a chained Umbraco 400 it is the
- * JSON-stringified problem details — so a non-JSON body yields nothing.
+ * inner decorators produced — e.g. a chained call whose upstream returned
+ * problem JSON, which `createToolResultError` stringifies — so a non-JSON body
+ * yields nothing.
  */
 function problemFieldsFromResult(result: unknown): ProblemFields {
   try {
     const text = (result as { content?: Array<{ text?: unknown }> }).content?.[0]?.text;
     return typeof text === "string" ? problemFields(JSON.parse(text)) : {};
   } catch {
+    // Non-JSON text is the normal case for plain-string errors.
     return {};
+  }
+}
+
+/**
+ * Runs span bookkeeping so that a failure in it (a malformed error object, a
+ * throwing getter) can never replace the handler's result or error.
+ */
+function observe(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    // Losing an attribute is acceptable; changing the call's outcome is not.
   }
 }
 
@@ -213,21 +228,26 @@ export function withTelemetry<
       let handlerStarted = false;
       const run = async (span: TelemetrySpan) => {
         handlerStarted = true;
+        let result: unknown;
         try {
-          const result = await (originalHandler as (...a: any[]) => any)(...params);
+          result = await (originalHandler as (...a: any[]) => any)(...params);
+        } catch (error) {
+          observe(() => {
+            span.setAttribute(TelemetryAttributes.OUTCOME, classifyThrown(error));
+            setProblemAttributes(span, problemFields(error));
+          });
+          // Rethrow untouched — `withErrorHandling` owns turning this into a
+          // tool result. Telemetry observes; it never changes the outcome.
+          throw error;
+        }
+        observe(() => {
           const outcome = classifyResult(result);
           span.setAttribute(TelemetryAttributes.OUTCOME, outcome);
           if (outcome === "error_result") {
             setProblemAttributes(span, problemFieldsFromResult(result));
           }
-          return result;
-        } catch (error) {
-          span.setAttribute(TelemetryAttributes.OUTCOME, classifyThrown(error));
-          setProblemAttributes(span, problemFields(error));
-          // Rethrow untouched — `withErrorHandling` owns turning this into a
-          // tool result. Telemetry observes; it never changes the outcome.
-          throw error;
-        }
+        });
+        return result;
       };
 
       try {
