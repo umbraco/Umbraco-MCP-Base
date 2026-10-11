@@ -88,9 +88,16 @@ function problemFields(value: unknown): ProblemFields {
   let fallbackStatus: unknown;
 
   if (value instanceof ToolValidationError) {
-    problem = value.details as unknown as Record<string, unknown>;
+    // Flattens `extensions`, which is where a validation error carries
+    // `operationStatus`.
+    problem = value.toProblemDetails();
   } else if (value instanceof UmbracoApiError) {
-    problem = value.problemDetails as Record<string, unknown>;
+    // A non-JSON upstream body (a proxy's HTML 502, say) arrives as a string.
+    problem =
+      typeof value.problemDetails === "object" && value.problemDetails !== null
+        ? (value.problemDetails as Record<string, unknown>)
+        : {};
+    fallbackTitle = value.name;
   } else if (value instanceof Error) {
     const response = (value as { response?: { data?: unknown; status?: unknown } }).response;
     problem =
@@ -130,7 +137,10 @@ function problemFields(value: unknown): ProblemFields {
 function problemFieldsFromResult(result: unknown): ProblemFields {
   try {
     const text = (result as { content?: Array<{ text?: unknown }> }).content?.[0]?.text;
-    return typeof text === "string" ? problemFields(JSON.parse(text)) : {};
+    // Only a JSON object can be problem details; skip parsing anything else.
+    return typeof text === "string" && text.trimStart().startsWith("{")
+      ? problemFields(JSON.parse(text))
+      : {};
   } catch {
     // Non-JSON text is the normal case for plain-string errors.
     return {};

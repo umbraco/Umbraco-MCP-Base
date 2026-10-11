@@ -280,6 +280,54 @@ describe("withTelemetry error details", () => {
     expect(attrs[TelemetryAttributes.ERROR_STATUS]).toBe(404);
   });
 
+  it("falls back to the class name for an UmbracoApiError with a non-JSON body", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.UmbracoApiError("<html>502 Bad Gateway</html>" as any);
+    });
+
+    expect(attrs[TelemetryAttributes.OUTCOME]).toBe("api_error");
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("UmbracoApiError");
+    expect(JSON.stringify(attrs)).not.toContain("Bad Gateway");
+  });
+
+  it("reads operationStatus from a ToolValidationError's extensions", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.ToolValidationError({
+        title: "Bad input",
+        detail: "x",
+        extensions: { operationStatus: "DuplicateName" },
+      });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("DuplicateName");
+  });
+
+  it("records attributes on both spans of a nested chained call", async () => {
+    const ctx = await setup();
+    const problem = JSON.stringify({ title: "Not Found", status: 404, operationStatus: "NotFound" });
+    const inner = ctx.withTelemetry(
+      makeTool({
+        name: "inner",
+        handler: async () => ({ content: [{ type: "text", text: problem }], isError: true }),
+      })
+    );
+    const outer = ctx.withTelemetry(
+      makeTool({
+        name: "outer",
+        // Re-wraps the inner tool's returned error, as a chained proxy does.
+        handler: async () => inner.handler({} as any, {} as any),
+      })
+    );
+    await outer.handler({} as any, {} as any);
+
+    expect(ctx.spans).toHaveLength(2);
+    for (const span of ctx.spans) {
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_TITLE]).toBe("Not Found");
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_STATUS]).toBe(404);
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("NotFound");
+    }
+  });
+
   it("records the title of a thrown ToolValidationError", async () => {
     const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
       throw new ctx.ToolValidationError({ title: "Bad input", detail: "id is required" });
