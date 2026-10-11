@@ -67,15 +67,16 @@ const MAX_STRING_DETAIL_LENGTH = 500;
 
 /**
  * Builds ProblemDetails from an error response, always carrying the HTTP status.
- * A status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
+ * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
  */
 function toProblemDetails(response: HttpResponse<unknown>): ProblemDetails {
   const body = response.data;
   if (typeof body === 'string' && body.trim()) {
     return { status: response.status, detail: body.trim().slice(0, MAX_STRING_DETAIL_LENGTH) };
   }
-  if (body && typeof body === 'object') {
-    return { status: response.status, ...(body as ProblemDetails) };
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const problem = body as ProblemDetails;
+    return { ...problem, status: typeof problem.status === 'number' ? problem.status : response.status };
   }
   return { status: response.status, detail: response.statusText };
 }

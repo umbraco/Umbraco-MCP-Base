@@ -329,6 +329,26 @@ describe("API Call Helpers", () => {
     });
   });
 
+  describe("executeGetApiCall error bodies without status", () => {
+    it.each([
+      ["string body", "  <html>Bad Gateway</html> ", "<html>Bad Gateway</html>"],
+      ["empty object body", {}, undefined],
+      ["null status in body", { status: null, title: "Oops" }, undefined],
+    ] as const)("%s keeps the HTTP status", async (_name, body, detail) => {
+      const { configureApiClient, executeGetApiCall, UmbracoApiError } = await getApiHelpersModule();
+      configureApiClient(() => new MockApiClient());
+
+      const error = await executeGetApiCall(() =>
+        Promise.resolve(createMockHttpResponse(502, body as any, "Bad Gateway"))
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(UmbracoApiError);
+      expect((error as any).problemDetails.status).toBe(502);
+      expect((error as any).problemDetails.detail).toBe(detail);
+      expect((error as any).message).not.toContain("undefined");
+    });
+  });
+
   describe("executeVoidApiCall", () => {
     it("should return success for 200 response", async () => {
       const { configureApiClient, executeVoidApiCall } = await getApiHelpersModule();
