@@ -815,7 +815,7 @@ The SDK provides several subpath exports for tree-shaking:
 
 ## Requirements
 
-- Node.js >= 22.0.0
+- Node.js >= 22.3.0
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
 

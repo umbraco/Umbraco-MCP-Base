@@ -49,6 +49,7 @@ export interface CarriedRequestContext {
 type Store = AsyncLocalStorage<Readonly<CarriedRequestContext>>;
 
 let store: Store | null | undefined;
+let warnedMissingStore = false;
 
 /** The store, created on first use; `null` when `node:async_hooks` is unavailable. */
 function getStore(): Store | null {
@@ -62,6 +63,18 @@ function getStore(): Store | null {
     }
   }
   return store;
+}
+
+/**
+ * Whether the request-context store could be created in this runtime.
+ *
+ * When it is `false`, only an explicit `context` carries the version and
+ * tenant into chained calls; a call made by a helper that never received
+ * `extra` falls back to the oldest tool variants. Hosts that depend on the
+ * store can check this at start-up and fail hard.
+ */
+export function isRequestContextStoreAvailable(): boolean {
+  return getStore() !== null;
 }
 
 /**
@@ -102,6 +115,13 @@ export function pickCarriedRequestContext(context: unknown): CarriedRequestConte
 export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
   const active = getStore();
   if (!active) {
+    if (!warnedMissingStore) {
+      warnedMissingStore = true;
+      console.warn(
+        "[umbraco-mcp] AsyncLocalStorage is unavailable (needs Node 22.3+ or nodejs_compat); " +
+          "chained calls will not inherit the Umbraco version or tenant unless an explicit context is passed.",
+      );
+    }
     return fn();
   }
   return active.run(Object.freeze(pickCarriedRequestContext(values)), fn);

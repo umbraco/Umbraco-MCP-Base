@@ -186,6 +186,7 @@ export {
   runWithRequestContext,
   getActiveRequestContext,
   pickCarriedRequestContext,
+  isRequestContextStoreAvailable,
   type CarriedRequestContext,
 } from "./request-context/async-request-context.js";
 

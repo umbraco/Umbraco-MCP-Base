@@ -36,9 +36,11 @@
  * inside a handler, by a helper that never received `extra`, still carries
  * the caller's tenant/region/login into the chained handler
  * (`InProcessConnection.callTool` uses an explicit `context` when given and
- * falls back to the store). The cost is that hosted Workers need
- * `nodejs_compat` / `nodejs_compat_v2` for `node:async_hooks`, which every
- * hosted MCP Worker already sets.
+ * falls back to the store). The store is created lazily
+ * through `process.getBuiltinModule("node:async_hooks")`, so importing the SDK
+ * needs no `async_hooks`; where that is unavailable the store is absent and
+ * only the explicit `context` carries values (see
+ * `isRequestContextStoreAvailable`).
  *
  * ## Shape
  *
