@@ -19,12 +19,15 @@
  *
  * The SDK itself only *reads* the store; entering it is the host's job.
  *
- * Kept in its own file so `node:async_hooks` is only pulled in by the code
- * that actually uses it. Workers need `nodejs_compat` (or `nodejs_compat_v2`)
- * for this import.
+ * `node:async_hooks` is never imported statically: the store is created
+ * lazily on first use through `process.getBuiltinModule`, so importing the SDK
+ * works in runtimes without it (e.g. Workers lacking `nodejs_compat`). Where
+ * it is unavailable the store is simply absent — {@link runWithRequestContext}
+ * runs `fn` as-is and {@link getActiveRequestContext} returns `undefined`, so
+ * only the explicit `context` argument carries values.
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
+import type { AsyncLocalStorage } from "node:async_hooks";
 import {
   TELEMETRY_CONTEXT_KEY,
   getRequestTelemetryContext,
@@ -43,7 +46,23 @@ export interface CarriedRequestContext {
   [UMBRACO_VERSION_CONTEXT_KEY]?: string;
 }
 
-const store = new AsyncLocalStorage<Readonly<CarriedRequestContext>>();
+type Store = AsyncLocalStorage<Readonly<CarriedRequestContext>>;
+
+let store: Store | null | undefined;
+
+/** The store, created on first use; `null` when `node:async_hooks` is unavailable. */
+function getStore(): Store | null {
+  if (store === undefined) {
+    try {
+      const nodeProcess = (globalThis as { process?: NodeJS.Process }).process;
+      const hooks = nodeProcess?.getBuiltinModule?.("node:async_hooks");
+      store = hooks ? new hooks.AsyncLocalStorage() : null;
+    } catch {
+      store = null;
+    }
+  }
+  return store;
+}
 
 /**
  * Picks only the carried, namespaced values off a tool-call `context`.
@@ -81,7 +100,11 @@ export function pickCarriedRequestContext(context: unknown): CarriedRequestConte
  * @returns Whatever `fn` returns
  */
 export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
-  return store.run(Object.freeze(pickCarriedRequestContext(values)), fn);
+  const active = getStore();
+  if (!active) {
+    return fn();
+  }
+  return active.run(Object.freeze(pickCarriedRequestContext(values)), fn);
 }
 
 /**
@@ -89,5 +112,5 @@ export function runWithRequestContext<T>(values: unknown, fn: () => T): T {
  * `undefined` outside one.
  */
 export function getActiveRequestContext(): Readonly<CarriedRequestContext> | undefined {
-  return store.getStore();
+  return getStore()?.getStore();
 }

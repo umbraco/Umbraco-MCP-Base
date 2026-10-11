@@ -30,6 +30,7 @@ import { getUmbracoVersion } from "../umbraco-version/request-context.js";
 import {
   getActiveRequestContext,
   pickCarriedRequestContext,
+  runWithRequestContext,
   type CarriedRequestContext,
 } from "../request-context/async-request-context.js";
 
@@ -110,7 +111,11 @@ export class InProcessConnection implements McpConnection {
     }
 
     try {
-      const result = await match.tool.handler(args, extra as any);
+      // Re-enter the store with the merged values so a chain made from inside
+      // this handler sees them, not an outer store that may differ.
+      const result = await runWithRequestContext(carried, () =>
+        match.tool.handler(args, extra as any),
+      );
       return result as {
         content: Array<{ type: string; text?: string }>;
         structuredContent?: unknown;
