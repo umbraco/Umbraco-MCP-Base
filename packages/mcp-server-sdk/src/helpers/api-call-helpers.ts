@@ -78,7 +78,8 @@ let clientProvider: ClientProvider | null = null;
  *
  * This is a **module-level fallback** for stdio, CLI and tests. An
  * `apiClientProvider` in the active per-request store
- * (`runWithRequestContext`) always wins over it. Hosted code must not call
+ * (`runWithRequestContext`) wins over it; this provider is used whenever the
+ * active store has no `apiClientProvider` (or no store is active). Hosted code must not call
  * this: module scope is shared by every MCP session (Durable Object) in a
  * Cloudflare isolate. Hosted code keeps per-session values (tokens, clients,
  * servers, token keys) in the per-request store and reads them through its

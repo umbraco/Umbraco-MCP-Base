@@ -636,9 +636,10 @@ async function initPerRequestServer(
   // Deliberately NOT written to the SDK's module-level slots
   // (`setCustomTransport` / `configureApiClient`): module scope is shared by
   // every Durable Object — i.e. every MCP session — in the isolate, so those
-  // would be last-session-wins. A hosted call made outside the store fails
-  // loudly with "API client not configured" instead of silently using another
-  // session's client. See umbraco/Umbraco-MCP-Base#383.
+  // would be last-session-wins. Outside the store, `getApiClient()` fails
+  // loudly with "API client not configured" and `UmbracoManagementClient`
+  // falls through to the SDK's default (uninitialised) transport, instead of
+  // silently using another session's client. See umbraco/Umbraco-MCP-Base#383.
   const session: RequestSessionContext = {
     transport: fetchClient as unknown as RequestTransport,
     server: server.server,

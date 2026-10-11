@@ -377,16 +377,33 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
             : "Umbraco rejected this session's access token and it cannot be refreshed."
         );
       }
-    } else if (canRefresh && Date.now() >= currentExpiresAt - SESSION_AUTH_EXPIRY_SKEW_MS) {
-      if (config.refreshContext) {
+    } else if (Date.now() >= currentExpiresAt - SESSION_AUTH_EXPIRY_SKEW_MS) {
+      const expired = () => Date.now() >= currentExpiresAt!;
+      if (!canRefresh || !config.refreshContext) {
+        // Nothing to refresh with. Still inside the skew window the token is
+        // valid, so hand it over; once actually expired, never return it.
+        if (expired()) {
+          throw new Error(
+            "Umbraco authentication expired and this session cannot refresh it. Disconnect and reconnect this MCP server to re-authenticate."
+          );
+        }
+      } else {
         logAuth(
           config.refreshContext.env,
           `getSessionAuth token expired or near expiry — refreshing up front (key=${config.refreshContext.tokenKey})`
         );
-      }
-      const result = await refresh();
-      if (!result.ok) {
-        throw new Error(`The Umbraco access token could not be refreshed: ${result.message}`);
+        const result = await refresh();
+        if (!result.ok) {
+          // A failed pre-emptive refresh inside the skew window leaves a token
+          // that is still valid, so return it; only an expired token throws.
+          if (expired()) {
+            throw new Error(`The Umbraco access token could not be refreshed: ${result.message}`);
+          }
+          logAuth(
+            config.refreshContext.env,
+            `getSessionAuth pre-emptive refresh failed (${result.reason}) — returning the still-valid current token (key=${config.refreshContext.tokenKey})`
+          );
+        }
       }
     }
 

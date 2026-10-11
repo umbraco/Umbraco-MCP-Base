@@ -31,7 +31,7 @@ import type { AuthProps } from "../../types/auth.js";
 // One fetch client per session, keyed by the session's KV token key
 // ============================================================================
 
-type SessionName = "A" | "B";
+type SessionName = "A" | "B" | "C";
 
 function createSessionFetchClient(name: SessionName) {
   const client = jest.fn(async (config: { url: string }) => {
@@ -52,6 +52,7 @@ function createSessionFetchClient(name: SessionName) {
 const sessionClients: Record<string, ReturnType<typeof createSessionFetchClient>> = {
   "token-key-A": createSessionFetchClient("A"),
   "token-key-B": createSessionFetchClient("B"),
+  "token-key-C": createSessionFetchClient("C"),
 };
 
 jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
@@ -126,6 +127,10 @@ const chainedCollection: ToolCollectionExport = {
       const client = getApiClient<{ who: () => Promise<unknown> }>();
       return client.who();
     }),
+    tool("api-client-slow", async () => {
+      await gate;
+      return getApiClient<{ who: () => Promise<unknown> }>().who();
+    }),
   ],
 };
 
@@ -192,6 +197,7 @@ async function interleave(
 describe("createPerRequestServer keeps per-session state per session", () => {
   let serverA: McpServer;
   let serverB: McpServer;
+  let serverC: McpServer;
   let logSpy: ReturnType<typeof jest.spyOn>;
 
   beforeAll(async () => {
@@ -225,7 +231,24 @@ describe("createPerRequestServer keeps per-session state per session", () => {
           clientFactory: () => ({ who: async () => ({ via: "own-client-factory" }) }),
         },
       });
+      // With its own clientFactory whose client goes through UmbracoManagementClient
+      // (an Orval client), so it must still use the session's transport.
+      await registerChainedTools({
+        server,
+        env,
+        props,
+        fetchUser: false,
+        chainedServer: {
+          ...chainedBase,
+          name: "orval",
+          clientFactory: () => ({ who: () => UmbracoManagementClient({ url: "/who", method: "GET" }) }),
+        },
+      });
     }
+
+    // Session C has no clientFactory at all.
+    const { clientFactory: _unused, ...optionsWithoutFactory } = options;
+    serverC = await createPerRequestServer(optionsWithoutFactory, env, propsFor("C"));
   });
 
   afterAll(() => {
@@ -260,6 +283,27 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     await expect(UmbracoManagementClient({ url: "/who", method: "GET" })).rejects.toThrow(
       "UmbracoFetch not initialized"
     );
+  });
+
+  it("leaves the module-level server ref unset after sessions start", () => {
+    expect(() => getServerRef()).toThrow("Server reference not set");
+  });
+
+  it("a chained clientFactory client that calls UmbracoManagementClient uses each session's own transport", async () => {
+    expect(await interleave(serverA, "orval--api-client-slow", serverB, "orval--api-client")).toEqual([
+      { via: "A" },
+      { via: "B" },
+    ]);
+  });
+
+  it("a session created without a clientFactory never gets another session's client", async () => {
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const pendingC = call(serverC, "api-client-slow");
+    // Session A (with a clientFactory) runs to completion in between.
+    expect(await call(serverA, "transport")).toEqual({ via: "A" });
+    release();
+    await expect(pendingC).rejects.toThrow("API client not configured");
   });
 
   it("resolves the server ref per session", async () => {

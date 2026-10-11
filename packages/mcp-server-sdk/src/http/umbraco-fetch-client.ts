@@ -255,7 +255,8 @@ let customTransport: CustomTransport | null = null;
  *
  * This is a **module-level fallback** for stdio, CLI and tests — one process,
  * one Umbraco. A transport in the active per-request store
- * (`runWithRequestContext({ transport })`) always wins over it.
+ * (`runWithRequestContext({ transport })`) wins over it; this value is used
+ * whenever the active store has no `transport` (or no store is active).
  *
  * Hosted code must not call this: module scope is shared by every Durable
  * Object (i.e. every MCP session) in a Cloudflare isolate, so the last session

@@ -25,9 +25,11 @@
  * several Durable Objects of the same class, sharing module scope, and each
  * MCP session is its own Durable Object. A module-level "current transport"
  * or "current server" is therefore last-session-wins across every session in
- * the isolate. `UmbracoManagementClient`, `getApiClient()`, `getServerRef()`
- * and `getSessionUmbracoAuth()` read the store first and only fall back to
- * their module value when no store is active (stdio, CLI, tests).
+ * the isolate. `UmbracoManagementClient`, `getApiClient()` and
+ * `getServerRef()` read the store first and, per key, fall back to their
+ * module value when the store has no value for that key or no store is active
+ * (the module values are for stdio, CLI, tests). `getSessionUmbracoAuth()`
+ * has no module fallback.
  *
  * **Rule for hosted code:** never keep per-session values (tokens, clients,
  * servers, token keys) in module scope. Put them in this store at the

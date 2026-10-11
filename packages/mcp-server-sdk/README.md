@@ -834,9 +834,13 @@ await fetch(`${baseUrl}/umbraco/management/api/v1/...`, {
 ```
 
 `setCustomTransport`, `configureApiClient` and `setServerRef` are module-level
-fallbacks for stdio, CLI and tests only, and are read only when no store is
-active. Hosted servers no longer write them, so a hosted call made outside a
-tool call fails with "API client not configured".
+fallbacks for stdio, CLI and tests only. The fallback is per key: each reader
+uses the module value whenever the active store has no value for its key (or
+no store is active). Hosted servers no longer write them, so outside a hosted
+tool call `getApiClient()` throws "API client not configured" and
+`getServerRef()` throws "Server reference not set", while
+`UmbracoManagementClient` falls through to the default fetch transport (which
+fails unless `initializeUmbracoFetch()` was called).
 
 ## Subpath Exports
 

@@ -753,6 +753,44 @@ describe("getSessionAuth", () => {
     expect(client.getRefreshFailure()?.reason).toBe("expired");
   });
 
+  it("returns the still-valid token when a pre-emptive refresh inside the skew window fails", async () => {
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv(), Date.now() + 10_000));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "old-access" });
+    expect(mockFetch.mock.calls.some(isTokenEndpoint)).toBe(true);
+  });
+
+  it("throws when the token has expired and the session has no way to refresh it", async () => {
+    const client = createUmbracoFetchClient({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "dead",
+      expiresAt: Date.now() - 1_000,
+    });
+
+    await expect(client.getSessionAuth()).rejects.toThrow("re-authenticate");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns the token near expiry when the session has no way to refresh it", async () => {
+    const client = createUmbracoFetchClient({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "still-valid",
+      expiresAt: Date.now() + 10_000,
+    });
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "still-valid" });
+  });
+
+  it("with no known expiry, throws when the probe's 401 refresh is rejected", async () => {
+    mockFetch
+      .mockResolvedValueOnce(createJsonResponse(401, {}, "Unauthorized"))
+      .mockResolvedValueOnce(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv()));
+
+    await expect(client.getSessionAuth()).rejects.toThrow("could not be refreshed");
+  });
+
   it("with no known expiry, makes one cheap authenticated call and returns the token when it is still valid", async () => {
     mockFetch.mockResolvedValueOnce(createJsonResponse(200, { id: "user" }));
     const client = createUmbracoFetchClient(refreshableConfig(mapKv()));
