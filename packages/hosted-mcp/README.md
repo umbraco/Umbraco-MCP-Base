@@ -204,6 +204,26 @@ A single Worker can serve multiple Umbraco instances. All sites share a single M
 
 See [Multi-Site Deployments](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp/multi-site) for setup instructions, route structure, and security details.
 
+### Session isolation check
+
+A Cloudflare isolate can host several Durable Objects (MCP sessions) of the same class, and they share module scope. Per-session values (tokens, clients, token keys, server references) must therefore come from the SDK's per-request accessors (`UmbracoManagementClient`, `getApiClient()`, `getServerRef()`, `getSessionUmbracoAuth()`), never from a module-level variable.
+
+`@umbraco-cms/mcp-hosted/testing` checks this against your real tools. It starts sessions through `createPerRequestServer`, runs your `init()` work for each, calls the tools you list from each session (including with a new session starting mid-call), and fails if any Umbraco request carries another session's site or token:
+
+```ts
+import { assertSessionIsolation } from "@umbraco-cms/mcp-hosted/testing";
+
+it("keeps sessions isolated", async () => {
+  await assertSessionIsolation(serverOptions, {
+    toolCalls: [{ name: "get-page", arguments: { id: "00000000-0000-0000-0000-000000000001" } }],
+    // Everything your Durable Object's init() does after createPerRequestServer.
+    init: ({ server }) => setServerRef(server.server),
+  });
+});
+```
+
+Nothing leaves the test process: `fetch` is stubbed for the duration and the fake Umbraco answers every request. List tools with arguments that make them call Umbraco. A listed tool that makes no request fails the check, because it proves nothing.
+
 ## Documentation
 
 Full documentation lives on [docs.umbraco.com](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp/hosted-mcp).
