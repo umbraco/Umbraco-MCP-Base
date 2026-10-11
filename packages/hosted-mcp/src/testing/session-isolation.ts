@@ -13,13 +13,16 @@
  *    its own site and token in KV, and runs the MCP's own `init` hook for each
  *    (the work its Durable Object's `init()` does).
  * 2. Calls each tool from each session, after the other session has started.
- * 3. Calls each tool again and starts a third session in the middle of the call,
- *    while the call is waiting on its first Umbraco request.
+ * 3. Calls each tool again and, while the call is waiting on its first Umbraco
+ *    request, starts a third session and runs that session's call of the same
+ *    tool to completion before resuming the first. Both calls are checked.
  *
- * Every outgoing request is recorded by host and bearer token. A request made
- * during a tool call that doesn't carry that session's site and token is a
- * violation. Nothing leaves the process: `globalThis.fetch` is replaced for the
- * duration of the check and restored afterwards.
+ * Every outgoing request is recorded by host and bearer token, and attributed
+ * to the tool call that made it. A request made during a tool call that doesn't
+ * carry that session's site and token is a violation, as is an elicitation or
+ * logging message delivered to a different session's client. Nothing leaves the
+ * process: `globalThis.fetch` is replaced for the duration of the check and
+ * restored afterwards. Telemetry isolation isn't covered.
  *
  * @example
  * ```ts
@@ -28,17 +31,19 @@
  * it("keeps sessions isolated", async () => {
  *   await assertSessionIsolation(serverOptions, {
  *     toolCalls: [{ name: "get-page", arguments: { id: "…" } }],
- *     init: ({ server }) => setServerRef(server.server),
+ *     init: ({ server }) => registerInProcessChainedServer(server),
  *   });
  * });
  * ```
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ElicitRequestSchema, LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createPerRequestServer, type CreateServerOptions } from "../server/create-server.js";
-import { storeUmbracoToken } from "../auth/token-storage.js";
+import { getBackofficeEndpoints, storeUmbracoToken } from "../auth/token-storage.js";
 import type { HostedMcpEnv } from "../types/env.js";
 import type { AuthProps } from "../types/auth.js";
 
@@ -77,6 +82,23 @@ export interface SessionIsolationOptions {
   respond?: (request: RecordedRequest) => Response | undefined | Promise<Response | undefined>;
   /** Version the fake Umbraco reports from `/server/information`. Defaults to `17.6.0`. */
   umbracoVersion?: string;
+  /**
+   * Decides whether a request is an Umbraco request, and so is checked. The
+   * default counts a request to a session's site, or one carrying a session's
+   * token. Requests that aren't (a media-from-URL source fetch, say) are
+   * ignored; override this when your tools reach Umbraco some other way.
+   */
+  isUmbracoRequest?: (request: RecordedRequest) => boolean;
+  /**
+   * Stores near-expiry tokens with a refresh token, and makes the fake Umbraco
+   * answer each tool call's first authenticated request with a 401 so the
+   * refresh paths run. The fake token endpoint rotates tokens; the new ones are
+   * attributed to their session. For these requests `RecordedRequest.token` is
+   * the refresh token.
+   */
+  exerciseRefresh?: boolean;
+  /** Per-session `props` and `env` overrides, e.g. `consentChoices.siteId` or site routing. */
+  sessionOverrides?: (label: string) => { props?: Partial<AuthProps>; env?: Partial<HostedMcpEnv> };
 }
 
 /** An outgoing request, as the fake Umbraco saw it. */
@@ -93,10 +115,13 @@ export interface IsolationViolation {
   /** The session that made the tool call. */
   session: string;
   phase: "after-other-session-started" | "session-started-mid-call";
+  /** `request` for an outgoing HTTP request, `message` for an elicitation or logging message. */
+  kind: "request" | "message";
+  /** For a `message`, the MCP method and an empty path. */
   request: { method: string; path: string };
-  /** The session whose site the request went to, or `"unknown"`. */
+  /** The session whose site the request went to (or whose client got the message), or `"unknown"`. */
   sentToSession: string;
-  /** The session whose token the request carried, or `"none"` / `"unknown"`. */
+  /** The session whose token the request carried, or `"none"` / `"unknown"`; `"n/a"` for a message. */
   tokenOfSession: string;
 }
 
@@ -115,10 +140,24 @@ export interface SessionIsolationReport {
 const HOST_SUFFIX = ".isolation-check.invalid";
 const hostFor = (label: string) => `session-${label.toLowerCase()}${HOST_SUFFIX}`;
 const tokenFor = (label: string) => `isolation-token-${label.toLowerCase()}`;
+const refreshTokenFor = (label: string, generation: number) => `isolation-refresh-${label.toLowerCase()}-${generation}`;
+const isSessionHost = (host: string) => host.startsWith("session-") && host.endsWith(HOST_SUFFIX);
 const labelOfHost = (host: string) =>
-  host.endsWith(HOST_SUFFIX) ? host.slice("session-".length, -HOST_SUFFIX.length).toUpperCase() : "unknown";
-const labelOfToken = (token: string | undefined) =>
-  token === undefined ? "none" : token.startsWith("isolation-token-") ? token.slice("isolation-token-".length).toUpperCase() : "unknown";
+  isSessionHost(host) ? host.slice("session-".length, -HOST_SUFFIX.length).toUpperCase() : "unknown";
+const TOKEN_ENDPOINT_PATH = new URL(getBackofficeEndpoints("https://x.invalid").token_endpoint).pathname;
+
+/** One tool call in flight. Requests are attributed to it through async context. */
+interface CallBucket {
+  label: string;
+  requests: RecordedRequest[];
+  messages: { type: string; receivedBy: string }[];
+  onFirstRequest?: () => Promise<void>;
+  hookError?: unknown;
+  unauthorizedSent?: boolean;
+}
+
+// Two runs would swap each other's `globalThis.fetch`.
+let running = false;
 
 function createMemoryKv(): KVNamespace {
   const store = new Map<string, string>();
@@ -142,12 +181,12 @@ function headerValue(init: RequestInit | undefined, request: Request | undefined
   return fromInit ?? request?.headers.get(name) ?? undefined;
 }
 
-function defaultResponse(request: RecordedRequest, umbracoVersion: string): Response {
+function defaultResponse(request: RecordedRequest, umbracoVersion: string, userLabel: string): Response {
   const path = new URL(request.url).pathname;
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
   if (path.endsWith("/user/current")) {
     return json({
-      id: `${labelOfToken(request.token)}-user`,
+      id: `${userLabel}-user`,
       name: "Isolation check user",
       allowedSections: ["Umb.Section.Content", "Umb.Section.Media", "Umb.Section.Settings", "Umb.Section.Members"],
       fallbackPermissions: [],
@@ -167,62 +206,114 @@ export async function checkSessionIsolation(
   serverOptions: CreateServerOptions,
   options: SessionIsolationOptions,
 ): Promise<SessionIsolationReport> {
+  if (running) {
+    throw new Error("checkSessionIsolation is already running: concurrent runs would swap each other's globalThis.fetch stub.");
+  }
+  running = true;
+  try {
+    return await runCheck(serverOptions, options);
+  } finally {
+    running = false;
+  }
+}
+
+async function runCheck(serverOptions: CreateServerOptions, options: SessionIsolationOptions): Promise<SessionIsolationReport> {
   const umbracoVersion = options.umbracoVersion ?? "17.6.0";
   const kv = createMemoryKv();
-  const env = { ...options.env, OAUTH_KV: kv } as HostedMcpEnv;
   // Tracing needs the Workers runtime; the check runs in a test process.
-  const { telemetry: _telemetry, ...optionsWithoutTelemetry } = serverOptions as CreateServerOptions & { telemetry?: unknown };
-  const createOptions = optionsWithoutTelemetry as CreateServerOptions;
+  const { telemetry: _telemetry, ...createOptions } = serverOptions;
 
-  // Requests made during a tool call are collected here; null means "not in a call".
-  let current: { requests: RecordedRequest[]; onFirstRequest?: () => Promise<void> } | null = null;
-  // Requests made while a session is being started belong to that session, not the call.
-  let startingSession = false;
+  // Which session each token (access, refresh, rotated) was issued to.
+  const tokenOwners = new Map<string, string>();
+  const generations = new Map<string, number>();
+  const labelOfToken = (token: string | undefined) => (token === undefined ? "none" : (tokenOwners.get(token) ?? "unknown"));
+  const isUmbracoRequest =
+    options.isUmbracoRequest ?? ((request: RecordedRequest) => isSessionHost(request.host) || tokenOwners.has(request.token ?? ""));
+
+  const callContext = new AsyncLocalStorage<CallBucket | null>();
+
+  function tokenEndpointResponse(body: string): Response {
+    const owner = tokenOwners.get(new URLSearchParams(body).get("refresh_token") ?? "");
+    if (!owner) return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400, headers: { "content-type": "application/json" } });
+    const generation = (generations.get(owner) ?? 0) + 1;
+    generations.set(owner, generation);
+    const accessToken = `${tokenFor(owner)}-r${generation}`;
+    const refreshToken = refreshTokenFor(owner, generation);
+    tokenOwners.set(accessToken, owner);
+    tokenOwners.set(refreshToken, owner);
+    return new Response(
+      JSON.stringify({ access_token: accessToken, token_type: "Bearer", expires_in: 3600, refresh_token: refreshToken }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : undefined;
     const url = request ? request.url : String(input);
+    const parsed = new URL(url);
+    const isTokenEndpoint = parsed.pathname === TOKEN_ENDPOINT_PATH;
+    const body = typeof init?.body === "string" ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : "";
     const authorization = headerValue(init, request, "authorization");
     const recorded: RecordedRequest = {
       method: (init?.method ?? request?.method ?? "GET").toUpperCase(),
       url,
-      host: new URL(url).hostname,
-      token: authorization?.replace(/^Bearer\s+/i, ""),
+      host: parsed.hostname,
+      token: isTokenEndpoint ? (new URLSearchParams(body).get("refresh_token") ?? undefined) : authorization?.replace(/^Bearer\s+/i, ""),
     };
-    if (current && !startingSession) {
-      current.requests.push(recorded);
-      const hook = current.onFirstRequest;
+    const bucket = callContext.getStore();
+    if (bucket) {
+      bucket.requests.push(recorded);
+      const hook = bucket.onFirstRequest;
       if (hook) {
-        current.onFirstRequest = undefined;
-        await hook();
+        bucket.onFirstRequest = undefined;
+        // Kept rather than thrown here: the tool's own error handling would hide it.
+        await hook().catch((error) => {
+          bucket.hookError ??= error;
+        });
       }
     }
-    return (await options.respond?.(recorded)) ?? defaultResponse(recorded, umbracoVersion);
+    const custom = await options.respond?.(recorded);
+    if (custom) return custom;
+    if (isTokenEndpoint) return tokenEndpointResponse(body);
+    if (options.exerciseRefresh && bucket && !bucket.unauthorizedSent && recorded.token) {
+      bucket.unauthorizedSent = true;
+      return new Response("{}", { status: 401, headers: { "content-type": "application/json" } });
+    }
+    return defaultResponse(recorded, umbracoVersion, labelOfToken(recorded.token));
   }) as typeof fetch;
 
   const clients = new Map<string, Client>();
   async function startSession(label: string): Promise<void> {
-    startingSession = true;
-    try {
-      const tokenKey = `isolation-check-${label.toLowerCase()}`;
-      const baseUrl = `https://${hostFor(label)}`;
-      await storeUmbracoToken(kv, tokenKey, { access_token: tokenFor(label), token_type: "Bearer", expires_in: 3600 } as never, {
-        oauthClientId: "isolation-check",
-        baseUrl,
-        serverUrl: baseUrl,
-      });
-      const props: AuthProps = { umbracoTokenKey: tokenKey, userId: `isolation-${label}`, userName: `Session ${label}` };
-      const server = await createPerRequestServer(createOptions, env, props);
-      await options.init?.({ label, server, env, props });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      await server.connect(serverTransport);
-      const client = new Client({ name: "session-isolation-check", version: "1.0.0" });
-      await client.connect(clientTransport);
-      clients.set(label, client);
-    } finally {
-      startingSession = false;
+    const tokenKey = `isolation-check-${label.toLowerCase()}`;
+    const baseUrl = `https://${hostFor(label)}`;
+    const overrides = options.sessionOverrides?.(label);
+    const sessionEnv = { ...options.env, ...overrides?.env, OAUTH_KV: kv } as HostedMcpEnv;
+    const accessToken = tokenFor(label);
+    tokenOwners.set(accessToken, label);
+    const tokens: Record<string, unknown> = { access_token: accessToken, token_type: "Bearer", expires_in: options.exerciseRefresh ? 1 : 3600 };
+    if (options.exerciseRefresh) {
+      tokens.refresh_token = refreshTokenFor(label, 0);
+      tokenOwners.set(refreshTokenFor(label, 0), label);
     }
+    await storeUmbracoToken(kv, tokenKey, tokens as never, { oauthClientId: "isolation-check", baseUrl, serverUrl: baseUrl });
+    const props: AuthProps = { umbracoTokenKey: tokenKey, userId: `isolation-${label}`, userName: `Session ${label}`, ...overrides?.props };
+    const server = await createPerRequestServer(createOptions, sessionEnv, props);
+    await options.init?.({ label, server, env: sessionEnv, props });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "session-isolation-check", version: "1.0.0" }, { capabilities: { elicitation: {} } });
+    // A message sent during a tool call that lands on another session's client is a leak.
+    const received = (type: string) => callContext.getStore()?.messages.push({ type, receivedBy: label });
+    client.setRequestHandler(ElicitRequestSchema, async () => {
+      received("elicitation/create");
+      return { action: "decline" as const };
+    });
+    client.setNotificationHandler(LoggingMessageNotificationSchema, async () => {
+      received("notifications/message");
+    });
+    await client.connect(clientTransport);
+    clients.set(label, client);
   }
 
   const violations: IsolationViolation[] = [];
@@ -230,31 +321,56 @@ export async function checkSessionIsolation(
   let checkedRequests = 0;
   let midCallSessions = 0;
 
-  async function callFrom(label: string, toolCall: IsolationToolCall, phase: IsolationViolation["phase"]): Promise<void> {
-    current = { requests: [] };
-    if (phase === "session-started-mid-call") {
-      current.onFirstRequest = () => startSession(`C${++midCallSessions}`);
+  async function callFrom(
+    label: string,
+    toolCall: IsolationToolCall,
+    phase: IsolationViolation["phase"],
+    startSessionMidCall = phase === "session-started-mid-call",
+  ): Promise<void> {
+    const bucket: CallBucket = { label, requests: [], messages: [] };
+    if (startSessionMidCall) {
+      // A is paused on its first request while C starts and runs the same tool to completion.
+      bucket.onFirstRequest = async () => {
+        const other = `C${++midCallSessions}`;
+        await callContext.run(null, () => startSession(other));
+        await callFrom(other, toolCall, phase, false);
+      };
     }
     try {
       // Tool errors are expected with fake responses; only the requests matter.
-      await clients.get(label)!.callTool({ name: toolCall.name, arguments: toolCall.arguments ?? {} }).catch(() => undefined);
+      await callContext
+        .run(bucket, () => clients.get(label)!.callTool({ name: toolCall.name, arguments: toolCall.arguments ?? {} }))
+        .catch(() => undefined);
     } finally {
-      const { requests } = current;
-      current = null;
-      requestsByTool.set(toolCall.name, (requestsByTool.get(toolCall.name) ?? 0) + requests.length);
-      for (const request of requests) {
+      const umbracoRequests = bucket.requests.filter(isUmbracoRequest);
+      requestsByTool.set(toolCall.name, (requestsByTool.get(toolCall.name) ?? 0) + umbracoRequests.length);
+      for (const request of umbracoRequests) {
         checkedRequests++;
-        if (request.host === hostFor(label) && request.token === tokenFor(label)) continue;
+        if (request.host === hostFor(label) && labelOfToken(request.token) === label) continue;
         violations.push({
           tool: toolCall.name,
           session: label,
           phase,
+          kind: "request",
           request: { method: request.method, path: new URL(request.url).pathname },
           sentToSession: labelOfHost(request.host),
           tokenOfSession: labelOfToken(request.token),
         });
       }
+      for (const message of bucket.messages) {
+        if (message.receivedBy === label) continue;
+        violations.push({
+          tool: toolCall.name,
+          session: label,
+          phase,
+          kind: "message",
+          request: { method: message.type, path: "" },
+          sentToSession: message.receivedBy,
+          tokenOfSession: "n/a",
+        });
+      }
     }
+    if (bucket.hookError) throw bucket.hookError;
   }
 
   try {
@@ -264,7 +380,7 @@ export async function checkSessionIsolation(
       // B started last, so a module-level value now holds B's state.
       await callFrom("A", toolCall, "after-other-session-started");
       await callFrom("B", toolCall, "after-other-session-started");
-      // A third session starts while A's call is waiting on Umbraco.
+      // A third session starts and calls the tool while A's call is waiting on Umbraco.
       await callFrom("A", toolCall, "session-started-mid-call");
     }
   } finally {
@@ -289,10 +405,11 @@ export async function assertSessionIsolation(
   options: SessionIsolationOptions,
 ): Promise<SessionIsolationReport> {
   const report = await checkSessionIsolation(serverOptions, options);
-  const problems: string[] = report.violations.map(
-    (v) =>
-      `- ${v.tool} called from session ${v.session} (${v.phase}): ${v.request.method} ${v.request.path} ` +
-      `went to session ${v.sentToSession}'s site with session ${v.tokenOfSession}'s token`,
+  const problems: string[] = report.violations.map((v) =>
+    v.kind === "message"
+      ? `- ${v.tool} called from session ${v.session} (${v.phase}): ${v.request.method} was delivered to session ${v.sentToSession}'s client`
+      : `- ${v.tool} called from session ${v.session} (${v.phase}): ${v.request.method} ${v.request.path} ` +
+        `went to session ${v.sentToSession}'s site with session ${v.tokenOfSession}'s token`,
   );
   if (report.toolsWithoutRequests.length > 0) {
     problems.push(

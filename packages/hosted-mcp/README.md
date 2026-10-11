@@ -208,7 +208,7 @@ See [Multi-Site Deployments](https://docs.umbraco.com/umbraco-in-ai/mcp/base-mcp
 
 A Cloudflare isolate can host several Durable Objects (MCP sessions) of the same class, and they share module scope. Per-session values (tokens, clients, token keys, server references) must therefore come from the SDK's per-request accessors (`UmbracoManagementClient`, `getApiClient()`, `getServerRef()`, `getSessionUmbracoAuth()`), never from a module-level variable.
 
-`@umbraco-cms/mcp-hosted/testing` checks this against your real tools. It starts sessions through `createPerRequestServer`, runs your `init()` work for each, calls the tools you list from each session (including with a new session starting mid-call), and fails if any Umbraco request carries another session's site or token:
+`@umbraco-cms/mcp-hosted/testing` checks this against your real tools. It starts sessions through `createPerRequestServer`, runs your `init()` work for each, and calls the tools you list from each session. In one phase a new session starts and runs the same tool to completion while the first session's call is paused on its first Umbraco request, so state written at the start of a call and read after an `await` is caught too. It fails if any Umbraco request carries another session's site or token, or if an elicitation or logging message reaches another session's client:
 
 ```ts
 import { assertSessionIsolation } from "@umbraco-cms/mcp-hosted/testing";
@@ -216,13 +216,18 @@ import { assertSessionIsolation } from "@umbraco-cms/mcp-hosted/testing";
 it("keeps sessions isolated", async () => {
   await assertSessionIsolation(serverOptions, {
     toolCalls: [{ name: "get-page", arguments: { id: "00000000-0000-0000-0000-000000000001" } }],
-    // Everything your Durable Object's init() does after createPerRequestServer.
-    init: ({ server }) => setServerRef(server.server),
+    // Everything your Durable Object's init() does after createPerRequestServer
+    // (hosted code shouldn't need setServerRef: the SDK carries the server per request).
+    init: ({ server }) => registerInProcessChainedServer(server),
   });
 });
 ```
 
-Nothing leaves the test process: `fetch` is stubbed for the duration and the fake Umbraco answers every request. List tools with arguments that make them call Umbraco. A listed tool that makes no request fails the check, because it proves nothing.
+Nothing leaves the test process: `fetch` is stubbed for the duration and the fake Umbraco answers every request. List tools with arguments that make them call Umbraco. A listed tool that makes no Umbraco request fails the check, because it proves nothing. Requests to hosts that aren't a session's site and carry no session token (a media-from-URL fetch) are ignored; pass `isUmbracoRequest` to change that.
+
+Other options: `exerciseRefresh` (near-expiry tokens, a fake rotating token endpoint and a 401 on each call's first request), `sessionOverrides` (per-session `props`/`env`, e.g. `consentChoices.siteId`) and `respond` (your own fake Umbraco responses).
+
+Not covered: telemetry isolation. Pass `HostedMcpServerOptions` through `getServerOptions()` first, since the check takes the `CreateServerOptions` it returns.
 
 ## Documentation
 
