@@ -21,6 +21,7 @@ import {
   getApiClient,
   getServerRef,
   getSessionUmbracoAuth,
+  confirmAction,
   type ToolCollectionExport,
   type ToolDefinition,
 } from "@umbraco-cms/mcp-server-sdk";
@@ -84,6 +85,9 @@ const propsFor = (name: SessionName): AuthProps => ({
  */
 let gate: Promise<void> = Promise.resolve();
 
+/** The session whose server each elicitation went to, in order. */
+const elicitedBy: string[] = [];
+
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
 const tool = (name: string, handler: () => Promise<unknown>): ToolDefinition<any, any> => ({
@@ -123,6 +127,12 @@ const chainedCollection: ToolCollectionExport = {
       return UmbracoManagementClient({ url: "/who", method: "GET" });
     }),
     tool("transport", async () => UmbracoManagementClient({ url: "/who", method: "GET" })),
+    tool("server-ref", async () => (getServerRef() as unknown as { __session: string }).__session),
+    tool("confirm", async () => confirmAction(undefined, "Proceed?")),
+    tool("confirm-slow", async () => {
+      await gate;
+      return confirmAction(undefined, "Proceed?");
+    }),
     tool("api-client", async () => {
       const client = getApiClient<{ who: () => Promise<unknown> }>();
       return client.who();
@@ -215,6 +225,14 @@ describe("createPerRequestServer keeps per-session state per session", () => {
     ] as const) {
       // Tag each session's underlying Server so getServerRef() is identifiable.
       (server.server as unknown as { __session: string }).__session = name;
+      // Record which session's server an elicitation went to.
+      Object.assign(server.server, {
+        getClientCapabilities: () => ({ elicitation: { form: {} } }),
+        elicitInput: async () => {
+          elicitedBy.push(name);
+          return { action: "accept", content: { confirm: true } };
+        },
+      });
 
       const props = propsFor(name);
       // Without its own clientFactory: inherits the caller's client.
@@ -330,6 +348,59 @@ describe("createPerRequestServer keeps per-session state per session", () => {
       { baseUrl: "https://a.example.com", accessToken: "token-A" },
       { baseUrl: "https://b.example.com", accessToken: "token-B" },
     ]);
+  });
+
+  it("an elicitation inside a chained call goes to the caller's own session", async () => {
+    elicitedBy.length = 0;
+    // A parks before eliciting; B elicits in between; then A resumes.
+    expect(await interleave(serverA, "inherit--confirm-slow", serverB, "inherit--confirm")).toEqual([true, true]);
+    expect(elicitedBy).toEqual(["B", "A"]);
+  });
+
+  it("a hosted path outside the session store fails loudly", async () => {
+    // Registered directly on the server, not through the wrapped registration.
+    serverA.registerTool("direct", { description: "direct" }, async () => ({
+      content: [{ type: "text" as const, text: JSON.stringify({ via: (getServerRef() as any).__session }) }],
+    }));
+    await expect(call(serverA, "direct")).rejects.toThrow("Server reference not set");
+    expect(() => getApiClient()).toThrow("API client not configured");
+  });
+
+  it("runInSessionContext enters the session's store for code registered directly on the server", async () => {
+    const { runInSessionContext } = await import("../create-server.js");
+    serverB.registerTool("direct-wrapped", { description: "direct" }, async () =>
+      runInSessionContext(serverB, async () => ({
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              server: (getServerRef() as any).__session,
+              transport: await UmbracoManagementClient({ url: "/who", method: "GET" }),
+              client: await getApiClient<{ who: () => Promise<unknown> }>().who(),
+              auth: await getSessionUmbracoAuth(),
+            }),
+          },
+        ],
+      }))
+    );
+    expect(await call(serverB, "direct-wrapped")).toEqual({
+      server: "B",
+      transport: { via: "B" },
+      client: { via: "B" },
+      auth: { baseUrl: "https://b.example.com", accessToken: "token-B" },
+    });
+  });
+
+  it("runInSessionContext throws for a server createPerRequestServer did not build", async () => {
+    const { runInSessionContext } = await import("../create-server.js");
+    const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+    expect(() => runInSessionContext(new McpServer({ name: "x", version: "1" }), () => 1)).toThrow(
+      "no session context"
+    );
+  });
+
+  it("a session without a clientFactory explains what is missing", async () => {
+    await expect(call(serverC, "api-client-slow")).rejects.toThrow("without a `clientFactory`");
   });
 
   it("getSessionUmbracoAuth throws outside a request", async () => {

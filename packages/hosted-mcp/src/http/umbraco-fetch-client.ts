@@ -17,6 +17,7 @@ import {
   type StoredSiteContext,
 } from "../auth/token-storage.js";
 import { logAuth } from "../auth/log.js";
+import { sanitizeForLog } from "../util/log-sanitize.js";
 
 /**
  * Options for the fetch-based Umbraco management client.
@@ -247,6 +248,47 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
   }
 
   /**
+   * Looks in KV for a token another client on the same `tokenKey` has already
+   * refreshed (OpenIddict rotates the refresh token on each redemption, so
+   * when two clients race, the loser's own refresh fails with `invalid_grant`
+   * even though the session is fine) and adopts it. Returns whether a usable,
+   * different token was adopted. A KV failure counts as "nothing to adopt".
+   */
+  async function adoptStoredToken(): Promise<boolean> {
+    if (!config.refreshContext) {
+      return false;
+    }
+    const { env, tokenKey } = config.refreshContext;
+    const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch((error) => {
+      // Logged, not swallowed: a KV outage here would otherwise read as
+      // "nothing newer to adopt" and kill a session that is still healthy.
+      logAuth(
+        env,
+        `adoptStoredToken KV READ FAILED key=${tokenKey} error=${sanitizeForLog(
+          error instanceof Error ? error.message : "unknown error"
+        )}`
+      );
+      return null;
+    });
+    const stored = entry?.tokens;
+    if (!stored?.access_token || stored.access_token === currentToken) {
+      return false;
+    }
+    // Without an absolute expiry we can't tell a fresh token from an old one.
+    if (typeof stored.expires_at !== "number" || Date.now() >= stored.expires_at) {
+      return false;
+    }
+    logAuth(env, `adopting a token refreshed by another client (key=${tokenKey})`);
+    currentToken = stored.access_token;
+    currentExpiresAt = stored.expires_at;
+    if (stored.refresh_token) {
+      currentRefreshToken = stored.refresh_token;
+    }
+    lastRefreshFailure = undefined;
+    return true;
+  }
+
+  /**
    * The mutator function - compatible with Orval custom instance pattern.
    */
   async function fetchClient<T>(
@@ -292,7 +334,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
         );
         const result = await refresh();
 
-        if (result.ok) {
+        if (result.ok || (await adoptStoredToken())) {
           headers.Authorization = `Bearer ${currentToken}`;
           resp = await fetch(fullUrl, { ...fetchOptions, headers });
           logAuth(
@@ -397,7 +439,10 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
           // A failed pre-emptive refresh inside the skew window leaves a token
           // that is still valid, so return it; only an expired token throws.
           if (expired()) {
-            throw new Error(`The Umbraco access token could not be refreshed: ${result.message}`);
+            if (!(await adoptStoredToken())) {
+              throw new Error(`The Umbraco access token could not be refreshed: ${result.message}`);
+            }
+            return { baseUrl: normalizedBaseUrl, accessToken: currentToken };
           }
           logAuth(
             config.refreshContext.env,

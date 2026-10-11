@@ -29,6 +29,7 @@ import {
   prepareRequestTelemetryContext,
   withRequestTelemetryContext,
   runWithRequestContext,
+  getActiveRequestContext,
   pickCarriedRequestContext,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
@@ -123,20 +124,20 @@ export interface CreateServerOptions {
    */
   instructions?: InstructionsResolver;
   /**
-   * Optional factory to create the API client used by tool handlers.
+   * Factory for the API client used by tool handlers. Required in practice:
+   * a hosted server without one fails with "API client not configured" the
+   * first time a handler calls `getApiClient()` / `executeGetApiCall`.
    *
    * Tool handlers call `executeGetApiCall((client) => client.someMethod(...))`.
    * The `client` is whatever this factory returns: it is put in the SDK's
    * per-request store as this session's `apiClientProvider` around every tool
    * call (never via the module-level `configureApiClient`, which every session
-   * in the isolate shares).
+   * in the isolate shares, so hosted code must not call it).
    *
-   * Whether or not it's provided, the session's fetch client is put in the
-   * same store as the `transport` behind `UmbracoManagementClient`, so the
-   * Orval client's named methods (e.g. `client.getTreeDataTypeRoot()`) go out
-   * with this session's site URL and token.
-   *
-   * Only provide this if you need a custom client setup beyond the Orval client.
+   * The session's fetch client is also put in the same store as the
+   * `transport` behind `UmbracoManagementClient`, so the Orval client's named
+   * methods (e.g. `client.getTreeDataTypeRoot()`) go out with this session's
+   * site URL and token. A typical factory just returns the Orval client.
    */
   clientFactory?: () => unknown;
   /** Multi-site deployment configuration (for resolving site-specific URLs and filters) */
@@ -644,7 +645,11 @@ async function initPerRequestServer(
     transport: fetchClient as unknown as RequestTransport,
     server: server.server,
     umbracoAuth: () => fetchClient.getSessionAuth(),
-    ...(options.clientFactory ? { apiClientProvider: options.clientFactory } : {}),
+    // Without a `clientFactory` the session still gets a provider, one that
+    // fails loudly. Leaving it unset would make `getApiClient()` fall through
+    // to the module provider, i.e. whatever `configureApiClient` last set for
+    // every session in the isolate, which is what the rule above forbids.
+    apiClientProvider: options.clientFactory ?? missingClientFactoryProvider,
   };
   sessionContexts.set(server, session);
 
@@ -716,12 +721,59 @@ async function initPerRequestServer(
  */
 const sessionContexts = new WeakMap<McpServer, RequestSessionContext>();
 
+/** The `apiClientProvider` of a session whose server was built without a `clientFactory`. */
+function missingClientFactoryProvider(): never {
+  throw new Error(
+    "API client not configured: this hosted server was created without a `clientFactory`. " +
+      "Hosted servers must pass `clientFactory` to `createPerRequestServer` (or `HostedMcpServerOptions`) " +
+      "and must not call `configureApiClient()`, whose module scope is shared by every session in the isolate."
+  );
+}
+
 /**
  * The per-session store values `createPerRequestServer` built for `server`,
  * or `undefined` for a server it didn't build (or a degraded one).
  */
 export function getServerSessionContext(server: McpServer): RequestSessionContext | undefined {
   return sessionContexts.get(server);
+}
+
+/**
+ * Runs `fn` inside the SDK's per-request store holding `server`'s session
+ * values (transport, API client provider, server, Umbraco auth), next to any
+ * carried values (telemetry, Umbraco version) already on the active store.
+ *
+ * `createPerRequestServer` and `registerChainedTools` already do this for the
+ * tools they register. Use it for anything a worker registers directly on the
+ * server (`server.registerTool`, resources, prompts): without it that handler
+ * runs outside the store, where `getApiClient()` and `getServerRef()` throw and
+ * `UmbracoManagementClient` has no session transport.
+ *
+ * ```typescript
+ * server.registerResource("example", "example://x", {}, (uri) =>
+ *   runInSessionContext(server, async () => {
+ *     const client = getApiClient<MyClient>();
+ *     // ...
+ *   })
+ * );
+ * ```
+ *
+ * @param server - A server returned by `createPerRequestServer`
+ * @param fn - The work to run in this session's store
+ * @returns Whatever `fn` returns
+ * @throws When `server` has no session context (not built by `createPerRequestServer`, or a degraded server)
+ */
+export function runInSessionContext<T>(server: McpServer, fn: () => T): T {
+  const session = sessionContexts.get(server);
+  if (!session) {
+    throw new Error(
+      "runInSessionContext: this server has no session context. Pass a server returned by createPerRequestServer."
+    );
+  }
+  return runWithRequestContext(
+    { ...pickCarriedRequestContext(getActiveRequestContext()), ...session },
+    fn
+  );
 }
 
 /**
