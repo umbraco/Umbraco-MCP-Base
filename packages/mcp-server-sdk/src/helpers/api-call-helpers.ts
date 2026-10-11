@@ -75,7 +75,7 @@ const MAX_STRING_DETAIL_LENGTH = 500;
 /**
  * Builds ProblemDetails from an error response, always carrying the HTTP status.
  * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
- * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText`.
+ * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText` as the `title`, so the message keeps the status.
  * Use this wherever you construct an `UmbracoApiError` from a raw response.
  */
 export function toProblemDetails(
@@ -89,11 +89,13 @@ export function toProblemDetails(
     const problem = body as ProblemDetails;
     const status = typeof problem.status === 'number' ? problem.status : response.status;
     if (!problem.detail && !problem.title && response.statusText) {
-      return { ...problem, status, detail: response.statusText };
+      return { ...problem, status, title: response.statusText };
     }
     return { ...problem, status };
   }
-  return { status: response.status, detail: response.statusText };
+  return response.statusText
+    ? { status: response.status, title: response.statusText }
+    : { status: response.status };
 }
 
 /**

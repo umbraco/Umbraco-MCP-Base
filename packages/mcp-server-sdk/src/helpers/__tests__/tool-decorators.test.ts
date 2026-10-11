@@ -140,7 +140,7 @@ describe("withStandardDecorators", () => {
 });
 
 describe("withErrorHandling with a status-less error body", () => {
-  it("surfaces the HTTP status in the tool-result text", async () => {
+  it.each(["", "Not Found"])("surfaces the HTTP status in the tool-result text (statusText %j)", async (statusText) => {
     const { withErrorHandling } = await import("../tool-decorators.js");
     const { UmbracoApiError, toProblemDetails } = await import("../api-call-helpers.js");
 
@@ -148,7 +148,7 @@ describe("withErrorHandling with a status-less error body", () => {
       name: "t",
       description: "",
       handler: async () => {
-        throw new UmbracoApiError(toProblemDetails({ status: 404, statusText: "", data: {} }));
+        throw new UmbracoApiError(toProblemDetails({ status: 404, statusText, data: {} }));
       },
     } as any;
 

@@ -277,7 +277,7 @@ describe("API Call Helpers", () => {
       expect(() => processVoidResponse(response)).toThrow(UmbracoApiError);
     });
 
-    it("should use statusText when response data is empty", async () => {
+    it("should use statusText as the title when response data is empty", async () => {
       const { processVoidResponse, UmbracoApiError } = await getApiHelpersModule();
 
       const response = createMockHttpResponse(404, null as any, "Not Found");
@@ -287,19 +287,19 @@ describe("API Call Helpers", () => {
         fail("Expected to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(UmbracoApiError);
-        expect((e as any).problemDetails.detail).toBe("Not Found");
+        expect((e as any).problemDetails.title).toBe("Not Found");
         expect((e as any).problemDetails.status).toBe(404);
       }
     });
 
     describe.each([
-      ["empty object body", {}, "Not Found", "Not Found"],
-      ["array body", [{ x: 1 }], "Not Found", "Not Found"],
-      ["whitespace-only string body", "   \n ", "Not Found", "Not Found"],
-      ["string body", "  <html>Bad Gateway</html>  ", "<html>Bad Gateway</html>", "<html>Bad Gateway</html>"],
-      ["empty body", null, "Not Found", "Not Found"],
-      ["title-only body", { title: "Missing" }, undefined, "Missing (HTTP 404)"],
-    ] as const)("%s", (_name, body, detail, message) => {
+      ["empty object body", {}, undefined, "Not Found", "Not Found (HTTP 404)"],
+      ["array body", [{ x: 1 }], undefined, "Not Found", "Not Found (HTTP 404)"],
+      ["whitespace-only string body", "   \n ", undefined, "Not Found", "Not Found (HTTP 404)"],
+      ["string body", "  <html>Bad Gateway</html>  ", "<html>Bad Gateway</html>", undefined, "<html>Bad Gateway</html>"],
+      ["empty body", null, undefined, "Not Found", "Not Found (HTTP 404)"],
+      ["title-only body", { title: "Missing" }, undefined, "Missing", "Missing (HTTP 404)"],
+    ] as const)("%s", (_name, body, detail, title, message) => {
       it("should keep the HTTP status in problemDetails and message", async () => {
         const { processVoidResponse, UmbracoApiError } = await getApiHelpersModule();
 
@@ -310,6 +310,7 @@ describe("API Call Helpers", () => {
           expect(e).toBeInstanceOf(UmbracoApiError);
           expect((e as any).problemDetails.status).toBe(404);
           expect((e as any).problemDetails.detail).toBe(detail);
+          expect((e as any).problemDetails.title).toBe(title);
           expect((e as any).message).toBe(message);
           expect((e as any).message).not.toContain("undefined");
         }
@@ -359,16 +360,16 @@ describe("API Call Helpers", () => {
       const error = new UmbracoApiError(toProblemDetails({ status: 400, statusText: "Bad Request", data: {} }));
 
       expect(error.problemDetails.status).toBe(400);
-      expect(error.message).toBe("Bad Request");
+      expect(error.message).toBe("Bad Request (HTTP 400)");
     });
   });
 
   describe("executeGetApiCall error bodies without status", () => {
     it.each([
-      ["string body", "  <html>Bad Gateway</html> ", "<html>Bad Gateway</html>"],
-      ["empty object body", {}, "Bad Gateway"],
-      ["null status in body", { status: null, title: "Oops" }, undefined],
-    ] as const)("%s keeps the HTTP status", async (_name, body, detail) => {
+      ["string body", "  <html>Bad Gateway</html> ", "<html>Bad Gateway</html>", undefined],
+      ["empty object body", {}, undefined, "Bad Gateway"],
+      ["null status in body", { status: null, title: "Oops" }, undefined, "Oops"],
+    ] as const)("%s keeps the HTTP status", async (_name, body, detail, title) => {
       const { configureApiClient, executeGetApiCall, UmbracoApiError } = await getApiHelpersModule();
       configureApiClient(() => new MockApiClient());
 
@@ -379,6 +380,7 @@ describe("API Call Helpers", () => {
       expect(error).toBeInstanceOf(UmbracoApiError);
       expect((error as any).problemDetails.status).toBe(502);
       expect((error as any).problemDetails.detail).toBe(detail);
+      expect((error as any).problemDetails.title).toBe(title);
       expect((error as any).message).not.toContain("undefined");
     });
   });
