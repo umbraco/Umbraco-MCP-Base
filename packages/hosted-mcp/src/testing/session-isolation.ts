@@ -13,9 +13,10 @@
  *    its own site and token in KV, and runs the MCP's own `init` hook for each
  *    (the work its Durable Object's `init()` does).
  * 2. Calls each tool from each session, after the other session has started.
- * 3. Calls each tool again and, while the call is waiting on its first Umbraco
- *    request, starts a third session and runs that session's call of the same
- *    tool to completion before resuming the first. Both calls are checked.
+ * 3. Counts the I/O points of each tool call (Umbraco requests and reads from the
+ *    check's own KV), then repeats the call once per point: it pauses the call
+ *    at that point, starts a third session, and runs that session's call of the
+ *    same tool to completion before resuming the first. Both calls are checked.
  *
  * Every outgoing request is recorded by host and bearer token, and attributed
  * to the tool call that made it. A request made during a tool call that doesn't
@@ -67,8 +68,8 @@ export interface SessionIsolationOptions {
   toolCalls: IsolationToolCall[];
   /**
    * What the MCP's Durable Object does in `init()` after `createPerRequestServer`,
-   * e.g. `setServerRef(server.server)`, registering an in-process chained server,
-   * or setting its own auth context. This is where downstream module-level
+   * e.g. registering an in-process chained server or setting its own auth
+   * context. This is where downstream module-level
    * state usually gets written, so include all of it.
    */
   init?: (session: IsolationSession) => void | Promise<void>;
@@ -119,6 +120,8 @@ export interface IsolationViolation {
   kind: "request" | "message";
   /** For a `message`, the MCP method and an empty path. */
   request: { method: string; path: string };
+  /** For `session-started-mid-call`, the I/O point (1-based) the call was paused at. */
+  pausePoint?: number;
   /** The session whose site the request went to (or whose client got the message), or `"unknown"`. */
   sentToSession: string;
   /** The session whose token the request carried, or `"none"` / `"unknown"`; `"n/a"` for a message. */
@@ -135,6 +138,11 @@ export interface SessionIsolationReport {
    * nothing about them. Give them arguments that make them call Umbraco.
    */
   toolsWithoutRequests: string[];
+  /**
+   * Tools whose mid-call phase never paused a call and started a third session,
+   * so concurrent calls weren't checked for them.
+   */
+  toolsWithoutMidCallCheck: string[];
 }
 
 const HOST_SUFFIX = ".isolation-check.invalid";
@@ -151,7 +159,11 @@ interface CallBucket {
   label: string;
   requests: RecordedRequest[];
   messages: { type: string; receivedBy: string }[];
-  onFirstRequest?: () => Promise<void>;
+  /** I/O points seen so far in this call (Umbraco requests and check-KV reads). */
+  ioPoints: number;
+  /** Pause the call at this I/O point (1-based) by running `onPause`. */
+  pauseAt?: number;
+  onPause?: () => Promise<void>;
   hookError?: unknown;
   unauthorizedSent?: boolean;
 }
@@ -159,10 +171,11 @@ interface CallBucket {
 // Two runs would swap each other's `globalThis.fetch`.
 let running = false;
 
-function createMemoryKv(): KVNamespace {
+function createMemoryKv(onRead: () => Promise<void>): KVNamespace {
   const store = new Map<string, string>();
   return {
     get: async (key: string, type?: unknown) => {
+      await onRead();
       const value = store.get(key) ?? null;
       return value !== null && type === "json" ? JSON.parse(value) : value;
     },
@@ -219,7 +232,27 @@ export async function checkSessionIsolation(
 
 async function runCheck(serverOptions: CreateServerOptions, options: SessionIsolationOptions): Promise<SessionIsolationReport> {
   const umbracoVersion = options.umbracoVersion ?? "17.6.0";
-  const kv = createMemoryKv();
+  const callContext = new AsyncLocalStorage<CallBucket | null>();
+
+  /**
+   * Counts an I/O point of the current call and, when it's the one the call is
+   * to be paused at, runs the pause hook to completion before the call resumes.
+   */
+  async function ioPoint(): Promise<void> {
+    const bucket = callContext.getStore();
+    if (!bucket) return;
+    bucket.ioPoints++;
+    const pause = bucket.onPause;
+    if (pause && bucket.ioPoints === bucket.pauseAt) {
+      bucket.onPause = undefined;
+      // Kept rather than thrown here: the tool's own error handling would hide it.
+      await pause().catch((error) => {
+        bucket.hookError ??= error;
+      });
+    }
+  }
+
+  const kv = createMemoryKv(ioPoint);
   // Tracing needs the Workers runtime; the check runs in a test process.
   const { telemetry: _telemetry, ...createOptions } = serverOptions;
 
@@ -229,8 +262,6 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
   const labelOfToken = (token: string | undefined) => (token === undefined ? "none" : (tokenOwners.get(token) ?? "unknown"));
   const isUmbracoRequest =
     options.isUmbracoRequest ?? ((request: RecordedRequest) => isSessionHost(request.host) || tokenOwners.has(request.token ?? ""));
-
-  const callContext = new AsyncLocalStorage<CallBucket | null>();
 
   function tokenEndpointResponse(body: string): Response {
     const owner = tokenOwners.get(new URLSearchParams(body).get("refresh_token") ?? "");
@@ -264,15 +295,8 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
     const bucket = callContext.getStore();
     if (bucket) {
       bucket.requests.push(recorded);
-      const hook = bucket.onFirstRequest;
-      // Only an Umbraco request pauses the call: a non-Umbraco fetch before the tool writes its state would hide the leak.
-      if (hook && isUmbracoRequest(recorded)) {
-        bucket.onFirstRequest = undefined;
-        // Kept rather than thrown here: the tool's own error handling would hide it.
-        await hook().catch((error) => {
-          bucket.hookError ??= error;
-        });
-      }
+      // Only Umbraco requests are I/O points: a non-Umbraco fetch is ignored.
+      if (isUmbracoRequest(recorded)) await ioPoint();
     }
     const custom = await options.respond?.(recorded);
     if (custom) return custom;
@@ -320,21 +344,24 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
   const violations: IsolationViolation[] = [];
   const requestsByTool = new Map<string, number>();
   let checkedRequests = 0;
+  const midCallPauses = new Map<string, number>();
   let midCallSessions = 0;
 
   async function callFrom(
     label: string,
     toolCall: IsolationToolCall,
     phase: IsolationViolation["phase"],
-    startSessionMidCall = phase === "session-started-mid-call",
-  ): Promise<void> {
-    const bucket: CallBucket = { label, requests: [], messages: [] };
-    if (startSessionMidCall) {
-      // A is paused on its first request while C starts and runs the same tool to completion.
-      bucket.onFirstRequest = async () => {
+    pauseAt?: number,
+  ): Promise<number> {
+    const bucket: CallBucket = { label, requests: [], messages: [], ioPoints: 0 };
+    if (pauseAt !== undefined) {
+      // A is paused at its `pauseAt`-th I/O point while C starts and runs the same tool to completion.
+      bucket.pauseAt = pauseAt;
+      bucket.onPause = async () => {
+        midCallPauses.set(toolCall.name, (midCallPauses.get(toolCall.name) ?? 0) + 1);
         const other = `C${++midCallSessions}`;
         await callContext.run(null, () => startSession(other));
-        await callFrom(other, toolCall, phase, false);
+        await callFrom(other, toolCall, phase);
       };
     }
     try {
@@ -347,11 +374,13 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
       requestsByTool.set(toolCall.name, (requestsByTool.get(toolCall.name) ?? 0) + umbracoRequests.length);
       for (const request of umbracoRequests) {
         checkedRequests++;
-        if (request.host === hostFor(label) && labelOfToken(request.token) === label) continue;
+        // Our own site without a token isn't a leak.
+        if (request.host === hostFor(label) && (request.token === undefined || labelOfToken(request.token) === label)) continue;
         violations.push({
           tool: toolCall.name,
           session: label,
           phase,
+          pausePoint: pauseAt,
           kind: "request",
           request: { method: request.method, path: new URL(request.url).pathname },
           sentToSession: labelOfHost(request.host),
@@ -365,6 +394,7 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
           session: label,
           phase,
           kind: "message",
+          pausePoint: pauseAt,
           request: { method: message.type, path: "" },
           sentToSession: message.receivedBy,
           tokenOfSession: "n/a",
@@ -372,6 +402,7 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
       }
     }
     if (bucket.hookError) throw bucket.hookError;
+    return bucket.ioPoints;
   }
 
   try {
@@ -379,10 +410,12 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
     await startSession("B");
     for (const toolCall of options.toolCalls) {
       // B started last, so a module-level value now holds B's state.
-      await callFrom("A", toolCall, "after-other-session-started");
+      const ioPoints = await callFrom("A", toolCall, "after-other-session-started");
       await callFrom("B", toolCall, "after-other-session-started");
-      // A third session starts and calls the tool while A's call is waiting on Umbraco.
-      await callFrom("A", toolCall, "session-started-mid-call");
+      // A third session starts and calls the tool while A's call is paused at each I/O point in turn.
+      for (let point = 1; point <= ioPoints; point++) {
+        await callFrom("A", toolCall, "session-started-mid-call", point);
+      }
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -394,6 +427,7 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
     violations,
     checkedRequests,
     toolsWithoutRequests: options.toolCalls.map((t) => t.name).filter((name) => !requestsByTool.get(name)),
+    toolsWithoutMidCallCheck: options.toolCalls.map((t) => t.name).filter((name) => !midCallPauses.get(name)),
   };
 }
 
@@ -406,10 +440,11 @@ export async function assertSessionIsolation(
   options: SessionIsolationOptions,
 ): Promise<SessionIsolationReport> {
   const report = await checkSessionIsolation(serverOptions, options);
+  const at = (v: IsolationViolation) => (v.pausePoint === undefined ? "" : ` at I/O point ${v.pausePoint}`);
   const problems: string[] = report.violations.map((v) =>
     v.kind === "message"
-      ? `- ${v.tool} called from session ${v.session} (${v.phase}): ${v.request.method} was delivered to session ${v.sentToSession}'s client`
-      : `- ${v.tool} called from session ${v.session} (${v.phase}): ${v.request.method} ${v.request.path} ` +
+      ? `- ${v.tool} called from session ${v.session} (${v.phase}${at(v)}): ${v.request.method} was delivered to session ${v.sentToSession}'s client`
+      : `- ${v.tool} called from session ${v.session} (${v.phase}${at(v)}): ${v.request.method} ${v.request.path} ` +
         `went to session ${v.sentToSession}'s site with session ${v.tokenOfSession}'s token`,
   );
   if (report.toolsWithoutRequests.length > 0) {
@@ -417,6 +452,10 @@ export async function assertSessionIsolation(
       `- made no Umbraco request, so isolation wasn't checked: ${report.toolsWithoutRequests.join(", ")} ` +
         `(pass arguments that make them call Umbraco)`,
     );
+  }
+  const unpaused = report.toolsWithoutMidCallCheck.filter((name) => !report.toolsWithoutRequests.includes(name));
+  if (unpaused.length > 0) {
+    problems.push(`- no session was started mid-call, so concurrent calls weren't checked: ${unpaused.join(", ")}`);
   }
   if (problems.length > 0) {
     throw new Error(

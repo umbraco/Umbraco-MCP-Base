@@ -10,13 +10,16 @@ import { checkSessionIsolation, assertSessionIsolation } from "../session-isolat
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
-/** Set from `init`, the way a downstream worker keeps its own auth context. */
-/** Set from `init`: the last session to start wins. */
+/** Set from `init`, the way a downstream worker keeps its own auth context: the last session to start wins. */
 let moduleLevelServer: { elicitInput: (params: { message: string; requestedSchema: { type: "object"; properties: Record<string, never> } }) => Promise<unknown> } | null = null;
 let moduleLevelAuth: { baseUrl: string; accessToken: string } | null = null;
 
 /** Written at the start of each call and read after an await, so it only breaks when calls overlap. */
 let lazyCallSlot: { baseUrl: string; accessToken: string } | null = null;
+
+/** Written, then read after awaits that aren't Umbraco requests or after a later request. */
+let slotAfterKv: { baseUrl: string; accessToken: string } | null = null;
+let slotAfterFetch: { baseUrl: string; accessToken: string } | null = null;
 
 const collection: ToolCollectionExport = {
   metadata: { name: "probe", displayName: "Probe", description: "" },
@@ -60,6 +63,33 @@ const collection: ToolCollectionExport = {
       },
     },
     {
+      name: "write-kv-read",
+      description: "Writes a module slot, awaits a KV read, then reads the slot.",
+      slices: ["read"],
+      handler: async () => {
+        slotAfterKv = await getSessionUmbracoAuth();
+        await UmbracoManagementClient({ url: "/umbraco/management/api/v1/probe", method: "GET" });
+        const res = await fetch(`${slotAfterKv.baseUrl}/umbraco/management/api/v1/second`, {
+          headers: { authorization: `Bearer ${slotAfterKv.accessToken}` },
+        });
+        return text(await res.json());
+      },
+    },
+    {
+      name: "fetch-write-fetch-read",
+      description: "Requests, writes a module slot, requests again, then reads the slot.",
+      slices: ["read"],
+      handler: async () => {
+        await UmbracoManagementClient({ url: "/umbraco/management/api/v1/first", method: "GET" });
+        slotAfterFetch = await getSessionUmbracoAuth();
+        await UmbracoManagementClient({ url: "/umbraco/management/api/v1/second", method: "GET" });
+        const res = await fetch(`${slotAfterFetch.baseUrl}/umbraco/management/api/v1/third`, {
+          headers: { authorization: `Bearer ${slotAfterFetch.accessToken}` },
+        });
+        return text(await res.json());
+      },
+    },
+    {
       name: "external-fetch-then-lazy-slot",
       description: "Fetches a non-Umbraco URL, then stashes auth at call start and uses it after an await.",
       slices: ["read"],
@@ -70,6 +100,16 @@ const collection: ToolCollectionExport = {
         const res = await fetch(`${lazyCallSlot.baseUrl}/umbraco/management/api/v1/second`, {
           headers: { authorization: `Bearer ${lazyCallSlot.accessToken}` },
         });
+        return text(await res.json());
+      },
+    },
+    {
+      name: "no-token-own-site",
+      description: "Calls the session's own site without a token.",
+      slices: ["read"],
+      handler: async () => {
+        const auth = await getSessionUmbracoAuth();
+        const res = await fetch(`${auth.baseUrl}/umbraco/management/api/v1/public`);
         return text(await res.json());
       },
     },
@@ -154,13 +194,42 @@ describe("checkSessionIsolation", () => {
     const midCall = sequential.violations.filter((v) => v.phase === "session-started-mid-call");
     expect(sequential.violations.filter((v) => v.phase === "after-other-session-started")).toEqual([]);
     // ...but A's second request goes out with C's auth once C's call ran while A was paused.
-    expect(midCall).toHaveLength(1);
-    expect(midCall[0]).toMatchObject({ session: "A", sentToSession: "C1", tokenOfSession: "C1" });
+    expect(midCall.length).toBeGreaterThanOrEqual(1);
+    expect(midCall[0]).toMatchObject({ session: "A", sentToSession: expect.stringMatching(/^C\d+$/), tokenOfSession: expect.stringMatching(/^C\d+$/) });
   });
 
-  it("pauses the call on its first Umbraco request, not an earlier external fetch", async () => {
+  it("doesn't count external fetches as I/O points, so a pause still lands before the slot is read", async () => {
     const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "external-fetch-then-lazy-slot" }] });
-    expect(report.violations.filter((v) => v.phase === "session-started-mid-call")).toHaveLength(1);
+    expect(report.violations.filter((v) => v.phase === "session-started-mid-call").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("catches a slot written, then read after another await (write -> KV await -> read)", async () => {
+    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "write-kv-read" }] });
+    expect(report.violations.some((v) => v.phase === "session-started-mid-call")).toBe(true);
+    expect(report.violations.filter((v) => v.phase === "after-other-session-started")).toEqual([]);
+  });
+
+  it("catches a slot written after the first request and read after the second (fetch -> write -> fetch -> read)", async () => {
+    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "fetch-write-fetch-read" }] });
+    const midCall = report.violations.filter((v) => v.phase === "session-started-mid-call");
+    expect(midCall.length).toBeGreaterThanOrEqual(1);
+    // A pause at the first request is too early to see the leak; a later point is needed.
+    expect(midCall.every((v) => (v.pausePoint ?? 0) > 1)).toBe(true);
+    expect(report.violations.filter((v) => v.phase === "after-other-session-started")).toEqual([]);
+  });
+
+  it("reports a tool whose mid-call phase never paused", async () => {
+    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "no-umbraco-call" }] });
+    expect(report.toolsWithoutMidCallCheck).toEqual(["no-umbraco-call"]);
+    const checked = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] });
+    expect(checked.toolsWithoutMidCallCheck).toEqual([]);
+  });
+
+  it("doesn't flag a request to its own site that carries no token", async () => {
+    const report = await checkSessionIsolation(serverOptions, {
+      toolCalls: [{ name: "no-token-own-site" }],
+    });
+    expect(report.violations).toEqual([]);
   });
 
   it("ignores requests to non-Umbraco hosts and doesn't count them", async () => {
