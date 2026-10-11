@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { UmbracoManagementClient, getSessionUmbracoAuth, type ToolCollectionExport } from "@umbraco-cms/mcp-server-sdk";
+import { UmbracoManagementClient, getSessionUmbracoAuth, getServerRef, setServerRef, clearServerRef, requireRequestContext, resetRequireRequestContext, type ToolCollectionExport } from "@umbraco-cms/mcp-server-sdk";
 import { checkSessionIsolation, assertSessionIsolation } from "../session-isolation.js";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
@@ -316,5 +316,28 @@ describe("checkSessionIsolation", () => {
     const first = checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] });
     await expect(checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] })).rejects.toThrow(/already running/);
     await first;
+  });
+
+  it("restores the require-request-context flag, so module-value calls work afterwards", async () => {
+    const module = { name: "module" } as never;
+    try {
+      await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] });
+      setServerRef(module);
+      expect(getServerRef()).toBe(module);
+    } finally {
+      clearServerRef();
+    }
+  });
+
+  it("keeps the flag when the caller had already required the request context", async () => {
+    requireRequestContext();
+    try {
+      await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "via-sdk-transport" }] });
+      setServerRef({ name: "module" } as never);
+      expect(() => getServerRef()).toThrow("outside a request context");
+    } finally {
+      clearServerRef();
+      resetRequireRequestContext();
+    }
   });
 });

@@ -158,6 +158,11 @@ export function requireRequestContext(): void {
   requestContextRequired = true;
 }
 
+/** Whether {@link requireRequestContext} is currently in effect. */
+export function isRequestContextRequired(): boolean {
+  return requestContextRequired;
+}
+
 /**
  * Resets {@link requireRequestContext}, restoring the module-value fallback.
  * Test-only: hosts must never call it. `requireRequestContext` sets a

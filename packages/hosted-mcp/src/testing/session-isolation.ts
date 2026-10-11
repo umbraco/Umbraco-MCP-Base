@@ -43,6 +43,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema, LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { isRequestContextRequired, resetRequireRequestContext } from "@umbraco-cms/mcp-server-sdk";
 import { createPerRequestServer, type CreateServerOptions } from "../server/create-server.js";
 import { getBackofficeEndpoints, storeUmbracoToken } from "../auth/token-storage.js";
 import type { HostedMcpEnv } from "../types/env.js";
@@ -238,9 +239,12 @@ export async function checkSessionIsolation(
     throw new Error("checkSessionIsolation is already running: concurrent runs would swap each other's globalThis.fetch stub.");
   }
   running = true;
+  // The hosted server turns this process-wide flag on; restore it unless the caller had set it.
+  const wasRequired = isRequestContextRequired();
   try {
     return await runCheck(serverOptions, options);
   } finally {
+    if (!wasRequired) resetRequireRequestContext();
     running = false;
   }
 }
