@@ -223,6 +223,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
   // specified refresh token has already been redeemed" on the second attempt).
   let currentRefreshToken = config.refreshContext?.refreshToken;
   let lastRefreshFailure: RefreshFailure | undefined;
+  let refreshInFlight: Promise<RefreshTokenResult> | undefined;
   let currentExpiresAt = config.expiresAt;
   const normalizedBaseUrl = normalizeBaseUrl(config.baseUrl);
 
@@ -232,6 +233,16 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
    * Only call when `config.refreshContext` and `currentRefreshToken` are set.
    */
   async function refresh(): Promise<RefreshTokenResult> {
+    // Concurrent 401s on this client share one refresh. A second redemption of
+    // the same refresh token would be rejected (OpenIddict rotates it), turning
+    // a healthy session into an `invalid_grant`.
+    refreshInFlight ??= redeemRefreshToken().finally(() => {
+      refreshInFlight = undefined;
+    });
+    return refreshInFlight;
+  }
+
+  async function redeemRefreshToken(): Promise<RefreshTokenResult> {
     const result = await refreshUmbracoToken(
       config.refreshContext!.env,
       config.refreshContext!.tokenKey,

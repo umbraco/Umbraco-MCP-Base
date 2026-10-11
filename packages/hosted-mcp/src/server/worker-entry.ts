@@ -985,6 +985,12 @@ function renderSiteRoutingLandingPage(
 // ============================================================================
 // Info Endpoint
 // ============================================================================
+//
+// The `toolCount`s below call `c.tools(undefined)` — no user and no
+// `umbracoVersion` — so they are approximate by design: this runs before
+// auth, so there is no Umbraco to ask. A version-gated collection counts its
+// oldest (no-version) variant here; the real per-request set is resolved in
+// `createPerRequestServer`, which fetches the connected version.
 
 function renderInfoResponse(
   options: HostedMcpServerOptions,
