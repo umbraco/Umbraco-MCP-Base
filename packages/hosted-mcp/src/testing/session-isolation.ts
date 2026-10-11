@@ -265,7 +265,8 @@ async function runCheck(serverOptions: CreateServerOptions, options: SessionIsol
     if (bucket) {
       bucket.requests.push(recorded);
       const hook = bucket.onFirstRequest;
-      if (hook) {
+      // Only an Umbraco request pauses the call: a non-Umbraco fetch before the tool writes its state would hide the leak.
+      if (hook && isUmbracoRequest(recorded)) {
         bucket.onFirstRequest = undefined;
         // Kept rather than thrown here: the tool's own error handling would hide it.
         await hook().catch((error) => {

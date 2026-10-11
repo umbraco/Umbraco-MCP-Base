@@ -60,6 +60,20 @@ const collection: ToolCollectionExport = {
       },
     },
     {
+      name: "external-fetch-then-lazy-slot",
+      description: "Fetches a non-Umbraco URL, then stashes auth at call start and uses it after an await.",
+      slices: ["read"],
+      handler: async () => {
+        await fetch("https://media-source.example.invalid/image.png");
+        lazyCallSlot = await getSessionUmbracoAuth();
+        await UmbracoManagementClient({ url: "/umbraco/management/api/v1/probe", method: "GET" });
+        const res = await fetch(`${lazyCallSlot.baseUrl}/umbraco/management/api/v1/second`, {
+          headers: { authorization: `Bearer ${lazyCallSlot.accessToken}` },
+        });
+        return text(await res.json());
+      },
+    },
+    {
       name: "fetches-external-source",
       description: "Fetches a non-Umbraco URL, then calls Umbraco.",
       slices: ["read"],
@@ -142,6 +156,11 @@ describe("checkSessionIsolation", () => {
     // ...but A's second request goes out with C's auth once C's call ran while A was paused.
     expect(midCall).toHaveLength(1);
     expect(midCall[0]).toMatchObject({ session: "A", sentToSession: "C1", tokenOfSession: "C1" });
+  });
+
+  it("pauses the call on its first Umbraco request, not an earlier external fetch", async () => {
+    const report = await checkSessionIsolation(serverOptions, { toolCalls: [{ name: "external-fetch-then-lazy-slot" }] });
+    expect(report.violations.filter((v) => v.phase === "session-started-mid-call")).toHaveLength(1);
   });
 
   it("ignores requests to non-Umbraco hosts and doesn't count them", async () => {
