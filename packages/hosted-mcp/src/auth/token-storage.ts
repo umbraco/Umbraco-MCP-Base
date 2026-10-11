@@ -56,6 +56,25 @@ export interface TokenResponse {
   expires_in?: number;
   refresh_token?: string;
   scope?: string;
+  /**
+   * Absolute access-token expiry (epoch milliseconds). Not sent by Umbraco:
+   * stamped from `expires_in` by `storeUmbracoToken` (and so on every refresh),
+   * because a relative `expires_in` with no issue time can't tell a later
+   * reader whether the token is still valid. Entries stored before this field
+   * existed don't have it.
+   */
+  expires_at?: number;
+}
+
+/**
+ * Returns `tokens` with an absolute `expires_at` stamped from `expires_in`,
+ * unless it already carries one (or has no `expires_in` to stamp from).
+ */
+function withExpiresAt(tokens: TokenResponse): TokenResponse {
+  if (typeof tokens.expires_at === "number" || typeof tokens.expires_in !== "number") {
+    return tokens;
+  }
+  return { ...tokens, expires_at: Date.now() + tokens.expires_in * 1000 };
 }
 
 /**
@@ -144,7 +163,8 @@ export async function storeUmbracoToken(
     env,
     `storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
   );
-  const entry: StoredTokenEntry = site ? { tokens, site } : { tokens };
+  const stamped = withExpiresAt(tokens);
+  const entry: StoredTokenEntry = site ? { tokens: stamped, site } : { tokens: stamped };
   await kv.put(
     `umbraco_token:${tokenKey}`,
     JSON.stringify(entry),
@@ -288,6 +308,8 @@ export interface RefreshSuccess {
    */
   refreshToken?: string;
   expiresIn?: number;
+  /** Absolute expiry of `accessToken` (epoch ms), when Umbraco sent `expires_in`. */
+  expiresAt?: number;
 }
 
 /**
@@ -707,7 +729,9 @@ async function performRefresh(
         return fail(attempt.failure);
       }
 
-      const tokens = attempt.tokens;
+      // Stamped here rather than only inside `storeUmbracoToken` so the
+      // caller gets the same absolute expiry that is persisted.
+      const tokens = withExpiresAt(attempt.tokens);
 
       // Cache the rotated token before attempting to persist it: Umbraco has
       // already redeemed the old one at this point, so if the write below
@@ -755,6 +779,7 @@ async function performRefresh(
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresIn: tokens.expires_in,
+        expiresAt: tokens.expires_at,
       };
     }
   );

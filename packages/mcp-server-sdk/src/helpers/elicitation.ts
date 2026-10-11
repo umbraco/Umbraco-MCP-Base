@@ -97,8 +97,9 @@ export class ElicitationUnsupportedError extends Error {
  * Clients that advertise no elicitation capability at all throw
  * {@link ElicitationUnsupportedError}.
  *
- * Uses `getServerRef()` internally — ensure `setServerRef()` has been
- * called during server initialization.
+ * Uses `getServerRef()` internally: the active per-request store's server
+ * (hosted, set by `createPerRequestServer`), else the module server ref from
+ * `setServerRef()` (stdio, CLI, tests).
  *
  * Passes `relatedRequestId` from the handler's `extra` parameter,
  * required for correct elicitation routing over Streamable HTTP.

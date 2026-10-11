@@ -95,6 +95,7 @@ export {
 // Strict JSON Schema (draft 2020-12) tool schemas — works around an
 // upstream @modelcontextprotocol/sdk bug that always advertises draft-7
 export { useDraft202012ToolSchemas } from "./helpers/strict-json-schema-tools.js";
+export { toolCallExtraIndex } from "./helpers/tool-call-params.js";
 
 // Elicitation Helpers
 export {
@@ -183,12 +184,23 @@ export {
   type WithUmbracoVersionContext,
 } from "./umbraco-version/request-context.js";
 
+// The per-request store. Hosted hosts also put the session's own values in it
+// (transport, API client provider, server, Umbraco auth) so nothing per
+// session lives in module scope, which every session in a Worker isolate
+// shares. `getSessionUmbracoAuth` is the accessor for raw `fetch` callers.
 export {
   runWithRequestContext,
   getActiveRequestContext,
   pickCarriedRequestContext,
+  getSessionUmbracoAuth,
   isRequestContextStoreAvailable,
+  requireRequestContext,
+  resetRequireRequestContext,
   type CarriedRequestContext,
+  type RequestSessionContext,
+  type RequestContextStore,
+  type RequestTransport,
+  type SessionUmbracoAuth,
 } from "./request-context/async-request-context.js";
 
 // CLI Introspection & Context Generation
