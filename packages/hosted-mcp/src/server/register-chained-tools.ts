@@ -16,6 +16,8 @@ import {
   expandModesToCollections,
   useDraft202012ToolSchemas,
   jsonSchemaObjectToZodObject,
+  runWithRequestContext,
+  UMBRACO_VERSION_CONTEXT_KEY,
 } from "@umbraco-cms/mcp-server-sdk";
 
 import type { HostedMcpEnv } from "../types/env.js";
@@ -160,15 +162,22 @@ export async function registerChainedTools(
       clientFactory: chainedServer.clientFactory,
     });
 
-    // Discover and register proxied tools
-    const proxiedTools = await discoverProxiedTools(manager);
-
     // The session's per-request store values `createPerRequestServer` built
     // for this server. Each proxied handler runs inside that store, so the
     // chained handler's API calls go out through *this* session's transport
     // (and the chained server's `clientFactory`, when it has one, is scoped
     // to the call by `InProcessConnection`).
     const session = getServerSessionContext(server);
+
+    // Discover and register proxied tools. Discovery runs with the connected
+    // Umbraco version in the store so a collection that gates tools on it
+    // (`collection.tools(user, { umbracoVersion })`) lists them here; outside
+    // the store they would be filtered as if the site were the oldest.
+    const umbracoVersion = session?.[UMBRACO_VERSION_CONTEXT_KEY];
+    const proxiedTools = await runWithRequestContext(
+      umbracoVersion ? { [UMBRACO_VERSION_CONTEXT_KEY]: umbracoVersion } : {},
+      () => discoverProxiedTools(manager),
+    );
 
     for (const pt of proxiedTools) {
       const handler = createProxyHandler(

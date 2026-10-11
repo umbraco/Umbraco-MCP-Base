@@ -676,10 +676,10 @@ async function initPerRequestServer(
   // `getRefreshFailure()` only ever reports something after the fetch client
   // has actually made a request — `fetchCurrentUser` above is what does that
   // here (the server-info fetch does too, but it is an implementation detail
-  // of version capture and shouldn't be relied on alone). If a future change removes or reorders
-  // `fetchCurrentUser` so nothing exercises `fetchClient` before this point,
-  // this check would silently stop firing. Keep something calling through
-  // `fetchClient` ahead of this line.
+  // of version capture and shouldn't be relied on alone). If a future change
+  // removes or reorders `fetchCurrentUser` so nothing exercises `fetchClient`
+  // before this point, this check would silently stop firing. Keep something
+  // calling through `fetchClient` ahead of this line.
   const refreshFailure = fetchClient.getRefreshFailure();
   const degradedRefresh = refreshFailure ? DEGRADED_REFRESH_REASONS[refreshFailure.reason] : null;
   if (degradedRefresh) {
@@ -773,7 +773,6 @@ async function initPerRequestServer(
     filterConfig,
     requestTelemetry,
     session,
-    umbracoVersion,
   );
 
   // Covers the common case (chaining disabled, or a consumer that
@@ -936,9 +935,9 @@ export function withRequestSessionContext<Callback extends (...args: any[]) => a
  * same isolate interleave. When it carries the connected Umbraco version, that
  * version is also on each handler's `extra`.
  *
- * `umbracoVersion` is the connected site's raw version, handed to each
+ * The connected site's raw version is read from `session` and handed to each
  * `collection.tools(currentUser, { umbracoVersion })` so a collection can pick
- * version-gated tools. `undefined` (the fetch failed) means "oldest".
+ * version-gated tools. Absent (no session, or the fetch failed) means "oldest".
  */
 export function registerCollectionTools<TUser>(
   server: McpServer,
@@ -947,8 +946,8 @@ export function registerCollectionTools<TUser>(
   filterConfig: CollectionConfiguration,
   requestTelemetry?: RequestTelemetryContext,
   session?: HostedSessionContext,
-  umbracoVersion?: string,
 ): number {
+  const umbracoVersion = session?.[UMBRACO_VERSION_CONTEXT_KEY];
   let registered = 0;
   for (const collection of collections) {
     const collectionName = collection.metadata.name;
