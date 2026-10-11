@@ -37,7 +37,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
 import { createToolResult } from "./tool-result.js";
 import { pickFields, omitFields } from "./response-trimmer.js";
-import { getActiveRequestContext } from "../request-context/async-request-context.js";
+import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
  * Transport-agnostic HTTP response interface.
@@ -109,6 +109,7 @@ export function getApiClient<TClient>(): TClient {
   if (sessionProvider) {
     return sessionProvider() as TClient;
   }
+  assertModuleFallbackAllowed("getApiClient()");
   if (!clientProvider) {
     throw new Error(
       'API client not configured. Call configureApiClient() at application startup.'

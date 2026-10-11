@@ -31,6 +31,9 @@ import {
   runWithRequestContext,
   getActiveRequestContext,
   pickCarriedRequestContext,
+  isRequestContextStoreAvailable,
+  requireRequestContext,
+  toolCallExtraIndex,
   TelemetryAttributes,
   SERVER_INFORMATION_PATH,
   useDraft202012ToolSchemas,
@@ -495,6 +498,15 @@ async function initPerRequestServer(
   // `siteId` may come from a user-submitted consent form in static
   // multi-site mode; strip control characters before logging so it can't
   // forge log lines on `wrangler tail`.
+  // Per-session values live only in the request store; without it a handler
+  // would read module slots that another session may own.
+  if (!isRequestContextStoreAvailable()) {
+    throw new Error(
+      "mcp-hosted requires AsyncLocalStorage (nodejs_compat_v2 on Cloudflare Workers) to keep per-session state separate."
+    );
+  }
+  requireRequestContext();
+
   const initStartedAt = Date.now();
   const traceId = Math.random().toString(36).slice(2, 8);
   const safeSiteId = sanitizeForLog(props.consentChoices?.siteId);
@@ -772,8 +784,18 @@ export function runInSessionContext<T>(server: McpServer, fn: () => T): T {
   }
   return runWithRequestContext(
     { ...pickCarriedRequestContext(getActiveRequestContext()), ...session },
-    fn
+    () => {
+      assertStoreActive("runInSessionContext");
+      return fn();
+    }
   );
+}
+
+/** Fails hard when the store did not take, instead of running on module scope. */
+function assertStoreActive(caller: string): void {
+  if (getActiveRequestContext() === undefined) {
+    throw new Error(`${caller}: no request context is active, so this session's state cannot be entered.`);
+  }
 }
 
 /**
@@ -796,12 +818,13 @@ export function withRequestSessionContext<Callback extends (...args: any[]) => a
     return callback;
   }
   return function enterSessionContext(this: unknown, ...params: any[]) {
-    // `extra` is the last argument: `(args, extra)` with an input schema,
-    // `(extra)` without. Only its carried, namespaced keys are picked.
-    const extra = params[params.length - 1];
-    return runWithRequestContext({ ...pickCarriedRequestContext(extra), ...session }, () =>
-      callback.apply(this, params)
-    );
+    // `extra` is `(args, extra)` with an input schema, `(extra)` without.
+    // Only its carried, namespaced keys are picked.
+    const extra = params[toolCallExtraIndex(params)];
+    return runWithRequestContext({ ...pickCarriedRequestContext(extra), ...session }, () => {
+      assertStoreActive("tool call");
+      return callback.apply(this, params);
+    });
   } as Callback;
 }
 

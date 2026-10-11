@@ -14,6 +14,8 @@ import {
   getActiveRequestContext,
   getSessionUmbracoAuth,
   pickCarriedRequestContext,
+  requireRequestContext,
+  resetRequireRequestContext,
 } from "../async-request-context.js";
 import { UmbracoManagementClient, setCustomTransport } from "../../http/umbraco-fetch-client.js";
 import { configureApiClient, getApiClient } from "../../helpers/api-call-helpers.js";
@@ -27,6 +29,7 @@ const transportFor = (name: string) =>
 const fakeServer = (name: string) => ({ name }) as unknown as Server;
 
 afterEach(() => {
+  resetRequireRequestContext();
   setCustomTransport(null);
   configureApiClient(null as any);
   clearServerRef();
@@ -185,5 +188,28 @@ describe("InProcessConnection.callTool and the API client", () => {
     expect(getApiClient()).toBe("module-client");
     expect((await pending).content[0].text).toBe("chained-client");
     expect(getApiClient()).toBe("module-client");
+  });
+});
+
+describe("requireRequestContext", () => {
+  it("stops the accessors falling back to module values outside a store", async () => {
+    setCustomTransport(transportFor("module"));
+    configureApiClient(() => ({ via: "module" }));
+    setServerRef(fakeServer("module"));
+    requireRequestContext();
+
+    expect(() => getApiClient()).toThrow("outside a request context");
+    expect(() => getServerRef()).toThrow("outside a request context");
+    await expect(UmbracoManagementClient({ url: "/x", method: "GET" })).rejects.toThrow(
+      "outside a request context"
+    );
+  });
+
+  it("still lets a store's own values through", async () => {
+    requireRequestContext();
+    const via = await runWithRequestContext({ transport: transportFor("session") }, () =>
+      UmbracoManagementClient({ url: "/x", method: "GET" })
+    );
+    expect(via).toEqual({ via: "session" });
   });
 });

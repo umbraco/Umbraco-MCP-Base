@@ -34,7 +34,7 @@
  */
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { getActiveRequestContext } from "../request-context/async-request-context.js";
+import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 let _server: Server | null = null;
 
@@ -65,6 +65,7 @@ export function getServerRef(): Server {
   if (sessionServer) {
     return sessionServer;
   }
+  assertModuleFallbackAllowed("getServerRef()");
   if (!_server) {
     throw new Error(
       "Server reference not set. Call setServerRef(server.server) during initialization."

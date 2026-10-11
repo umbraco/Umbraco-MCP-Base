@@ -143,6 +143,40 @@ export function isRequestContextStoreAvailable(): boolean {
   return getStore() !== null;
 }
 
+let requestContextRequired = false;
+
+/**
+ * Makes `getApiClient()`, `getServerRef()` and `UmbracoManagementClient` throw
+ * instead of falling back to their module-level values (`configureApiClient`,
+ * `setServerRef`, `setCustomTransport`) whenever no store is active.
+ *
+ * Hosts that run several sessions in one isolate turn this on: a module value
+ * there may belong to a different session, so reading it would cross sessions.
+ * Stdio, CLI and tests leave it off.
+ */
+export function requireRequestContext(): void {
+  requestContextRequired = true;
+}
+
+/** Resets {@link requireRequestContext}. For tests. */
+export function resetRequireRequestContext(): void {
+  requestContextRequired = false;
+}
+
+/**
+ * Throws when a host has required the request context and none is active.
+ * Called by the accessors before they fall back to a module-level value.
+ *
+ * @param what - The accessor name, for the error message
+ */
+export function assertModuleFallbackAllowed(what: string): void {
+  if (requestContextRequired && getActiveRequestContext() === undefined) {
+    throw new Error(
+      `${what} was called outside a request context. This host requires a per-session request context, so module-level values are not used (they may belong to another session).`
+    );
+  }
+}
+
 /**
  * Picks only the carried, namespaced values off a tool-call `context`.
  *

@@ -837,6 +837,13 @@ Hosted servers must pass `clientFactory` to `createPerRequestServer`: it becomes
 the session's API client provider. Without one, `getApiClient()` throws "API
 client not configured" rather than falling back to a module-level client.
 
+Hosts that run several sessions in one isolate call `requireRequestContext()`
+(`createPerRequestServer` does). From then on `getApiClient()`, `getServerRef()`
+and `UmbracoManagementClient` throw "outside a request context" when no store
+is active, instead of falling back to `configureApiClient` / `setServerRef` /
+`setCustomTransport` values that may belong to another session. Hosted start-up
+also fails when `isRequestContextStoreAvailable()` is `false`.
+
 Anything a worker registers directly on the server (`server.registerTool`,
 resources, prompts) runs outside the store. Wrap its body in
 `runInSessionContext(server, fn)` from `@umbraco-cms/mcp-hosted`:
