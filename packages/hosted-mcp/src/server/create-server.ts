@@ -46,7 +46,7 @@ import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import type { AuthProps, ConsentChoices } from "../types/auth.js";
-import type { RefreshFailureReason } from "../auth/token-storage.js";
+import { deleteStoredUmbracoToken, type RefreshFailureReason } from "../auth/token-storage.js";
 
 /**
  * Fetches the current user from Umbraco's Management API.
@@ -635,6 +635,19 @@ async function initPerRequestServer(
   const refreshFailure = fetchClient.getRefreshFailure();
   const degradedRefresh = refreshFailure ? DEGRADED_REFRESH_REASONS[refreshFailure.reason] : null;
   if (degradedRefresh) {
+    // Only `expired` means the stored entry is dead for good: drop it, so the
+    // client's next request finds no inner token and the API handler wrapper
+    // (`createSiteRoutingApiHandler`) revokes the outer grant and 401s it back
+    // into a fresh sign-in. Not on `misconfigured` / `request_rejected`: a
+    // fresh login replays the same broken client or request, so signing in
+    // again can't help and the entry stays put for an administrator to fix.
+    if (refreshFailure!.reason === "expired") {
+      try {
+        await deleteStoredUmbracoToken(env.OAUTH_KV, props.umbracoTokenKey);
+      } catch (error) {
+        console.error("[mcp-hosted] failed to delete expired Umbraco token entry:", error);
+      }
+    }
     const server = createAuthExpiredServer(options, baseInstructions, degradedRefresh.message);
     console.log(
       `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=degraded-auth-expired cause=${degradedRefresh.cause} tools=1 elapsedMs=${Date.now() - initStartedAt}`

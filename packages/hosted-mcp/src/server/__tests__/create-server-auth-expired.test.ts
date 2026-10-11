@@ -26,6 +26,8 @@ jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
   CAPTURE_RAW_HTTP_RESPONSE: { returnFullResponse: true },
 }));
 
+const kvDelete = jest.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
+
 const env = {
   UMBRACO_BASE_URL: "https://example.com",
   UMBRACO_OAUTH_CLIENT_ID: "test-client",
@@ -33,7 +35,7 @@ const env = {
   OAUTH_KV: {
     get: async () => null,
     put: async () => undefined,
-    delete: async () => undefined,
+    delete: kvDelete,
   },
 } as unknown as HostedMcpEnv;
 
@@ -69,6 +71,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
 
   beforeEach(() => {
     refreshFailure = undefined;
+    kvDelete.mockClear();
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   });
 
@@ -285,6 +288,53 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
     expect(init.attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-xyz");
     expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("deletes the inner KV entry when the refresh token expired", async () => {
+    // #371: with the entry gone, the API handler wrapper revokes the outer
+    // grant and 401s the client back into a fresh sign-in.
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).toHaveBeenCalledTimes(1);
+    expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
+  });
+
+  it.each([["misconfigured"], ["request_rejected"], ["network"], ["server_error"]] as const)(
+    "does not delete the inner KV entry when the refresh failed with %s",
+    async (reason) => {
+      // Signing in again can't fix a broken client/request, and a blip or 5xx
+      // must not end a session — so only `expired` drops the entry.
+      refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
+
+      const { createPerRequestServer } = await import("../create-server.js");
+      await createPerRequestServer(baseOptions, env, props);
+
+      expect(kvDelete).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not delete the inner KV entry when no refresh failed", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it("still returns the degraded server when deleting the expired entry fails", async () => {
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+    kvDelete.mockRejectedValueOnce(new Error("kv down"));
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { createPerRequestServer } = await import("../create-server.js");
+      const server = await createPerRequestServer(baseOptions, env, props);
+      expect(toolNames(server)).toEqual(["authentication-expired"]);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("isAuthExpiredServer recognises a real degraded server and rejects a real full one", async () => {

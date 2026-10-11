@@ -10,7 +10,10 @@
 
 import type { HostedMcpEnv } from "../types/env.js";
 import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
+import type { AuthProps } from "../types/auth.js";
 import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
+import { getStoredUmbracoToken } from "../auth/token-storage.js";
+import { resourceMetadataUrlFor } from "../server/resource-metadata.js";
 
 export interface SiteRouterOptions {
   /**
@@ -105,6 +108,14 @@ export interface SiteRoutingApiHandlerOptions {
  * get rewritten to the McpAgent's internal path *after* OAuthProvider's
  * audience check has run on the original URL. Use as the OAuthProvider's
  * `apiHandler` when `apiRoute` includes the site-routing prefix.
+ *
+ * Also checks, on every authenticated request, that the login's inner Umbraco
+ * token entry still exists in KV. The outer grant (issued by OAuthProvider)
+ * outlives Umbraco's refresh token, and the Durable Object deletes the inner
+ * entry once Umbraco definitively rejects it. When it's gone, the outer grant
+ * is revoked and the request gets a `401 invalid_token`, which MCP clients
+ * answer by signing in again — rather than being left on the degraded
+ * one-tool `authentication-expired` server that no client ever calls (#371).
  */
 export function createSiteRoutingApiHandler(
   baseHandler: { fetch: FetchHandler },
@@ -114,6 +125,11 @@ export function createSiteRoutingApiHandler(
   const internalPath = options.internalPath ?? "/mcp";
   return {
     async fetch(request, env, ctx) {
+      // Before the rewrite: the 401's `resource_metadata` must be built from
+      // the URL OAuthProvider saw, exactly as on its own 401s.
+      const expired = await rejectIfUmbracoSignInGone(request, env, ctx);
+      if (expired) return expired;
+
       const url = new URL(request.url);
       if (url.pathname.startsWith(externalPrefix)) {
         url.pathname = internalPath;
@@ -122,4 +138,65 @@ export function createSiteRoutingApiHandler(
       return baseHandler.fetch(request, env, ctx);
     },
   };
+}
+
+/**
+ * Returns a `401 invalid_token` (after revoking the outer grant) when this
+ * authenticated request's inner Umbraco token entry is missing from KV, or
+ * `null` to let the request through.
+ *
+ * Fails open on anything that isn't a definite "entry is gone": no token key
+ * in `ctx.props` (nothing to check) or a KV read that throws (an outage must
+ * not sign every user out).
+ */
+async function rejectIfUmbracoSignInGone(
+  request: Request,
+  env: HostedMcpEnv,
+  ctx: ExecutionContext
+): Promise<Response | null> {
+  const props = (ctx as { props?: unknown }).props as Partial<AuthProps> | undefined;
+  const tokenKey = props?.umbracoTokenKey;
+  if (typeof tokenKey !== "string" || tokenKey.length === 0) return null;
+
+  try {
+    if (await getStoredUmbracoToken(env.OAUTH_KV, tokenKey)) return null;
+  } catch (err) {
+    console.error("[mcp-hosted] failed to read Umbraco token entry; letting the request through:", err);
+    return null;
+  }
+
+  // OAuthProvider's access tokens are `{userId}:{grantId}:{secret}`. Parsed
+  // defensively: whatever the header holds, the client still gets the 401.
+  const grant = parseOuterAccessToken(request.headers.get("Authorization"));
+  if (grant) {
+    try {
+      await env.OAUTH_PROVIDER.revokeGrant(grant.grantId, grant.userId);
+    } catch (err) {
+      console.error("[mcp-hosted] failed to revoke outer grant for expired Umbraco sign-in:", err);
+    }
+  }
+
+  const description = "Umbraco sign-in expired";
+  return new Response(
+    JSON.stringify({ error: "invalid_token", error_description: description }),
+    {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": `Bearer realm="OAuth", resource_metadata="${resourceMetadataUrlFor(request.url)}", error="invalid_token", error_description="${description}"`,
+      },
+    }
+  );
+}
+
+/** Splits an OAuthProvider bearer token into its user and grant ids, or `null`. */
+function parseOuterAccessToken(
+  authorization: string | null
+): { userId: string; grantId: string } | null {
+  if (!authorization?.startsWith("Bearer ")) return null;
+  const parts = authorization.slice("Bearer ".length).split(":");
+  if (parts.length !== 3) return null;
+  const [userId, grantId, secret] = parts;
+  if (!userId || !grantId || !secret) return null;
+  return { userId, grantId };
 }

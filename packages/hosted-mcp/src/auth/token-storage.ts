@@ -157,6 +157,23 @@ export async function storeUmbracoToken(
 }
 
 /**
+ * Deletes a stored Umbraco token entry from KV.
+ *
+ * Used once Umbraco has definitively rejected the entry's refresh token
+ * (`reason: "expired"`): the entry can never authenticate again, and its
+ * absence is what the API handler wrapper (`createSiteRoutingApiHandler`)
+ * keys off to revoke the outer grant and send the client back through sign-in.
+ */
+export async function deleteStoredUmbracoToken(
+  kv: KVNamespace,
+  tokenKey: string
+): Promise<void> {
+  await kv.delete(`umbraco_token:${tokenKey}`);
+  // A cached rotation for a dead session must not outlive its KV entry.
+  lastRotatedTokens.delete(tokenKey);
+}
+
+/**
  * Retrieves a stored Umbraco token entry from KV.
  *
  * Reads both the current `{ tokens, site? }` envelope and the legacy
