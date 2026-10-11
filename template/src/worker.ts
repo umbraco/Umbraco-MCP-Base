@@ -182,7 +182,8 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
     let sessionId: string | undefined;
     try {
       sessionId = this.getSessionId?.();
-    } catch {
+    } catch (error) {
+      console.warn("[mcp-hosted] could not read MCP session id for telemetry:", error);
       sessionId = undefined;
     }
 
