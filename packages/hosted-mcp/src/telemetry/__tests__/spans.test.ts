@@ -102,6 +102,40 @@ describe("mcp.server.init span", () => {
     });
   });
 
+  it("stamps the session id and tenant on a degraded (no-token-in-kv) start", async () => {
+    // Regression for #371: degraded starts carried no session or tenant, so
+    // there was no way to tell which session/customer was stuck on the
+    // single-tool server.
+    const { createPerRequestServer } = await import("../../server/create-server.js");
+    const { TelemetryAttributes } = await import("@umbraco-cms/mcp-server-sdk");
+
+    await createPerRequestServer(
+      baseOptions,
+      { ...degradedEnv, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
+      { ...props, consentChoices: { siteId: "my-site" } },
+      "session-abc",
+    );
+
+    const attributes = spanNamed(SERVER_INIT_SPAN)!.attributes;
+    expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-abc");
+    // Hashed, never the plaintext alias.
+    expect(attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
+    expect(attributes[TelemetryAttributes.TENANT]).not.toBe("my-site");
+  });
+
+  it("leaves the session id and tenant unset when neither is available", async () => {
+    const { createPerRequestServer } = await import("../../server/create-server.js");
+    const { TelemetryAttributes } = await import("@umbraco-cms/mcp-server-sdk");
+
+    // Existing three-argument callers keep compiling and working.
+    await createPerRequestServer(baseOptions, degradedEnv, props);
+
+    const attributes = spanNamed(SERVER_INIT_SPAN)!.attributes;
+    expect(attributes).not.toHaveProperty(TelemetryAttributes.MCP_SESSION_ID);
+    expect(attributes).not.toHaveProperty(TelemetryAttributes.TENANT);
+  });
+
   it("keeps the :start and :done log lines with their correlation id", async () => {
     const { createPerRequestServer } = await import("../../server/create-server.js");
 
