@@ -143,9 +143,39 @@ export function sanitizeStringInput(
  * Honored on any field at any depth — strings, objects, arrays. Marking an
  * object or array opts the whole subtree out (useful for host-injected payloads
  * like ChatGPT's `openai/fileParams` file references, where the wire shape is
- * the host's contract and must pass through verbatim).
+ * the host's contract and must pass through verbatim). Also the escape hatch
+ * for secret-like string fields whose names don't match the end-anchored
+ * `password` / `secret` name rule, which relaxes URL-shaped checks automatically.
+ * The name rule never applies to `z.record` keys, which the caller chooses.
  */
 export const RAW_FIELD_MARKER = "[raw]";
+
+/**
+ * Name rule for secret-bearing string fields: a key ending in `password` or
+ * `secret` (case-insensitive) holds free text, not a URL fragment, so the
+ * path-traversal, query-param and pre-encoded checks are skipped. The
+ * control-character check still runs. Anchored at the end of the key, so
+ * `passwordHint` is still fully checked. Use `[raw]` for secret fields whose
+ * names don't match.
+ */
+const SECRET_FIELD_NAME = /(password|secret)$/i;
+
+const SECRET_FIELD_OPTIONS: SanitizeStringOptions = {
+  allowPathTraversal: true,
+  allowQueryParams: true,
+  allowPreEncoded: true,
+};
+
+/**
+ * Sanitises a string leaf, relaxing the URL-shaped checks when the
+ * schema-declared key it sits under matches the secret-name rule. `declaredKey`
+ * is `undefined` under a `z.record`, whose keys are caller-chosen and so must
+ * never opt a value out of the checks.
+ */
+function sanitizeStringLeaf(value: string, fieldPath: string, declaredKey: string | undefined): void {
+  const relaxed = declaredKey !== undefined && SECRET_FIELD_NAME.test(declaredKey);
+  sanitizeStringInput(value, fieldPath, relaxed ? SECRET_FIELD_OPTIONS : undefined);
+}
 
 /**
  * Walks past wrappers like `ZodOptional` / `ZodDefault` / `ZodNullable` to the
@@ -217,7 +247,7 @@ const PASSTHROUGH_SCALAR_TAGS = new Set([
  * sanitiser only needs to sanitise string content where the runtime
  * value tells it where strings live.
  */
-function sanitizeUnion(value: unknown, inner: any, fieldPath: string): void {
+function sanitizeUnion(value: unknown, inner: any, fieldPath: string, declaredKey: string | undefined): void {
   const options = inner?._def?.options;
   if (!Array.isArray(options)) return;
   for (const option of options) {
@@ -235,7 +265,7 @@ function sanitizeUnion(value: unknown, inner: any, fieldPath: string): void {
       (optTag === "undefined" && value === undefined) ||
       (optTag && PASSTHROUGH_SCALAR_TAGS.has(optTag));
     if (compatible) {
-      sanitizeAgainstSchema(value, option, fieldPath);
+      sanitizeAgainstSchema(value, option, fieldPath, declaredKey);
       return;
     }
   }
@@ -253,7 +283,12 @@ function sanitizeUnion(value: unknown, inner: any, fieldPath: string): void {
  * content un-sanitised. Authors hitting the error can mark the field
  * `[raw]` after deciding how to validate its contents.
  */
-function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): void {
+function sanitizeAgainstSchema(
+  value: unknown,
+  schema: any,
+  fieldPath: string,
+  declaredKey: string | undefined
+): void {
   if (!schema) return;
   const inner = unwrapSchema(schema);
   if (hasRawMarker(schema, inner)) return;
@@ -262,7 +297,7 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
   if (!tag) return;
 
   if (tag === "string") {
-    if (typeof value === "string") sanitizeStringInput(value, fieldPath);
+    if (typeof value === "string") sanitizeStringLeaf(value, fieldPath, declaredKey);
     return;
   }
 
@@ -270,7 +305,7 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
     if (!Array.isArray(value)) return;
     const element = inner._def?.element;
     if (element) {
-      value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`));
+      value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`, declaredKey));
     }
     return;
   }
@@ -282,7 +317,7 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         if (!Object.prototype.hasOwnProperty.call(shape, k)) continue;
         const child = shape[k];
-        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`);
+        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`, k);
       }
     }
     return;
@@ -296,13 +331,13 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
     const valueSchema = inner._def?.valueType;
     if (!valueSchema) return;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`);
+      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`, undefined);
     }
     return;
   }
 
   if (tag === "union" || tag === "discriminatedUnion") {
-    sanitizeUnion(value, inner, fieldPath);
+    sanitizeUnion(value, inner, fieldPath, declaredKey);
     return;
   }
 
@@ -326,6 +361,11 @@ function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): 
  * any depth are passed through `sanitizeStringInput`. Nested `ZodObject` and
  * `ZodArray` containers are descended into structurally — the handler receives
  * the input verbatim (no reshaping, no key reordering, no copies).
+ *
+ * String leaves whose key ends in `password` or `secret` (case-insensitive)
+ * skip the path-traversal, query-param and pre-encoded checks but still get the
+ * control-character check. Use `[raw]` for secret fields the name rule misses.
+ * Don't route such a field into a URL path — it would lose the URL-shaped checks.
  *
  * Fields whose `.describe()` contains the `[raw]` marker are skipped:
  * - On a `ZodString` field → that string passes through unsanitised.
@@ -359,14 +399,15 @@ export function withInputSanitization<
         const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
           if (Object.prototype.hasOwnProperty.call(schema, key)) {
-            sanitizeAgainstSchema(value, schema[key], key);
+            sanitizeAgainstSchema(value, schema[key], key, key);
           } else if (typeof value === "string") {
             // Top-level string not in the declared shape — the upstream MCP
             // SDK strips unknown keys via Zod parse, but the decorator is
             // standalone-consumable (in-process MCP, tests). Fall back to
             // string sanitisation so a path-traversal/control-char value
             // can't reach the handler if the caller didn't run validation.
-            sanitizeStringInput(value, key);
+            // The key is caller-chosen, so it never relaxes the checks.
+            sanitizeStringLeaf(value, key, undefined);
           }
         }
       }
