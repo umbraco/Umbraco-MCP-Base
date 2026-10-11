@@ -121,17 +121,20 @@ describe("API Call Helpers", () => {
       expect(error.problemDetails).toBe(problemDetails);
     });
 
-    it("should use status in message when detail is missing", async () => {
+    it("should use title in message when detail is missing", async () => {
       const { UmbracoApiError } = await getApiHelpersModule();
 
-      const problemDetails: ProblemDetails = {
-        status: 500,
-        title: "Server Error"
-      };
+      const error = new UmbracoApiError({ status: 500, title: "Server Error" });
 
-      const error = new UmbracoApiError(problemDetails);
+      expect(error.message).toBe("Server Error");
+    });
 
-      expect(error.message).toBe("API error: 500");
+    it("should use HTTP status in message when detail and title are missing", async () => {
+      const { UmbracoApiError } = await getApiHelpersModule();
+
+      const error = new UmbracoApiError({ status: 500 });
+
+      expect(error.message).toBe("HTTP 500");
     });
 
     it("should be instanceof Error", async () => {
@@ -278,6 +281,50 @@ describe("API Call Helpers", () => {
         expect(e).toBeInstanceOf(UmbracoApiError);
         expect((e as any).problemDetails.detail).toBe("Not Found");
         expect((e as any).problemDetails.status).toBe(404);
+      }
+    });
+
+    describe.each([
+      ["empty object body", {}, undefined, "HTTP 404"],
+      ["string body", "  <html>Bad Gateway</html>  ", "<html>Bad Gateway</html>", "<html>Bad Gateway</html>"],
+      ["empty body", null, "Not Found", "Not Found"],
+      ["title-only body", { title: "Missing" }, undefined, "Missing"],
+    ] as const)("%s", (_name, body, detail, message) => {
+      it("should keep the HTTP status in problemDetails and message", async () => {
+        const { processVoidResponse, UmbracoApiError } = await getApiHelpersModule();
+
+        try {
+          processVoidResponse(createMockHttpResponse(404, body as any, "Not Found"));
+          fail("Expected to throw");
+        } catch (e) {
+          expect(e).toBeInstanceOf(UmbracoApiError);
+          expect((e as any).problemDetails.status).toBe(404);
+          expect((e as any).problemDetails.detail).toBe(detail);
+          expect((e as any).message).toBe(message);
+          expect((e as any).message).not.toContain("undefined");
+        }
+      });
+    });
+
+    it("should let a status in the body win over the HTTP status", async () => {
+      const { processVoidResponse } = await getApiHelpersModule();
+
+      try {
+        processVoidResponse(createMockHttpResponse(502, { status: 404 } as any, "Bad Gateway"));
+        fail("Expected to throw");
+      } catch (e) {
+        expect((e as any).problemDetails.status).toBe(404);
+      }
+    });
+
+    it("should cap a string body at 500 characters", async () => {
+      const { processVoidResponse } = await getApiHelpersModule();
+
+      try {
+        processVoidResponse(createMockHttpResponse(502, "x".repeat(2000) as any, "Bad Gateway"));
+        fail("Expected to throw");
+      } catch (e) {
+        expect((e as any).problemDetails.detail).toHaveLength(500);
       }
     });
   });
