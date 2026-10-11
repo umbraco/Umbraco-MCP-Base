@@ -43,6 +43,12 @@ export interface OAuthProviderHelpers {
     props: unknown;
   }): Promise<{ redirectTo: string }>;
   lookupClient(clientId: string): Promise<unknown>;
+  /**
+   * Revokes an outer (Worker-issued) grant and every token minted from it.
+   * Used to send a client back through sign-in once its inner Umbraco token
+   * entry is gone (see `createSiteRoutingApiHandler`).
+   */
+  revokeGrant(grantId: string, userId: string): Promise<void>;
 }
 
 // ============================================================================

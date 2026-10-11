@@ -25,6 +25,7 @@ import type {
 } from "../types/multi-site.js";
 import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { createSiteRouter } from "../site-routing/site-router.js";
+import { rewriteResourceMetadataForTenant } from "./resource-metadata.js";
 import {
   matchTenantOAuthPath,
   dispatchTenantOAuth,
@@ -500,16 +501,10 @@ function rewriteWwwAuthenticateForTenant(
   const wwwAuth = response.headers.get("www-authenticate");
   if (!wwwAuth) return response;
 
-  const url = new URL(request.url);
-  const tenantMatch = url.pathname.match(/^\/at\/([^/]+)\//);
-  if (!tenantMatch) return response;
-  const alias = tenantMatch[1];
-
-  const rootPrmUrl = `${url.origin}/.well-known/oauth-protected-resource`;
-  const tenantPrmUrl = `${url.origin}/.well-known/oauth-protected-resource/at/${alias}`;
   const rewritten = wwwAuth.replace(
-    `resource_metadata="${rootPrmUrl}"`,
-    `resource_metadata="${tenantPrmUrl}"`,
+    /resource_metadata="([^"]*)"/,
+    (_match, value: string) =>
+      `resource_metadata="${rewriteResourceMetadataForTenant(value, request.url)}"`,
   );
   if (rewritten === wwwAuth) return response;
 

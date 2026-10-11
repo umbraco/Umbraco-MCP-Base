@@ -14,10 +14,15 @@ import type { RefreshFailure } from "../../auth/token-storage.js";
 
 // The fetch client is what reports the refresh failure, so it's the seam.
 let refreshFailure: RefreshFailure | undefined;
+/** The refresh token the (mocked) failed refresh posted and Umbraco rejected. */
+let rejectedRefreshToken: string | undefined;
 
 const mockFetchClient = Object.assign(
   jest.fn<any>().mockResolvedValue({ allowedSections: ["content"] }),
-  { getRefreshFailure: () => refreshFailure }
+  {
+    getRefreshFailure: () => refreshFailure,
+    getRejectedRefreshToken: () => rejectedRefreshToken,
+  }
 );
 
 jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
@@ -26,14 +31,23 @@ jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
   CAPTURE_RAW_HTTP_RESPONSE: { returnFullResponse: true },
 }));
 
+const kvDelete = jest.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
+/** What KV holds for this login when the server re-reads it before deleting. */
+let storedRefreshToken: string | undefined;
+const kvGet = jest.fn(async () =>
+  storedRefreshToken === undefined
+    ? null
+    : JSON.stringify({ tokens: { access_token: "a", refresh_token: storedRefreshToken } })
+);
+
 const env = {
   UMBRACO_BASE_URL: "https://example.com",
   UMBRACO_OAUTH_CLIENT_ID: "test-client",
   COOKIE_ENCRYPTION_KEY: "0".repeat(64),
   OAUTH_KV: {
-    get: async () => null,
+    get: kvGet,
     put: async () => undefined,
-    delete: async () => undefined,
+    delete: kvDelete,
   },
 } as unknown as HostedMcpEnv;
 
@@ -69,6 +83,9 @@ describe("createPerRequestServer with a rejected refresh token", () => {
 
   beforeEach(() => {
     refreshFailure = undefined;
+    rejectedRefreshToken = "rt-rejected";
+    storedRefreshToken = "rt-rejected";
+    kvDelete.mockClear();
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
   });
 
@@ -285,6 +302,75 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
     expect(init.attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-xyz");
     expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("deletes the inner KV entry when the refresh token expired", async () => {
+    // #371: with the entry gone, the API handler wrapper revokes the outer
+    // grant and 401s the client back into a fresh sign-in.
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).toHaveBeenCalledTimes(1);
+    expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
+  });
+
+  it("does NOT delete an entry rotated by a concurrent refresh", async () => {
+    // `invalid_grant` is only definitive for the token posted. If another
+    // request rotated the entry meanwhile, the session is alive.
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+    storedRefreshToken = "rt-rotated-by-someone-else";
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it("does not delete when the rejected refresh token is unknown", async () => {
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+    rejectedRefreshToken = undefined;
+
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([["misconfigured"], ["request_rejected"], ["network"], ["server_error"]] as const)(
+    "does not delete the inner KV entry when the refresh failed with %s",
+    async (reason) => {
+      // Signing in again can't fix a broken client/request, and a blip or 5xx
+      // must not end a session — so only `expired` drops the entry.
+      refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
+
+      const { createPerRequestServer } = await import("../create-server.js");
+      await createPerRequestServer(baseOptions, env, props);
+
+      expect(kvDelete).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not delete the inner KV entry when no refresh failed", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(baseOptions, env, props);
+
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it("still returns the degraded server when deleting the expired entry fails", async () => {
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+    kvDelete.mockRejectedValueOnce(new Error("kv down"));
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { createPerRequestServer } = await import("../create-server.js");
+      const server = await createPerRequestServer(baseOptions, env, props);
+      expect(toolNames(server)).toEqual(["authentication-expired"]);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("stamps the tenant but no session id on a refresh-failure degraded start without a session id", async () => {
