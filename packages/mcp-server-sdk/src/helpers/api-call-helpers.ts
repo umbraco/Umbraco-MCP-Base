@@ -57,8 +57,15 @@ export interface HttpResponse<T = unknown> {
  */
 export class UmbracoApiError extends Error {
   constructor(public readonly problemDetails: ProblemDetails) {
-    super(problemDetails.detail || problemDetails.title || `HTTP ${problemDetails.status}`);
+    super(UmbracoApiError.formatMessage(problemDetails));
     this.name = 'UmbracoApiError';
+  }
+
+  /** `detail`, else `<title> (HTTP <status>)`, else `HTTP <status>` — never contains `undefined`. */
+  private static formatMessage({ detail, title, status }: ProblemDetails): string {
+    if (detail) return detail;
+    if (title) return status === undefined ? title : `${title} (HTTP ${status})`;
+    return `HTTP ${status ?? 'error'}`;
   }
 }
 
@@ -68,15 +75,23 @@ const MAX_STRING_DETAIL_LENGTH = 500;
 /**
  * Builds ProblemDetails from an error response, always carrying the HTTP status.
  * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
+ * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText`.
+ * Use this wherever you construct an `UmbracoApiError` from a raw response.
  */
-function toProblemDetails(response: HttpResponse<unknown>): ProblemDetails {
+export function toProblemDetails(
+  response: Pick<HttpResponse<unknown>, 'status' | 'statusText' | 'data'>
+): ProblemDetails {
   const body = response.data;
   if (typeof body === 'string' && body.trim()) {
     return { status: response.status, detail: body.trim().slice(0, MAX_STRING_DETAIL_LENGTH) };
   }
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     const problem = body as ProblemDetails;
-    return { ...problem, status: typeof problem.status === 'number' ? problem.status : response.status };
+    const status = typeof problem.status === 'number' ? problem.status : response.status;
+    if (!problem.detail && !problem.title && response.statusText) {
+      return { ...problem, status, detail: response.statusText };
+    }
+    return { ...problem, status };
   }
   return { status: response.status, detail: response.statusText };
 }

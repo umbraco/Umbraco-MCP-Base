@@ -126,7 +126,15 @@ describe("API Call Helpers", () => {
 
       const error = new UmbracoApiError({ status: 500, title: "Server Error" });
 
-      expect(error.message).toBe("Server Error");
+      expect(error.message).toBe("Server Error (HTTP 500)");
+    });
+
+    it("should never print undefined when status, detail and title are all missing", async () => {
+      const { UmbracoApiError } = await getApiHelpersModule();
+
+      const error = new UmbracoApiError({});
+
+      expect(error.message).toBe("HTTP error");
     });
 
     it("should use HTTP status in message when detail and title are missing", async () => {
@@ -285,10 +293,12 @@ describe("API Call Helpers", () => {
     });
 
     describe.each([
-      ["empty object body", {}, undefined, "HTTP 404"],
+      ["empty object body", {}, "Not Found", "Not Found"],
+      ["array body", [{ x: 1 }], "Not Found", "Not Found"],
+      ["whitespace-only string body", "   \n ", "Not Found", "Not Found"],
       ["string body", "  <html>Bad Gateway</html>  ", "<html>Bad Gateway</html>", "<html>Bad Gateway</html>"],
       ["empty body", null, "Not Found", "Not Found"],
-      ["title-only body", { title: "Missing" }, undefined, "Missing"],
+      ["title-only body", { title: "Missing" }, undefined, "Missing (HTTP 404)"],
     ] as const)("%s", (_name, body, detail, message) => {
       it("should keep the HTTP status in problemDetails and message", async () => {
         const { processVoidResponse, UmbracoApiError } = await getApiHelpersModule();
@@ -304,6 +314,19 @@ describe("API Call Helpers", () => {
           expect((e as any).message).not.toContain("undefined");
         }
       });
+    });
+
+    it("should pass the merged status to transformError", async () => {
+      const { configureApiClient, executeVoidApiCallWithOptions } = await getApiHelpersModule();
+      configureApiClient(() => new MockApiClient());
+      const transformError = jest.fn((pd: ProblemDetails) => pd);
+
+      await executeVoidApiCallWithOptions(
+        () => Promise.resolve(createMockHttpResponse(502, {} as any, "Bad Gateway")),
+        { transformError }
+      ).catch(() => undefined);
+
+      expect(transformError).toHaveBeenCalledWith(expect.objectContaining({ status: 502 }));
     });
 
     it("should let a status in the body win over the HTTP status", async () => {
@@ -329,10 +352,21 @@ describe("API Call Helpers", () => {
     });
   });
 
+  describe("toProblemDetails", () => {
+    it("should build ProblemDetails for code that constructs UmbracoApiError itself", async () => {
+      const { toProblemDetails, UmbracoApiError } = await getApiHelpersModule();
+
+      const error = new UmbracoApiError(toProblemDetails({ status: 400, statusText: "Bad Request", data: {} }));
+
+      expect(error.problemDetails.status).toBe(400);
+      expect(error.message).toBe("Bad Request");
+    });
+  });
+
   describe("executeGetApiCall error bodies without status", () => {
     it.each([
       ["string body", "  <html>Bad Gateway</html> ", "<html>Bad Gateway</html>"],
-      ["empty object body", {}, undefined],
+      ["empty object body", {}, "Bad Gateway"],
       ["null status in body", { status: null, title: "Oops" }, undefined],
     ] as const)("%s keeps the HTTP status", async (_name, body, detail) => {
       const { configureApiClient, executeGetApiCall, UmbracoApiError } = await getApiHelpersModule();

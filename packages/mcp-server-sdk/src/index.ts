@@ -35,6 +35,7 @@ export {
   processVoidResponse,
   CAPTURE_RAW_HTTP_RESPONSE,
   UmbracoApiError,
+  toProblemDetails,
   configureApiClient,
   getApiClient,
   type HttpResponse,
