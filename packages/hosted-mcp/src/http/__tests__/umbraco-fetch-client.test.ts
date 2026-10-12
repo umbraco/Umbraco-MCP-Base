@@ -1,6 +1,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import {
   createUmbracoFetchClient,
+  createFetchClientFromKV,
   CAPTURE_RAW_HTTP_RESPONSE,
 } from "../umbraco-fetch-client.js";
 import type { HostedMcpEnv } from "../../types/env.js";
@@ -666,6 +667,280 @@ describe("createUmbracoFetchClient", () => {
       });
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// Umbraco-MCP-Base#383: `getSessionAuth` backs the SDK's
+// `getSessionUmbracoAuth()` for raw `fetch` callers (e.g. a streaming upload),
+// which can't be retried after a 401, so the token must be valid up front.
+describe("getSessionAuth", () => {
+  /** A KV backed by a Map, so a refresh's write-back is observable. */
+  function mapKv() {
+    const store = new Map<string, string>();
+    return {
+      store,
+      get: jest.fn(async (key: string) => store.get(key) ?? null),
+      put: jest.fn(async (key: string, value: string) => {
+        store.set(key, value);
+      }),
+      delete: jest.fn(async (key: string) => {
+        store.delete(key);
+      }),
+    };
+  }
+
+  function refreshableConfig(kv: unknown, expiresAt?: number) {
+    return {
+      baseUrl: "https://umbraco.example.com/",
+      accessToken: "old-access",
+      expiresAt,
+      refreshContext: {
+        env: refreshEnv(kv),
+        tokenKey: "session-key",
+        refreshToken: "old-refresh",
+      },
+    };
+  }
+
+  const isTokenEndpoint = (call: unknown[]) => String(call[0]).includes("/security/back-office/token");
+
+  it("returns the current token without any request while it is well within its lifetime", async () => {
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv(), Date.now() + 10 * 60_000));
+
+    await expect(client.getSessionAuth()).resolves.toEqual({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "old-access",
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("refreshes up front when the token is near expiry, and persists an absolute expires_at", async () => {
+    const kv = mapKv();
+    mockFetch.mockResolvedValueOnce(
+      createJsonResponse(200, { access_token: "fresh-access", refresh_token: "fresh-refresh", expires_in: 300 })
+    );
+    const client = createUmbracoFetchClient(refreshableConfig(kv, Date.now() + 10_000));
+
+    const before = Date.now();
+    await expect(client.getSessionAuth()).resolves.toEqual({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "fresh-access",
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(isTokenEndpoint(mockFetch.mock.calls[0])).toBe(true);
+    const stored = JSON.parse(kv.store.get("umbraco_token:session-key")!);
+    expect(stored.tokens.expires_at).toBeGreaterThanOrEqual(before + 300_000);
+
+    // The new expiry is adopted, so the next call needs no request at all.
+    mockFetch.mockClear();
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "fresh-access" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("refreshes up front when the token has already expired", async () => {
+    mockFetch.mockResolvedValueOnce(createJsonResponse(200, { access_token: "fresh-access", expires_in: 300 }));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv(), Date.now() - 1_000));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "fresh-access" });
+  });
+
+  it("throws rather than hand over a dead token when the up-front refresh is rejected", async () => {
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv(), Date.now() - 1_000));
+
+    await expect(client.getSessionAuth()).rejects.toThrow("could not be refreshed");
+    expect(client.getRefreshFailure()?.reason).toBe("expired");
+  });
+
+  it("returns the still-valid token when a pre-emptive refresh inside the skew window fails", async () => {
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv(), Date.now() + 10_000));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "old-access" });
+    expect(mockFetch.mock.calls.some(isTokenEndpoint)).toBe(true);
+  });
+
+  it("throws when the token has expired and the session has no way to refresh it", async () => {
+    const client = createUmbracoFetchClient({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "dead",
+      expiresAt: Date.now() - 1_000,
+    });
+
+    await expect(client.getSessionAuth()).rejects.toThrow("re-authenticate");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns the token near expiry when the session has no way to refresh it", async () => {
+    const client = createUmbracoFetchClient({
+      baseUrl: "https://umbraco.example.com",
+      accessToken: "still-valid",
+      expiresAt: Date.now() + 10_000,
+    });
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "still-valid" });
+  });
+
+  it("with no known expiry, throws when the probe's 401 refresh is rejected", async () => {
+    mockFetch
+      .mockResolvedValueOnce(createJsonResponse(401, {}, "Unauthorized"))
+      .mockResolvedValueOnce(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv()));
+
+    await expect(client.getSessionAuth()).rejects.toThrow("could not be refreshed");
+  });
+
+  it("with no known expiry, makes one cheap authenticated call and returns the token when it is still valid", async () => {
+    mockFetch.mockResolvedValueOnce(createJsonResponse(200, { id: "user" }));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv()));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "old-access" });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(String(url)).toBe("https://umbraco.example.com/umbraco/management/api/v1/user/current");
+    expect((init as RequestInit).headers).toEqual(
+      expect.objectContaining({ Authorization: "Bearer old-access" })
+    );
+  });
+
+  it("with no known expiry, refreshes through the probe's 401 and returns the refreshed token", async () => {
+    mockFetch
+      .mockResolvedValueOnce(createJsonResponse(401, {}, "Unauthorized"))
+      .mockResolvedValueOnce(createJsonResponse(200, { access_token: "fresh-access", expires_in: 300 }))
+      .mockResolvedValueOnce(createJsonResponse(200, { id: "user" }));
+    const client = createUmbracoFetchClient(refreshableConfig(mapKv()));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "fresh-access" });
+    expect(isTokenEndpoint(mockFetch.mock.calls[1])).toBe(true);
+  });
+
+  it("with no known expiry and no way to refresh, throws when the probe is rejected", async () => {
+    mockFetch.mockResolvedValueOnce(createJsonResponse(401, {}, "Unauthorized"));
+    const client = createUmbracoFetchClient({ baseUrl: "https://umbraco.example.com", accessToken: "dead" });
+
+    await expect(client.getSessionAuth()).rejects.toThrow("cannot be refreshed");
+  });
+
+  it("deduplicates concurrent refreshes, even across clients sharing a token key", async () => {
+    const kv = mapKv();
+    let resolveToken!: (response: Response) => void;
+    mockFetch.mockImplementation(
+      () => new Promise<Response>((resolve) => (resolveToken = resolve))
+    );
+    const first = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
+    const second = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
+
+    const pending = Promise.all([first.getSessionAuth(), first.getSessionAuth(), second.getSessionAuth()]);
+    // Let every caller reach the token endpoint before it answers.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveToken(createJsonResponse(200, { access_token: "fresh-access", refresh_token: "fresh-refresh", expires_in: 300 }));
+
+    const results = await pending;
+    expect(results.map((r) => r.accessToken)).toEqual(["fresh-access", "fresh-access", "fresh-access"]);
+    expect(mockFetch.mock.calls.filter(isTokenEndpoint)).toHaveLength(1);
+  });
+
+  it("adopts a token another client already refreshed when its own refresh is rejected after expiry", async () => {
+    const kv = mapKv();
+    // Another client on the same token key rotated the tokens and wrote them back.
+    kv.store.set(
+      "umbraco_token:session-key",
+      JSON.stringify({
+        tokens: {
+          access_token: "peer-access",
+          token_type: "Bearer",
+          refresh_token: "old-refresh",
+          expires_at: Date.now() + 5 * 60_000,
+        },
+      })
+    );
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
+
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "peer-access" });
+    expect(client.getRefreshFailure()).toBeUndefined();
+    // The adopted expiry is in effect: no further request is needed.
+    mockFetch.mockClear();
+    await expect(client.getSessionAuth()).resolves.toMatchObject({ accessToken: "peer-access" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("still throws, and logs, when the KV read for a peer's token fails", async () => {
+    const kv = mapKv();
+    kv.get.mockRejectedValue(new Error("kv down"));
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const env = { ...refreshEnv(kv), LOG_AUTH: "true" } as HostedMcpEnv;
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    const client = createUmbracoFetchClient({
+      ...refreshableConfig(kv, Date.now() - 1_000),
+      refreshContext: { env, tokenKey: "session-key", refreshToken: "old-refresh" },
+    });
+
+    await expect(client.getSessionAuth()).rejects.toThrow("could not be refreshed");
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes("adoptStoredToken KV READ FAILED"))).toBe(true);
+    logSpy.mockRestore();
+  });
+
+  it("still throws when KV holds no newer usable token", async () => {
+    const kv = mapKv();
+    kv.store.set(
+      "umbraco_token:session-key",
+      JSON.stringify({
+        tokens: { access_token: "old-access", token_type: "Bearer", refresh_token: "old-refresh", expires_at: Date.now() - 1_000 },
+      })
+    );
+    mockFetch.mockResolvedValue(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"));
+    const client = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
+
+    await expect(client.getSessionAuth()).rejects.toThrow("could not be refreshed");
+  });
+
+  it("retries a 401 with a token another client already refreshed when its own refresh is rejected", async () => {
+    const kv = mapKv();
+    kv.store.set(
+      "umbraco_token:session-key",
+      JSON.stringify({
+        tokens: {
+          access_token: "peer-access",
+          token_type: "Bearer",
+          refresh_token: "old-refresh",
+          expires_at: Date.now() + 5 * 60_000,
+        },
+      })
+    );
+    mockFetch
+      .mockResolvedValueOnce(createJsonResponse(401, {}, "Unauthorized"))
+      .mockResolvedValueOnce(createJsonResponse(400, { error: "invalid_grant" }, "Bad Request"))
+      .mockResolvedValueOnce(createJsonResponse(200, { ok: true }));
+    const client = createUmbracoFetchClient(refreshableConfig(kv, Date.now() + 10 * 60_000));
+
+    await expect(client({ url: "/thing", method: "GET" })).resolves.toEqual({ ok: true });
+    const retry = mockFetch.mock.calls[2];
+    expect((retry[1] as RequestInit).headers).toEqual(
+      expect.objectContaining({ Authorization: "Bearer peer-access" })
+    );
+  });
+
+  it("createFetchClientFromKV carries the stored expires_at, so an expired entry refreshes without a probe", async () => {
+    const kv = mapKv();
+    kv.store.set(
+      "umbraco_token:session-key",
+      JSON.stringify({
+        tokens: {
+          access_token: "stored-access",
+          token_type: "Bearer",
+          refresh_token: "stored-refresh",
+          expires_at: Date.now() - 1_000,
+        },
+      })
+    );
+    mockFetch.mockResolvedValueOnce(createJsonResponse(200, { access_token: "fresh-access", expires_in: 300 }));
+
+    const client = await createFetchClientFromKV(refreshEnv(kv), "session-key");
+    await expect(client!.getSessionAuth()).resolves.toMatchObject({ accessToken: "fresh-access" });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(isTokenEndpoint(mockFetch.mock.calls[0])).toBe(true);
   });
 });
 

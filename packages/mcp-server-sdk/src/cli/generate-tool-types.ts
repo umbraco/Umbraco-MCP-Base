@@ -23,6 +23,12 @@ import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { ToolDefinition } from "../types/tool-definition.js";
 import { createPermissiveCodegenUser } from "./permissive-user.js";
 
+/**
+ * A version above every real Umbraco release, passed to `tools()` so codegen
+ * also sees the variants a collection only lists on newer sites.
+ */
+export const CODEGEN_NEWEST_UMBRACO_VERSION = "999.0.0";
+
 export interface RunCodegenOptions {
   /** Collections to walk (already imported, not a path). */
   collections: ToolCollectionExport[];
@@ -73,14 +79,34 @@ export async function runCodegen(
   const { collections, registryName } = options;
   const permissiveUser = createPermissiveCodegenUser();
 
-  // 1. Flatten tools across collections.
+  // 1. Flatten tools across collections, describing every version variant.
+  //    A collection may gate tools on the connected Umbraco version, so the
+  //    no-version ("oldest") list alone would miss newer-only tools. Union it
+  //    with a list built for a version above every gate, keyed by tool name;
+  //    on a clash the newest variant's types win, keeping first-seen order.
+  //    The union is per collection, so two collections claiming the same
+  //    name still hit the collision check below.
   const tools: ToolDefinition[] = [];
   for (const collection of collections) {
-    const ts =
-      typeof collection.tools === "function"
-        ? collection.tools(permissiveUser)
-        : (collection.tools as ToolDefinition[]);
-    for (const t of ts) tools.push(t);
+    if (typeof collection.tools !== "function") {
+      for (const t of collection.tools as ToolDefinition[]) tools.push(t);
+      continue;
+    }
+    const byName = new Map<string, ToolDefinition>();
+    for (const list of [
+      collection.tools(permissiveUser),
+      collection.tools(permissiveUser, { umbracoVersion: CODEGEN_NEWEST_UMBRACO_VERSION }),
+    ]) {
+      const seenInList = new Set<string>();
+      for (const t of list) {
+        if (seenInList.has(t.name)) {
+          throw new Error(`Duplicate tool name "${t.name}" within one collection`);
+        }
+        seenInList.add(t.name);
+        byName.set(t.name, t);
+      }
+    }
+    for (const t of byName.values()) tools.push(t);
   }
 
   const lines: string[] = [

@@ -30,7 +30,7 @@
  *   host's `TelemetryAdapter`. They must be constant for the lifetime of the
  *   host process/isolate — the adapter lives in module scope, so anything it
  *   closes over is shared by every span the isolate records.
- * - **Request-scoped** keys (`TENANT`, `REGION`, `LOGIN_SESSION`) reach
+ * - **Request-scoped** keys (`TENANT`, `REGION`, `LOGIN_SESSION`, `UMBRACO_VERSION`) reach
  *   `withTelemetry` on the tool call's own `context` argument, exactly as
  *   `MCP_SESSION_ID` does. See `request-context.ts` for why a closure would
  *   be wrong here.
@@ -70,6 +70,16 @@ export const TelemetryAttributes = {
   SLICES: "umbraco.mcp.slices",
   /** How the call ended — see `ToolOutcome`. */
   OUTCOME: "umbraco.mcp.outcome",
+  /**
+   * Problem `title` (or the error class name) of a failed call, truncated to
+   * 100 characters. High-cardinality: for trace search only, never a
+   * span-metrics dimension.
+   */
+  ERROR_TITLE: "umbraco.mcp.error.title",
+  /** Problem `status` (or HTTP status) of a failed call. Same dimension rule as `ERROR_TITLE`. */
+  ERROR_STATUS: "umbraco.mcp.error.status",
+  /** Umbraco's `operationStatus` enum name, when present and well-formed. Same dimension rule as `ERROR_TITLE`. */
+  ERROR_OPERATION_STATUS: "umbraco.mcp.error.operation_status",
   /** Mirrors `annotations.readOnlyHint`. */
   READ_ONLY: "umbraco.mcp.read_only",
   /** Mirrors `annotations.destructiveHint`. */
@@ -101,6 +111,12 @@ export const TelemetryAttributes = {
    * next to the hashed `TENANT`. Request-scoped, same carrier as `TENANT`.
    */
   REGION: "umbraco.mcp.region",
+  /**
+   * Raw version of the connected Umbraco, e.g. `17.6.0-rc.1`. Low cardinality
+   * and not customer-identifying. Request-scoped: read from the tool call's
+   * `context` via `getUmbracoVersion`, like `TENANT`.
+   */
+  UMBRACO_VERSION: "umbraco.mcp.umbraco_version",
 } as const;
 
 /** The only `mcp.method.name` value this module emits. Also the span-name prefix. */

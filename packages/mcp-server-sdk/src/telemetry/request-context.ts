@@ -20,16 +20,27 @@
  * other's value. This module gives tenant/region/login the same property by
  * riding the same object.
  *
- * ## Why not `AsyncLocalStorage`
+ * ## Where `AsyncLocalStorage` fits
  *
- * It would work in principle — Workers support `node:async_hooks` — but the
- * natural place to enter a store (the Worker's `fetch`) is the wrong side of a
- * Durable Object boundary: tool calls execute inside the DO, reached through a
- * separate invocation that does not inherit the outer async context. The only
- * remaining place to enter a store is the tool-call boundary itself, which is
- * precisely where the context argument already is — so ALS would add a
- * `nodejs_compat` requirement for every consumer's `wrangler.toml` and buy
- * nothing.
+ * The carrier on `context` stays the primary path, and `withTelemetry` only
+ * ever reads it from there. A store entered at the Worker's `fetch` would be
+ * the wrong side of a Durable Object boundary (tool calls run inside the DO,
+ * reached through a separate invocation that does not inherit the outer async
+ * context), so the only place to enter one is the tool-call boundary — where
+ * this carrier is already attached.
+ *
+ * That is exactly where the host now *also* enters a store
+ * (`request-context/async-request-context.ts`, `runWithRequestContext`),
+ * holding this carrier and the connected Umbraco version. It buys one thing
+ * the `context` argument can't: a chained in-process call made from deep
+ * inside a handler, by a helper that never received `extra`, still carries
+ * the caller's tenant/region/login into the chained handler
+ * (`InProcessConnection.callTool` uses an explicit `context` when given and
+ * falls back to the store). The store is created lazily
+ * through `process.getBuiltinModule("node:async_hooks")`, so importing the SDK
+ * needs no `async_hooks`; where that is unavailable the store is absent and
+ * only the explicit `context` carries values (see
+ * `isRequestContextStoreAvailable`).
  *
  * ## Shape
  *
@@ -41,6 +52,7 @@
 import type { SpanAttributes } from "./adapter.js";
 import { TelemetryAttributes } from "./attributes.js";
 import { toolCallExtraIndex } from "../helpers/tool-call-params.js";
+import { getUmbracoVersion } from "../umbraco-version/request-context.js";
 
 /**
  * The property on the tool-call `context` (`RequestHandlerExtra`) under which
@@ -136,6 +148,10 @@ export function applyRequestTelemetryAttributes(
   attributes: SpanAttributes,
   context: unknown
 ): void {
+  const version = getUmbracoVersion(context);
+  if (version) {
+    attributes[TelemetryAttributes.UMBRACO_VERSION] = version;
+  }
   const carried = getRequestTelemetryContext(context);
   if (!carried) {
     return;

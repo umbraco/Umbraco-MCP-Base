@@ -257,6 +257,258 @@ describe("withTelemetry outcome classification", () => {
   });
 });
 
+describe("withTelemetry error details", () => {
+  // The handler factory receives the same module graph the decorator runs in,
+  // so `instanceof` checks against the error classes hold.
+  const run = async (makeHandler: (ctx: Awaited<ReturnType<typeof setup>>) => () => Promise<unknown>) => {
+    const ctx = await setup();
+    const wrapped = ctx.withTelemetry(makeTool({ handler: makeHandler(ctx) }));
+    await Promise.resolve(wrapped.handler({} as any, {} as any)).catch(() => {});
+    return { ...ctx, attrs: ctx.spans[0].attributes };
+  };
+  const errorResult = (text: string) => async () => ({
+    content: [{ type: "text", text }],
+    isError: true,
+  });
+
+  it("records title and status for a thrown UmbracoApiError", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.UmbracoApiError({ title: "Not Found", status: 404, detail: "x" });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("Not Found");
+    expect(attrs[TelemetryAttributes.ERROR_STATUS]).toBe(404);
+  });
+
+  it("falls back to the class name for an UmbracoApiError with a non-JSON body", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.UmbracoApiError("<html>502 Bad Gateway</html>" as any);
+    });
+
+    expect(attrs[TelemetryAttributes.OUTCOME]).toBe("api_error");
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("UmbracoApiError");
+    expect(JSON.stringify(attrs)).not.toContain("Bad Gateway");
+  });
+
+  it("reads operationStatus from a ToolValidationError's extensions", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.ToolValidationError({
+        title: "Bad input",
+        detail: "x",
+        extensions: { operationStatus: "DuplicateName" },
+      });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("DuplicateName");
+  });
+
+  it("records attributes on both spans of a nested chained call", async () => {
+    const ctx = await setup();
+    const problem = JSON.stringify({ title: "Not Found", status: 404, operationStatus: "NotFound" });
+    const inner = ctx.withTelemetry(
+      makeTool({
+        name: "inner",
+        handler: async () => ({ content: [{ type: "text", text: problem }], isError: true }),
+      })
+    );
+    const outer = ctx.withTelemetry(
+      makeTool({
+        name: "outer",
+        // Re-wraps the inner tool's returned error, as a chained proxy does.
+        handler: async () => inner.handler({} as any, {} as any),
+      })
+    );
+    await outer.handler({} as any, {} as any);
+
+    expect(ctx.spans).toHaveLength(2);
+    for (const span of ctx.spans) {
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_TITLE]).toBe("Not Found");
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_STATUS]).toBe(404);
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("NotFound");
+    }
+  });
+
+  it("records the title of a thrown ToolValidationError", async () => {
+    const { attrs, TelemetryAttributes } = await run((ctx) => async () => {
+      throw new ctx.ToolValidationError({ title: "Bad input", detail: "id is required" });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("Bad input");
+  });
+
+  it("falls back to the class name and HTTP status for an error with response data", async () => {
+    const { attrs, TelemetryAttributes } = await run(() => async () => {
+      throw Object.assign(new TypeError("boom"), { response: { status: 409, data: {} } });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("TypeError");
+    expect(attrs[TelemetryAttributes.ERROR_STATUS]).toBe(409);
+  });
+
+  it("parses a returned isError result carrying problem JSON (chained 400)", async () => {
+    const { attrs, TelemetryAttributes } = await run(() =>
+      errorResult(
+        JSON.stringify({ title: "Validation failed", status: 400, operationStatus: "DuplicateName" })
+      )
+    );
+
+    expect(attrs[TelemetryAttributes.OUTCOME]).toBe("error_result");
+    expect(attrs[TelemetryAttributes.ERROR_STATUS]).toBe(400);
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("Validation failed");
+    expect(attrs[TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("DuplicateName");
+  });
+
+  it("records only the outcome for non-JSON result text", async () => {
+    const { attrs, TelemetryAttributes } = await run(() => errorResult("blocked: version mismatch"));
+
+    expect(attrs[TelemetryAttributes.OUTCOME]).toBe("error_result");
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_TITLE);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_STATUS);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_OPERATION_STATUS);
+  });
+
+  it("caps over-length values at 100 characters", async () => {
+    const { attrs, TelemetryAttributes } = await run(() =>
+      errorResult(JSON.stringify({ title: "t".repeat(500), status: 400 }))
+    );
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("t".repeat(100));
+  });
+
+  it("drops an operationStatus that is not an enum-style name", async () => {
+    const { attrs, TelemetryAttributes } = await run(() =>
+      errorResult(JSON.stringify({ title: "x", status: 400, operationStatus: "not ok: 1234" }))
+    );
+
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_OPERATION_STATUS);
+  });
+
+  it("skips wrong-typed fields", async () => {
+    const { attrs, TelemetryAttributes } = await run(() =>
+      errorResult(JSON.stringify({ title: 42, status: "400", operationStatus: 7 }))
+    );
+
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_TITLE);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_STATUS);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_OPERATION_STATUS);
+  });
+
+  it("sets no error attributes on a successful result that looks like problem JSON", async () => {
+    const { attrs, TelemetryAttributes } = await run(() => async () => ({
+      content: [
+        { type: "text", text: JSON.stringify({ title: "Home", status: 200, operationStatus: "Ok" }) },
+      ],
+    }));
+
+    expect(attrs[TelemetryAttributes.OUTCOME]).toBe("success");
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_TITLE);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_STATUS);
+    expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_OPERATION_STATUS);
+  });
+
+  it("reads problem fields from response.data on a generic Error, ahead of the fallbacks", async () => {
+    const { attrs, TelemetryAttributes } = await run(() => async () => {
+      throw Object.assign(new Error("m"), {
+        response: {
+          status: 500,
+          data: { title: "Conflict", status: 409, operationStatus: "DuplicateName" },
+        },
+      });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("Conflict");
+    expect(attrs[TelemetryAttributes.ERROR_STATUS]).toBe(409);
+    expect(attrs[TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("DuplicateName");
+  });
+
+  it("falls back to the class name when response.data is not an object", async () => {
+    const { attrs, TelemetryAttributes } = await run(() => async () => {
+      throw Object.assign(new Error("m"), { response: { data: "<html>bad gateway</html>" } });
+    });
+
+    expect(attrs[TelemetryAttributes.ERROR_TITLE]).toBe("Error");
+  });
+
+  it("drops operationStatus values that merely resemble enum names", async () => {
+    for (const bad of ["", "Invalid2", "Dup_Name", "Name\n"]) {
+      const { attrs, TelemetryAttributes } = await run(() =>
+        errorResult(JSON.stringify({ title: "x", status: 400, operationStatus: bad }))
+      );
+      expect(attrs).not.toHaveProperty(TelemetryAttributes.ERROR_OPERATION_STATUS);
+    }
+  });
+
+  it("caps operationStatus at 100 characters", async () => {
+    const { attrs, TelemetryAttributes } = await run(() =>
+      errorResult(JSON.stringify({ operationStatus: "A".repeat(150) }))
+    );
+
+    expect(attrs[TelemetryAttributes.ERROR_OPERATION_STATUS]).toBe("A".repeat(100));
+  });
+
+  it("never lets a malformed error object change what the caller sees", async () => {
+    const { withTelemetry, UmbracoApiError } = await setup();
+    // Bypass the constructor: the type promises problemDetails, the runtime may not.
+    const broken = Object.assign(Object.create(UmbracoApiError.prototype), {
+      problemDetails: undefined,
+    });
+    const wrapped = withTelemetry(
+      makeTool({
+        handler: async () => {
+          throw broken;
+        },
+      })
+    );
+
+    await expect(wrapped.handler({} as any, {} as any)).rejects.toBe(broken);
+  });
+
+  it("never exports detail, type or argument values", async () => {
+    const ctx = await setup();
+    const uuid = "3f2b8c1e-9d4a-4e7b-8a61-0c5d2f9e7b11";
+    const secretArg = "super-secret-argument";
+    const problem = {
+      title: "Bad request",
+      status: 400,
+      operationStatus: "InvalidId",
+      type: "https://example.test/problems/secret-type",
+      detail: `Invalid UUID. Received: '${uuid}'`,
+    };
+
+    await ctx
+      .withTelemetry(makeTool({ handler: errorResult(JSON.stringify(problem)) }))
+      .handler({ name: secretArg } as any, {} as any);
+    const throwing = ctx.withTelemetry(
+      makeTool({
+        handler: async () => {
+          throw new ctx.UmbracoApiError(problem);
+        },
+      })
+    );
+    await Promise.resolve(throwing.handler({ name: secretArg } as any, {} as any)).catch(() => {});
+
+    const generic = ctx.withTelemetry(
+      makeTool({
+        handler: async () => {
+          throw Object.assign(new Error(`failed for ${uuid} ${secretArg}`), {
+            response: { data: problem },
+          });
+        },
+      })
+    );
+    await Promise.resolve(generic.handler({ name: secretArg } as any, {} as any)).catch(() => {});
+
+    expect(ctx.spans).toHaveLength(3);
+    for (const span of ctx.spans) {
+      expect(span.attributes[ctx.TelemetryAttributes.ERROR_TITLE]).toBe("Bad request");
+      const serialised = JSON.stringify(span);
+      expect(serialised).not.toContain(uuid);
+      expect(serialised).not.toContain(secretArg);
+      expect(serialised).not.toContain("secret-type");
+    }
+  });
+});
+
 describe("withTelemetry resilience", () => {
   it("still runs the tool when the adapter throws before reaching the handler", async () => {
     jest.resetModules();

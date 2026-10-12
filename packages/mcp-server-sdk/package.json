@@ -1,6 +1,6 @@
 {
   "name": "@umbraco-cms/mcp-server-sdk",
-  "version": "1.0.0-beta.45",
+  "version": "1.0.0-beta.46",
   "type": "module",
   "description": "Umbraco-specific MCP infrastructure and patterns for building MCP servers",
   "main": "dist/index.js",
@@ -58,7 +58,7 @@
     "prepublishOnly": "npm run build"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.3.0"
   },
   "repository": {
     "type": "git",

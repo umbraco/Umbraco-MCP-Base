@@ -201,4 +201,21 @@ describe("MCP Tool Proxy", () => {
       });
     });
   });
+
+  describe("createProxyHandler context forwarding", () => {
+    it("forwards the caller's extra to manager.callTool", async () => {
+      const calls: unknown[][] = [];
+      const stubManager = {
+        callTool: async (...a: unknown[]) => {
+          calls.push(a);
+          return { content: [] };
+        },
+      } as unknown as ReturnType<typeof createMcpClientManager>;
+      const extra = { umbracoVersion: "17.6.0" };
+
+      await createProxyHandler(stubManager, "srv", "tool")({ a: 1 }, extra);
+
+      expect(calls).toEqual([["srv", "tool", { a: 1 }, extra]]);
+    });
+  });
 });

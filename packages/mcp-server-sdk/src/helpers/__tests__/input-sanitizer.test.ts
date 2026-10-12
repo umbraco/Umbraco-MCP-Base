@@ -255,6 +255,100 @@ describe("withInputSanitization", () => {
     expect(handler).toHaveBeenCalled();
   });
 
+  describe("secret field name rule", () => {
+    const run = (schema: any, input: any) => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const tool = { name: "t", description: "t", inputSchema: schema, handler, slices: [] } as any;
+      const call = () => withInputSanitization(tool).handler(input, {} as any);
+      return { handler, call };
+    };
+    const nasty = "a?b&c%4a../x";
+
+    it.each(["password", "newPassword", "oldPassword", "resetPassword", "clientSecret"])(
+      "passes %s through unchanged",
+      (key) => {
+        const { handler, call } = run({ [key]: z.string() }, { [key]: nasty });
+        expect(call).not.toThrow();
+        expect(handler.mock.calls[0][0]).toEqual({ [key]: nasty });
+      }
+    );
+
+    it("still rejects control characters in a password", () => {
+      const { handler, call } = run({ password: z.string() }, { password: "ab\x00c" });
+      expect(call).toThrow(ToolValidationError);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it.each(["a?b", "a&b", "a%4ab", "../x"])("still rejects %s in id and name", (bad) => {
+      expect(run({ id: z.string() }, { id: bad }).call).toThrow(ToolValidationError);
+      expect(run({ name: z.string() }, { name: bad }).call).toThrow(ToolValidationError);
+    });
+
+    it("still checks passwordHint (end-anchored)", () => {
+      expect(run({ passwordHint: z.string() }, { passwordHint: "a?b" }).call).toThrow(ToolValidationError);
+    });
+
+    it("ignores non-string fields like allowChangePassword", () => {
+      const { call } = run(
+        { allowChangePassword: z.boolean(), lastPasswordChangeDate: z.date() },
+        { allowChangePassword: true, lastPasswordChangeDate: new Date() }
+      );
+      expect(call).not.toThrow();
+    });
+
+    it("applies to nested keys and array elements", () => {
+      const nested = run({ user: z.object({ newPassword: z.string() }) }, { user: { newPassword: nasty } });
+      expect(nested.call).not.toThrow();
+      const arr = run({ password: z.array(z.string()) }, { password: [nasty] });
+      expect(arr.call).not.toThrow();
+    });
+
+    it("does not relax undeclared top-level keys, whatever their name", () => {
+      expect(run({ other: z.string() }, { password: nasty }).call).toThrow(ToolValidationError);
+      expect(run({ other: z.string() }, { secret: "../x" }).call).toThrow(ToolValidationError);
+      expect(run({ other: z.string() }, { id: nasty }).call).toThrow(ToolValidationError);
+    });
+
+    it("relaxes optional and nullable password fields (Orval shapes)", () => {
+      expect(run({ password: z.string().optional() }, { password: nasty }).call).not.toThrow();
+      expect(run({ password: z.string().nullable() }, { password: nasty }).call).not.toThrow();
+    });
+
+    it("relaxes a password field typed as a union containing a string", () => {
+      const schema = { password: z.union([z.string(), z.number()]) };
+      expect(run(schema, { password: nasty }).call).not.toThrow();
+    });
+
+    it("relaxes password inside objects in an array", () => {
+      const schema = { users: z.array(z.object({ password: z.string() })) };
+      expect(run(schema, { users: [{ password: nasty }] }).call).not.toThrow();
+    });
+
+    it("matches the name case-insensitively", () => {
+      expect(run({ PASSWORD: z.string() }, { PASSWORD: nasty }).call).not.toThrow();
+    });
+
+    it("still checks secretary (secret is not a suffix)", () => {
+      expect(run({ secretary: z.string() }, { secretary: "a?b" }).call).toThrow(ToolValidationError);
+    });
+
+    it("does not let caller-chosen z.record keys opt out of the checks", () => {
+      const schema = { headers: z.record(z.string(), z.string()) };
+      expect(run(schema, { headers: { password: "a?b" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { headers: { "x.secret": "../x" } }).call).toThrow(ToolValidationError);
+    });
+
+    it("still relaxes a declared secret field nested under a record value", () => {
+      const schema = { users: z.record(z.string(), z.object({ password: z.string() })) };
+      expect(run(schema, { users: { bob: { password: nasty } } }).call).not.toThrow();
+    });
+
+    it("rejects a secret-like field the name rule misses, unless marked [raw]", () => {
+      expect(run({ pin: z.string() }, { pin: nasty }).call).toThrow(ToolValidationError);
+      expect(run({ pin: z.string().describe(RAW_FIELD_MARKER) }, { pin: nasty }).call).not.toThrow();
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Nested-object handling (issue umbraco/Umbraco-MCP-Base#133)
   //
@@ -263,6 +357,7 @@ describe("withInputSanitization", () => {
   // sanitiser is allowed to walk INTO the object to reject bad string content
   // at any depth, but is not allowed to reshape, reorder, or substitute it.
   // ---------------------------------------------------------------------------
+
   describe("nested object handling", () => {
     it("passes a nested object through to the handler structurally intact", () => {
       const handler = jest.fn().mockReturnValue({ content: [] });

@@ -35,6 +35,7 @@ export {
   processVoidResponse,
   CAPTURE_RAW_HTTP_RESPONSE,
   UmbracoApiError,
+  toProblemDetails,
   configureApiClient,
   getApiClient,
   type HttpResponse,
@@ -94,6 +95,7 @@ export {
 // Strict JSON Schema (draft 2020-12) tool schemas — works around an
 // upstream @modelcontextprotocol/sdk bug that always advertises draft-7
 export { useDraft202012ToolSchemas } from "./helpers/strict-json-schema-tools.js";
+export { toolCallExtraIndex } from "./helpers/tool-call-params.js";
 
 // Elicitation Helpers
 export {
@@ -165,6 +167,43 @@ export {
   type WithTelemetryContext,
 } from "./telemetry/index.js";
 
+// ============================================================================
+// Request-Scoped Umbraco Version
+// ============================================================================
+//
+// The connected Umbraco's version, carried per request on the tool call's
+// `extra` (never a module global — one Worker isolate serves many sites).
+// Hosts attach it with `withRequestUmbracoVersion` and enter the async store
+// with `runWithRequestContext`; tools and collections read it with
+// `getUmbracoVersion` and gate with `isAtLeast`.
+export {
+  UMBRACO_VERSION_CONTEXT_KEY,
+  getUmbracoVersion,
+  withRequestUmbracoVersion,
+  isAtLeast,
+  type WithUmbracoVersionContext,
+} from "./umbraco-version/request-context.js";
+
+// The per-request store. Hosted hosts also put the session's own values in it
+// (transport, API client provider, server, Umbraco auth) so nothing per
+// session lives in module scope, which every session in a Worker isolate
+// shares. `getSessionUmbracoAuth` is the accessor for raw `fetch` callers.
+export {
+  runWithRequestContext,
+  getActiveRequestContext,
+  pickCarriedRequestContext,
+  getSessionUmbracoAuth,
+  isRequestContextStoreAvailable,
+  requireRequestContext,
+  resetRequireRequestContext,
+  isRequestContextRequired,
+  type CarriedRequestContext,
+  type RequestSessionContext,
+  type RequestContextStore,
+  type RequestTransport,
+  type SessionUmbracoAuth,
+} from "./request-context/async-request-context.js";
+
 // CLI Introspection & Context Generation
 export {
   toolToJsonSchema,
@@ -194,6 +233,7 @@ export {
 export {
   type ToolCollectionMetadata,
   type ToolCollectionExport,
+  type ToolCollectionToolsOptions,
 } from "./types/tool-collection.js";
 
 export {

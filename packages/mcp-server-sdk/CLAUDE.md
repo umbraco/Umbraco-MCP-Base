@@ -35,6 +35,8 @@ src/
 ├── testing/           # Test utilities (setupTestEnvironment, snapshot helpers)
 ├── evals/             # LLM eval framework (runScenarioTest, agent-runner)
 ├── version-check/     # Umbraco version compatibility
+├── umbraco-version/   # Per-request connected Umbraco version (getUmbracoVersion, isAtLeast)
+├── request-context/   # AsyncLocalStorage store for carried request values + hosted session values (hosts enter, SDK reads)
 ├── file/              # File extension detection
 └── constants/         # Umbraco well-known IDs
 ```
@@ -66,7 +68,7 @@ src/
 - `executeGetItemsApiCall` - GET collections (wraps in `{ items: [...] }`)
 - `executeVoidApiCall` - DELETE/PUT/POST without response body
 - `CAPTURE_RAW_HTTP_RESPONSE` - Required option for all API calls
-- `configureApiClient` - Set up the API client provider
+- `configureApiClient` - Set up the API client provider (stdio/CLI/test fallback; the per-request store wins)
 
 **HTTP Client:**
 - `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
@@ -94,6 +96,10 @@ src/
 - `runAgentTest` - Low-level agent execution
 - `configureEvals` - Set up MCP server path and options
 - `verifyRequiredToolCalls`, `verifySuccessMessage` - Assertions
+
+## Per-Session State (Hosted)
+
+Hosted code must not keep per-session values (tokens, clients, servers, token keys) in module scope: one Cloudflare isolate hosts several Durable Objects (MCP sessions) that share it. Put them in the per-request store (`request-context/async-request-context.ts`, `runWithRequestContext`) and read them through its accessors. `UmbracoManagementClient`, `getApiClient()` and `getServerRef()` read the store first and, per key, fall back to `setCustomTransport` / `configureApiClient` / `setServerRef` whenever the store has no value for that key or no store is active (the fallbacks are for stdio, CLI, tests). `getSessionUmbracoAuth()` gives raw `fetch` callers the session's `{ baseUrl, accessToken }`. Hosted servers must pass `clientFactory` (the session's `apiClientProvider`); code registered directly on a hosted server enters the store with `runInSessionContext(server, fn)` from `@umbraco-cms/mcp-hosted`. Hosts that share an isolate call `requireRequestContext()` (hosted does): the three accessors then throw outside a store instead of falling back, and hosted start-up fails when `isRequestContextStoreAvailable()` is false. The flag is process-wide and never cleared by hosts; test suites that run the hosted path call the test-only `resetRequireRequestContext()` in `afterEach`. `InProcessConnection.callTool` scopes a chained server's `clientFactory` with a nested store and never swaps the module client.
 
 ## Testing Conventions
 

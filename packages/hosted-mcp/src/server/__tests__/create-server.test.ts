@@ -1,5 +1,11 @@
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
-import { DEFAULT_COLLECTION_CONFIG, TELEMETRY_CONTEXT_KEY, versionCheckService } from "@umbraco-cms/mcp-server-sdk";
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import {
+  DEFAULT_COLLECTION_CONFIG,
+  TELEMETRY_CONTEXT_KEY,
+  versionCheckService,
+  getActiveRequestContext,
+  getUmbracoVersion,
+} from "@umbraco-cms/mcp-server-sdk";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections, CollectionConfiguration } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { SiteConfig } from "../../types/multi-site.js";
@@ -1089,13 +1095,13 @@ describe("createPerRequestServer — version check", () => {
     expect(instructions).toMatch(/Version Mismatch/);
   });
 
-  it("skips the check entirely when expectedUmbracoMajor is not set anywhere", async () => {
+  it("skips the check when expectedUmbracoMajor is not set anywhere, but still fetches the version once", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     const server = await createPerRequestServer(baseOptions, makeMockEnv(), mockProps);
 
     expect(getInstructions(server)).toBeUndefined();
     const calledUrls = mockFetch.mock.calls.map((call) => String(call[0]));
-    expect(calledUrls.some((url) => url.includes("/server/information"))).toBe(false);
+    expect(calledUrls.filter((url) => url.includes("/server/information"))).toHaveLength(1);
   });
 
   it("lets env.UMBRACO_EXPECTED_MAJOR override the operator-configured expectedUmbracoMajor", async () => {
@@ -1160,6 +1166,221 @@ describe("createPerRequestServer — version check", () => {
     // would get wrong under concurrent, cross-tenant requests.
     expect(getInstructions(serverA)).toMatch(/Version Mismatch/);
     expect(getInstructions(serverB)).toBeUndefined();
+  });
+});
+
+describe("createPerRequestServer — connected Umbraco version", () => {
+  const mockFetch = jest.fn<typeof fetch>();
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function makeMockEnv(overrides: Partial<HostedMcpEnv> = {}): HostedMcpEnv {
+    return {
+      UMBRACO_BASE_URL: "https://example.com",
+      UMBRACO_OAUTH_CLIENT_ID: "test-client",
+      COOKIE_ENCRYPTION_KEY: "0".repeat(64),
+      OAUTH_KV: {
+        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        put: async () => undefined,
+        delete: async () => undefined,
+      },
+      ...overrides,
+    } as unknown as HostedMcpEnv;
+  }
+
+  const mockProps: AuthProps = {
+    userId: "user-1",
+    userName: "Test User",
+    umbracoTokenKey: "token-key",
+  };
+
+  /** A collection whose `tools` records the options each call received. */
+  function recordingCollection(seen: unknown[], tools: ToolDefinition<any, any>[] = []): ToolCollectionExport {
+    return {
+      metadata: { name: "recorded", displayName: "Recorded", description: "" },
+      tools: (_user, options) => {
+        seen.push(options);
+        return tools;
+      },
+    };
+  }
+
+  const optionsWith = (collections: ToolCollectionExport[], extra: Record<string, unknown> = {}) => ({
+    name: "test-server",
+    version: "1.0.0",
+    collections,
+    modeRegistry: [],
+    allModeNames: [],
+    allSliceNames: ["read"],
+    ...extra,
+  });
+
+  const getInstructions = (server: { server: unknown }): string | undefined =>
+    (server.server as { _instructions?: string })._instructions;
+
+  const serverInfoCalls = () =>
+    mockFetch.mock.calls.map((call) => String(call[0])).filter((url) => url.includes("/server/information"));
+
+  /** Serves `/server/information` with `serverInfo`, `/user/current` with `{}`. */
+  function serve(serverInfo: (url: string) => Response) {
+    mockFetch.mockImplementation((async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/server/information")) return serverInfo(url);
+      if (url.includes("/user/current")) return jsonResponse({});
+      return jsonResponse({}, 404);
+    }) as typeof fetch);
+  }
+
+  let logSpy: ReturnType<typeof jest.spyOn>;
+  let errorSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    (globalThis as any).fetch = mockFetch;
+    mockFetch.mockReset();
+    logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("fetches server info once and passes the version to collection.tools when expectedUmbracoMajor is unset", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    serve(() => jsonResponse({ version: "17.1.0" }));
+    const seen: unknown[] = [];
+
+    await createPerRequestServer(optionsWith([recordingCollection(seen)]), makeMockEnv(), mockProps);
+
+    expect(serverInfoCalls()).toHaveLength(1);
+    expect(seen).toEqual([{ umbracoVersion: "17.1.0" }]);
+  });
+
+  it("passes the raw version string through unparsed", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    serve(() => jsonResponse({ version: "17.1.0-rc.2+abc" }));
+    const seen: unknown[] = [];
+
+    await createPerRequestServer(optionsWith([recordingCollection(seen)]), makeMockEnv(), mockProps);
+
+    expect(seen).toEqual([{ umbracoVersion: "17.1.0-rc.2+abc" }]);
+  });
+
+  it("makes exactly one server-info request when expectedUmbracoMajor is set", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    serve(() => jsonResponse({ version: "15.2.0" }));
+    const seen: unknown[] = [];
+
+    const server = await createPerRequestServer(
+      optionsWith([recordingCollection(seen)], { expectedUmbracoMajor: "17" }),
+      makeMockEnv(),
+      mockProps,
+    );
+
+    expect(serverInfoCalls()).toHaveLength(1);
+    expect(getInstructions(server)).toMatch(/Version Mismatch/);
+    expect(seen).toEqual([{ umbracoVersion: "15.2.0" }]);
+  });
+
+  it.each([
+    ["401", 401],
+    ["5xx", 503],
+  ])("passes umbracoVersion: undefined when server info returns %s, and still creates the server", async (_label, status) => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    serve(() => jsonResponse({ title: "nope" }, status));
+    const seen: unknown[] = [];
+
+    const unchecked = await createPerRequestServer(
+      optionsWith([recordingCollection(seen, [createMockTool("read-thing", ["read"])])]),
+      makeMockEnv(),
+      mockProps,
+    );
+    expect(getInstructions(unchecked)).toBeUndefined();
+
+    const checked = await createPerRequestServer(
+      optionsWith([recordingCollection(seen)], { expectedUmbracoMajor: "17" }),
+      makeMockEnv(),
+      mockProps,
+    );
+    // Same warning as before: the check doesn't block on an API error.
+    expect(getInstructions(checked)).toMatch(/Unable to verify Umbraco version compatibility/);
+
+    expect(seen).toEqual([{ umbracoVersion: undefined }, { umbracoVersion: undefined }]);
+    const registered = Object.keys((unchecked as unknown as { _registeredTools: Record<string, unknown> })._registeredTools);
+    expect(registered).toEqual(["read-thing"]);
+  });
+
+  it("carries each site's own version in the request context when requests interleave", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    serve((url) =>
+      jsonResponse({ version: url.startsWith("https://site-a.example.com") ? "17.5.2" : "17.6.0" })
+    );
+
+    let release!: () => void;
+    let gate: Promise<void> = Promise.resolve();
+    const probe: ToolDefinition<any, any> = {
+      name: "probe",
+      description: "probe",
+      slices: ["read"],
+      handler: (async (_args: unknown, extra: unknown) => {
+        const before = getActiveRequestContext()?.umbracoVersion;
+        await gate;
+        const after = getActiveRequestContext()?.umbracoVersion;
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify({ before, after, extra: getUmbracoVersion(extra) }) },
+          ],
+        };
+      }) as any,
+    };
+    const collection = recordingCollection([], [probe]);
+
+    const [serverA, serverB] = await Promise.all([
+      createPerRequestServer(
+        optionsWith([collection]),
+        makeMockEnv({ UMBRACO_BASE_URL: "https://site-a.example.com" }),
+        { ...mockProps, umbracoTokenKey: "token-a" },
+      ),
+      createPerRequestServer(
+        optionsWith([collection]),
+        makeMockEnv({ UMBRACO_BASE_URL: "https://site-b.example.com" }),
+        { ...mockProps, umbracoTokenKey: "token-b" },
+      ),
+    ]);
+
+    const call = async (server: unknown) => {
+      const handler = (server as {
+        _registeredTools: Record<string, { handler: (...args: unknown[]) => Promise<{ content: { text: string }[] }> }>;
+      })._registeredTools.probe.handler;
+      const result = await handler({}, { signal: new AbortController().signal, requestId: "r" });
+      return JSON.parse(result.content[0].text);
+    };
+
+    // Both calls park on the gate after their first read, so each resumes
+    // after the other site's call has entered its own store.
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const pendingA = call(serverA);
+    const pendingB = call(serverB);
+    release();
+    const [resultA, resultB] = await Promise.all([pendingA, pendingB]);
+
+    expect(resultA).toEqual({ before: "17.5.2", after: "17.5.2", extra: "17.5.2" });
+    expect(resultB).toEqual({ before: "17.6.0", after: "17.6.0", extra: "17.6.0" });
+  });
+
+  it("leaves the version out of the request context when the fetch failed", async () => {
+    const { createPerRequestServer, getServerSessionContext } = await import("../create-server.js");
+    serve(() => jsonResponse({}, 500));
+
+    const server = await createPerRequestServer(optionsWith([]), makeMockEnv(), mockProps);
+
+    expect(getServerSessionContext(server)).not.toHaveProperty("umbracoVersion");
   });
 });
 

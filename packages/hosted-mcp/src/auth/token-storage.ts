@@ -56,6 +56,25 @@ export interface TokenResponse {
   expires_in?: number;
   refresh_token?: string;
   scope?: string;
+  /**
+   * Absolute access-token expiry (epoch milliseconds). Not sent by Umbraco:
+   * stamped from `expires_in` by `storeUmbracoToken` (and so on every refresh),
+   * because a relative `expires_in` with no issue time can't tell a later
+   * reader whether the token is still valid. Entries stored before this field
+   * existed don't have it.
+   */
+  expires_at?: number;
+}
+
+/**
+ * Returns `tokens` with an absolute `expires_at` stamped from `expires_in`,
+ * unless it already carries one (or has no `expires_in` to stamp from).
+ */
+function withExpiresAt(tokens: TokenResponse): TokenResponse {
+  if (typeof tokens.expires_at === "number" || typeof tokens.expires_in !== "number") {
+    return tokens;
+  }
+  return { ...tokens, expires_at: Date.now() + tokens.expires_in * 1000 };
 }
 
 /**
@@ -144,7 +163,8 @@ export async function storeUmbracoToken(
     env,
     `storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
   );
-  const entry: StoredTokenEntry = site ? { tokens, site } : { tokens };
+  const stamped = withExpiresAt(tokens);
+  const entry: StoredTokenEntry = site ? { tokens: stamped, site } : { tokens: stamped };
   await kv.put(
     `umbraco_token:${tokenKey}`,
     JSON.stringify(entry),
@@ -154,6 +174,41 @@ export async function storeUmbracoToken(
   // refresh's rotation or a fresh login. Drop any cached rotated token so a
   // stale one from an earlier failed write can never outrank it.
   lastRotatedTokens.delete(tokenKey);
+}
+
+/**
+ * Deletes a stored Umbraco token entry from KV — but only if it still holds
+ * the refresh token Umbraco just rejected.
+ *
+ * Used once Umbraco has definitively rejected the entry's refresh token
+ * (`reason: "expired"`): the entry can never authenticate again, and its
+ * absence is what the API handler wrapper (`createSiteRoutingApiHandler`)
+ * keys off to revoke the outer grant and send the client back through sign-in.
+ *
+ * `invalid_grant` is only definitive for the token that was posted. A
+ * concurrent refresh (another request, another isolate) can rotate the entry
+ * in between, and deleting it then would sign out a session that's alive. So
+ * the entry is re-read right before the delete and left alone when its
+ * refresh token no longer matches `rejectedRefreshToken`. KV has no
+ * compare-and-delete, so a rotation landing between this re-read and the
+ * delete can still be lost; the window is one KV round-trip, against the
+ * previous behaviour of always deleting.
+ *
+ * @returns `true` when the entry was deleted
+ */
+export async function deleteStoredUmbracoToken(
+  kv: KVNamespace,
+  tokenKey: string,
+  rejectedRefreshToken: string
+): Promise<boolean> {
+  const current = await getStoredUmbracoToken(kv, tokenKey);
+  if (current && current.tokens?.refresh_token !== rejectedRefreshToken) {
+    return false;
+  }
+  await kv.delete(`umbraco_token:${tokenKey}`);
+  // A cached rotation for a dead session must not outlive its KV entry.
+  lastRotatedTokens.delete(tokenKey);
+  return true;
 }
 
 /**
@@ -177,7 +232,15 @@ export async function getStoredUmbracoToken(
     }
     // Legacy: raw TokenResponse — wrap it.
     return { tokens: parsed as unknown as TokenResponse };
-  } catch {
+  } catch (error) {
+    // Error name only: a JSON parse message can quote the stored value, which
+    // holds tokens. The token key is a credential-store lookup key, so it
+    // isn't logged either.
+    console.warn(
+      `[mcp-hosted] stored Umbraco token entry is not valid JSON; treating it as missing (error=${sanitizeForLog(
+        error instanceof Error ? error.name : "unknown"
+      )})`
+    );
     return null;
   }
 }
@@ -288,6 +351,8 @@ export interface RefreshSuccess {
    */
   refreshToken?: string;
   expiresIn?: number;
+  /** Absolute expiry of `accessToken` (epoch ms), when Umbraco sent `expires_in`. */
+  expiresAt?: number;
 }
 
 /**
@@ -435,6 +500,24 @@ const inFlightRefreshes = new Map<string, Promise<RefreshTokenResult>>();
 const lastRotatedTokens = new Map<string, string>();
 
 /**
+ * The refresh token Umbraco rejected, for each `expired` failure this module
+ * returned. Kept off the `RefreshFailure` object itself so the token can't
+ * leak through anything that logs, serialises or spreads a failure; read it
+ * back with `getRejectedRefreshToken`.
+ */
+const rejectedRefreshTokens = new WeakMap<RefreshFailure, string>();
+
+/**
+ * The refresh token Umbraco rejected for an `expired` failure returned by
+ * `refreshUmbracoToken` — the token actually posted, which can be newer than
+ * the caller's snapshot (KV re-read, rotation cache, bounded retry). `undefined`
+ * for any other failure. Used to make `deleteStoredUmbracoToken` conditional.
+ */
+export function getRejectedRefreshToken(failure: RefreshFailure): string | undefined {
+  return rejectedRefreshTokens.get(failure);
+}
+
+/**
  * Refreshes an expired Umbraco token using the refresh token, stores the new
  * tokens in KV, and reports the outcome as a discriminated union so callers can
  * tell "the session is over" (`expired`) apart from "try again" (everything else).
@@ -525,6 +608,9 @@ async function performRefresh(
     );
   }
   const effectiveSite = site ?? stored?.site;
+  // The token most recently posted to the token endpoint — what an `expired`
+  // failure actually rejected (see `getRejectedRefreshToken`).
+  let postedRefreshToken = effectiveRefreshToken;
 
   const baseUrl = effectiveSite?.baseUrl ?? env.UMBRACO_BASE_URL;
   const serverUrl = effectiveSite?.serverUrl ?? env.UMBRACO_SERVER_URL;
@@ -559,6 +645,9 @@ async function performRefresh(
         console.warn(
           `[mcp-hosted] umbraco token refresh FAILED reason=${failure.reason} status=${failure.status ?? "n/a"} error=${failure.error ?? "n/a"}`
         );
+        if (failure.reason === "expired") {
+          rejectedRefreshTokens.set(failure, postedRefreshToken);
+        }
         return failure;
       };
 
@@ -699,6 +788,7 @@ async function performRefresh(
             env,
             `refreshUmbracoToken RETRY key=${tokenKey} invalid_grant on the posted token; KV now holds a newer one, retrying once`
           );
+          postedRefreshToken = retryToken;
           attempt = await postRefresh(retryToken, "retry");
         }
       }
@@ -707,7 +797,9 @@ async function performRefresh(
         return fail(attempt.failure);
       }
 
-      const tokens = attempt.tokens;
+      // Stamped here rather than only inside `storeUmbracoToken` so the
+      // caller gets the same absolute expiry that is persisted.
+      const tokens = withExpiresAt(attempt.tokens);
 
       // Cache the rotated token before attempting to persist it: Umbraco has
       // already redeemed the old one at this point, so if the write below
@@ -755,6 +847,7 @@ async function performRefresh(
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresIn: tokens.expires_in,
+        expiresAt: tokens.expires_at,
       };
     }
   );

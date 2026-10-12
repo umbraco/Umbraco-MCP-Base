@@ -91,25 +91,31 @@ export class McpClientManager {
   /**
    * Call a tool on a chained MCP server.
    *
+   * @param context - Optional caller tool-call `context`/`extra`, whose carried
+   *   request values (Umbraco version, telemetry) in-process servers forward
    * @returns Tool result with optional structuredContent (when tool has outputSchema)
    */
   async callTool(
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
+    context?: unknown,
   ): Promise<{
     content: Array<{ type: string; text?: string }>;
     structuredContent?: unknown;
     isError?: boolean;
   }> {
     const connection = await this.connect(serverName);
-    return connection.callTool(toolName, args);
+    return connection.callTool(toolName, args, context);
   }
 
   /**
    * List tools available on a chained MCP server.
+   *
+   * @param context - Optional caller tool-call `context`/`extra`; in-process
+   *   servers use its carried Umbraco version to decide which tools to list
    */
-  async listTools(serverName: string): Promise<{
+  async listTools(serverName: string, context?: unknown): Promise<{
     tools: Array<{
       name: string;
       description?: string;
@@ -117,7 +123,7 @@ export class McpClientManager {
     }>;
   }> {
     const connection = await this.connect(serverName);
-    return connection.listTools();
+    return connection.listTools(context);
   }
 
   /**

@@ -25,6 +25,7 @@ import type {
 } from "../types/multi-site.js";
 import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { createSiteRouter } from "../site-routing/site-router.js";
+import { rewriteResourceMetadataForTenant } from "./resource-metadata.js";
 import {
   matchTenantOAuthPath,
   dispatchTenantOAuth,
@@ -77,7 +78,7 @@ export interface HostedMcpServerOptions {
   allModeNames: readonly string[];
   /** All valid slice names */
   allSliceNames: readonly string[];
-  /** Optional factory to create the API client (see CreateServerOptions.clientFactory) */
+  /** Factory to create the API client; required for hosted servers (see CreateServerOptions.clientFactory) */
   clientFactory?: () => unknown;
   /**
    * Optional server-level instructions sent to clients on `initialize`.
@@ -500,16 +501,10 @@ function rewriteWwwAuthenticateForTenant(
   const wwwAuth = response.headers.get("www-authenticate");
   if (!wwwAuth) return response;
 
-  const url = new URL(request.url);
-  const tenantMatch = url.pathname.match(/^\/at\/([^/]+)\//);
-  if (!tenantMatch) return response;
-  const alias = tenantMatch[1];
-
-  const rootPrmUrl = `${url.origin}/.well-known/oauth-protected-resource`;
-  const tenantPrmUrl = `${url.origin}/.well-known/oauth-protected-resource/at/${alias}`;
   const rewritten = wwwAuth.replace(
-    `resource_metadata="${rootPrmUrl}"`,
-    `resource_metadata="${tenantPrmUrl}"`,
+    /resource_metadata="([^"]*)"/,
+    (_match, value: string) =>
+      `resource_metadata="${rewriteResourceMetadataForTenant(value, request.url)}"`,
   );
   if (rewritten === wwwAuth) return response;
 
@@ -990,6 +985,12 @@ function renderSiteRoutingLandingPage(
 // ============================================================================
 // Info Endpoint
 // ============================================================================
+//
+// The `toolCount`s below call `c.tools(undefined)` — no user and no
+// `umbracoVersion` — so they are approximate by design: this runs before
+// auth, so there is no Umbraco to ask. A version-gated collection counts its
+// oldest (no-version) variant here; the real per-request set is resolved in
+// `createPerRequestServer`, which fetches the connected version.
 
 function renderInfoResponse(
   options: HostedMcpServerOptions,

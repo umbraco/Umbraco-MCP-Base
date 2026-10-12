@@ -138,3 +138,25 @@ describe("withStandardDecorators", () => {
     expect(spans[0].attributes["umbraco.mcp.login_session"]).toBe("login-a");
   });
 });
+
+describe("withErrorHandling with a status-less error body", () => {
+  it.each(["", "Not Found"])("surfaces the HTTP status in the tool-result text (statusText %j)", async (statusText) => {
+    const { withErrorHandling } = await import("../tool-decorators.js");
+    const { UmbracoApiError, toProblemDetails } = await import("../api-call-helpers.js");
+
+    const tool = {
+      name: "t",
+      description: "",
+      handler: async () => {
+        throw new UmbracoApiError(toProblemDetails({ status: 404, statusText, data: {} }));
+      },
+    } as any;
+
+    const result = await (withErrorHandling(tool).handler as (...args: any[]) => any)({}, {});
+
+    expect(result.isError).toBe(true);
+    const text = JSON.stringify(result.content);
+    expect(text).toContain("404");
+    expect(text).not.toContain("undefined");
+  });
+});

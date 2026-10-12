@@ -18,6 +18,7 @@ export {
 // API call helpers
 export {
   UmbracoApiError,
+  toProblemDetails,
   CAPTURE_RAW_HTTP_RESPONSE,
   processVoidResponse,
   executeVoidApiCall,
