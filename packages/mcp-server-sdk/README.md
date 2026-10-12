@@ -620,7 +620,8 @@ Notes:
   unverified major. In practice `init`/`discover` provisions the API user and writes `.env`
   before `generate` ever runs.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
-  `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env` — the same variable the server itself uses.
+  `UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true` in `.env`, the same opt-in the server uses
+  (see "TLS certificates" below).
 - Each lookup failure warns with its own reason — which of the two requests failed and why —
   before the throw, so a broken `.env` is diagnosable from the generate output.
 - The generated file records whether the value was read from an instance or is a scaffold
@@ -886,6 +887,20 @@ The SDK provides several subpath exports for tree-shaking:
 - Node.js >= 22.3.0
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
+
+## TLS certificates
+
+TLS certificate verification is **on** by default. Importing the SDK no longer changes it.
+
+For a **local** Umbraco with a self-signed certificate, set:
+
+```
+UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true
+```
+
+It only takes effect when `UMBRACO_BASE_URL` is exactly `localhost`, `127.0.0.1` or `[::1]`, and is ignored (with a warning) for any other URL. Node.js can only relax verification process-wide, so when it applies, the server prints a notice to stderr. To keep verification on, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
+
+Do not set `NODE_TLS_REJECT_UNAUTHORIZED=0` for a remote site. If it is set and `UMBRACO_BASE_URL` is not local, the server warns at startup.
 
 ## License
 

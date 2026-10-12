@@ -63,11 +63,78 @@ export interface UmbracoManagementClientOptions {
 // Module State
 // ============================================================================
 
-// Accept self-signed certificates in non-production environments.
-// Must run at module load time (before any fetch calls) because Node.js
-// reads this env var when establishing TLS connections.
-if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// TLS certificate verification is left on by default. A local Umbraco with a
+// self-signed certificate is supported through an explicit, loopback-only
+// opt-in: see applyTlsPolicy() below.
+
+/** Environment variable that opts in to self-signed certificates for a local Umbraco. */
+export const ALLOW_SELF_SIGNED_LOCALHOST_ENV = "UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST";
+
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+// Each TLS policy message is printed once per process, not on every token request.
+const reportedTlsMessages = new Set<string>();
+function reportTlsOnce(message: string): void {
+  if (reportedTlsMessages.has(message)) return;
+  reportedTlsMessages.add(message);
+  console.error(message);
+}
+
+/**
+ * True when `url`'s hostname is exactly a loopback host (`localhost`,
+ * `127.0.0.1` or `[::1]`). A substring match is not enough:
+ * `https://localhost.example.com` is not local.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decides certificate verification for this process from the Umbraco base URL.
+ *
+ * - `UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true` with a loopback base URL turns
+ *   verification off for the process, so a local Umbraco with a self-signed
+ *   certificate works. Node.js only offers this switch process-wide.
+ * - The same opt-in with a non-loopback base URL is ignored, with a warning.
+ * - `NODE_TLS_REJECT_UNAUTHORIZED=0` set by the user with a non-loopback base
+ *   URL is left as set, with a warning: requests to that site, including the
+ *   client-credentials token request, are not certificate-checked.
+ *
+ * Messages go to stderr; stdout carries the MCP stdio protocol.
+ */
+export function applyTlsPolicy(baseUrl: string): void {
+  if (typeof process === "undefined" || !process.env) return;
+  const local = isLoopbackUrl(baseUrl);
+  const optIn = process.env[ALLOW_SELF_SIGNED_LOCALHOST_ENV]?.trim().toLowerCase() === "true";
+
+  if (optIn && local) {
+    if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    }
+    reportTlsOnce(
+      `[umbraco-mcp] ${ALLOW_SELF_SIGNED_LOCALHOST_ENV}=true and the Umbraco base URL is local: ` +
+        "TLS certificate verification is disabled for this process."
+    );
+    return;
+  }
+  if (optIn && !local) {
+    reportTlsOnce(
+      `[umbraco-mcp] ${ALLOW_SELF_SIGNED_LOCALHOST_ENV} is ignored: the Umbraco base URL is not a local ` +
+        "(localhost, 127.0.0.1 or [::1]) address. Certificate verification stays on."
+    );
+  }
+  if (!local && process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+    reportTlsOnce(
+      "[umbraco-mcp] Warning: NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local. " +
+        "TLS certificates are not being verified for this site. Remove NODE_TLS_REJECT_UNAUTHORIZED from " +
+        `the server's environment; for a local site with a self-signed certificate use ${ALLOW_SELF_SIGNED_LOCALHOST_ENV}=true ` +
+        "or NODE_EXTRA_CA_CERTS instead."
+    );
+  }
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
@@ -131,6 +198,7 @@ export const requestClientCredentialsToken = async (config: {
     signal,
   } = config;
 
+  applyTlsPolicy(baseUrl);
   const response = await fetch(`${baseUrl}${tokenPath}`, {
     method: "POST",
     headers: {
@@ -194,8 +262,8 @@ const getToken = async (): Promise<string> => {
  * Initialize the Umbraco fetch client with authentication config.
  * Must be called before making any API requests.
  *
- * In non-production environments, automatically disables TLS certificate
- * verification to support self-signed certificates during local development.
+ * Applies the TLS policy for the base URL (see applyTlsPolicy): certificate
+ * verification stays on unless a local base URL is explicitly opted in.
  *
  * @param config - Authentication configuration
  */
@@ -212,6 +280,7 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
     throw new Error("Missing required configuration: clientSecret");
   }
 
+  applyTlsPolicy(baseUrl);
   authConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
   clearUmbracoFetchToken();
 }
@@ -647,6 +716,7 @@ export function createUmbracoFetchClient(
       if (!clientSecret && clientId !== "umbraco-swagger") {
         throw new Error("Missing required configuration: clientSecret");
       }
+      applyTlsPolicy(baseUrl);
       instanceAuthConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
     },
     isInitialized: () => instanceAuthConfig !== null,

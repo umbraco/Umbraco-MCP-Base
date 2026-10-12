@@ -135,8 +135,9 @@ Do not just push a PR and walk away — the CI build includes tests that don't r
 
 ## Self-Signed Certificates
 
-The local Umbraco instance uses HTTPS with self-signed certs. TLS rejection must be disabled in three places:
-- Environment variable: `NODE_TLS_REJECT_UNAUTHORIZED=0`
+The local Umbraco instance uses HTTPS with self-signed certs. The SDK keeps TLS verification on by default (it must never disable it at import). For the local instance:
+- Runtime (servers, `npm run generate`): `UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true`, loopback base URLs only
+- Test processes and CI may still set `NODE_TLS_REJECT_UNAUTHORIZED=0` for the local instance
 - Jest setup file: `https.globalAgent.options.rejectUnauthorized = false` (env var alone is insufficient in Jest VM context)
 - Playwright config: `ignoreHTTPSErrors: true`
 

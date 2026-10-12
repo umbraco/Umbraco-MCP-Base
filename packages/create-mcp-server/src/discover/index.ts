@@ -23,6 +23,7 @@ import {
   promptUpdateModeRegistry,
   promptUpdateSliceRegistry,
 } from "./prompts.js";
+import { isLoopbackUrl } from "../loopback.js";
 
 export async function runDiscover(dir?: string): Promise<void> {
   const projectDir = path.resolve(dir || process.cwd());
@@ -97,8 +98,7 @@ export async function runDiscover(dir?: string): Promise<void> {
 
     // Step 3: Health check
     // Allow self-signed certs for localhost
-    const isLocalhost =
-      baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+    const isLocalhost = isLoopbackUrl(baseUrl);
     if (isLocalhost) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
@@ -180,7 +180,7 @@ export async function runDiscover(dir?: string): Promise<void> {
 
   if (shouldGenerate) {
     console.log(pc.dim("\nGenerating API client...\n"));
-    const genResult = generateClient(projectDir);
+    const genResult = generateClient(projectDir, baseUrl);
 
     if (!genResult.success) {
       console.log(
