@@ -61,8 +61,16 @@ import {
 const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:44391";
 const clientId = process.env.UMBRACO_CLIENT_ID || "";
 const clientSecret = process.env.UMBRACO_CLIENT_SECRET || "";
+// A config the SDK refuses (e.g. TLS verification disabled for a remote site)
+// is rethrown after the CLI commands below, so the offline ones
+// (--list-tools, --describe-tool, --debug-config, ...) still work to diagnose it.
+let fetchInitError: unknown;
 if (clientId) {
-  initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+  try {
+    initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+  } catch (error) {
+    fetchInitError = error;
+  }
 }
 
 // Configure the API client for use with toolkit helpers
@@ -105,6 +113,8 @@ await handleCliCommands(collections, {
   filterConfig,
   serverConfig: serverConfig.umbraco,
 });
+
+if (fetchInitError) throw fetchInitError;
 
 // ============================================================================
 // Version Check

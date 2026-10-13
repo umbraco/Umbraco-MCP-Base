@@ -78,10 +78,13 @@ export function removeApiTools(projectDir: string): number {
 
     // Remove initializeUmbracoFetch import and call (container doesn't make direct API calls)
     content = content.replace(/\s*initializeUmbracoFetch,/g, "");
+    // From the comment to the end of the `if (clientId) { ... }` block (the
+    // first top-level `}`), then the deferred rethrow after the CLI commands.
     content = content.replace(
-      /\/\/ Initialize the SDK's fetch client.*\n(.*\n)*?.*initializeUmbracoFetch\(.*\);\s*\n\}\s*\n/m,
+      /\/\/ Initialize the SDK's fetch client[\s\S]*?\n\}\n\s*\n/,
       "",
     );
+    content = content.replace(/^if \(fetchInitError\) throw fetchInitError;\n\n?/m, "");
 
     // Remove the baseUrl/clientId/clientSecret variables (only used by initializeUmbracoFetch)
     content = content.replace(
