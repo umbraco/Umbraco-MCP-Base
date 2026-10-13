@@ -620,7 +620,7 @@ Notes:
   unverified major. In practice `init`/`discover` provisions the API user and writes `.env`
   before `generate` ever runs.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
-  `UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true` in `.env`, the same opt-in the server uses
+  `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env`, the same variable the server uses. Local only
   (see "TLS certificates" below).
 - Each lookup failure warns with its own reason — which of the two requests failed and why —
   before the throw, so a broken `.env` is diagnosable from the generate output.
@@ -890,17 +890,15 @@ The SDK provides several subpath exports for tree-shaking:
 
 ## TLS certificates
 
-TLS certificate verification is **on** by default. Importing the SDK no longer changes it.
+TLS certificate verification is **on** by default. Importing the SDK does not change it.
 
-For a **local** Umbraco with a self-signed certificate, set:
+For a **local** Umbraco (`localhost`, `127.0.0.1` or `[::1]`) with a self-signed certificate, set this in `.env`:
 
 ```
-UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true
+NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-It only takes effect when `UMBRACO_BASE_URL` is exactly `localhost`, `127.0.0.1` or `[::1]`, and is ignored (with a warning) for any other URL. Node.js can only relax verification process-wide, so when it applies, the server prints a notice to stderr. To keep verification on, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
-
-Do not set `NODE_TLS_REJECT_UNAUTHORIZED=0` for a remote site. If it is set and `UMBRACO_BASE_URL` is not local, the server warns at startup.
+**Only use it locally.** It turns verification off for every HTTPS request the process makes, not just requests to Umbraco. Never set it for a remote site: if it is set and `UMBRACO_BASE_URL` is not local, the server prints a warning to stderr. To keep verification on locally, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
 
 ## License
 

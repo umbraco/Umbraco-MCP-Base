@@ -63,17 +63,8 @@ export interface UmbracoManagementClientOptions {
 // Module State
 // ============================================================================
 
-const ALLOW_SELF_SIGNED_LOCALHOST_ENV = "UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST";
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-// Printed once per process, not on every token request. stderr, because
-// stdout carries the MCP stdio protocol.
-const reportedTlsMessages = new Set<string>();
-function reportTlsOnce(message: string): void {
-  if (reportedTlsMessages.has(message)) return;
-  reportedTlsMessages.add(message);
-  console.error(`[umbraco-mcp] ${message}`);
-}
+let warnedTlsDisabledForRemote = false;
 
 function isLoopbackUrl(url: string): boolean {
   try {
@@ -84,37 +75,20 @@ function isLoopbackUrl(url: string): boolean {
 }
 
 /**
- * Certificate verification stays on unless UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST=true
- * and the base URL is loopback, in which case it is turned off process-wide
- * (the only switch Node.js offers). Warns when the opt-in is ignored, or when
- * the user has set NODE_TLS_REJECT_UNAUTHORIZED=0 for a non-local site.
+ * TLS certificate verification is left to Node.js (on by default). A local
+ * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
+ * warn once if that is set for a non-local site. stderr, because stdout
+ * carries the MCP stdio protocol.
  */
-function applyTlsPolicy(baseUrl: string): void {
-  if (typeof process === "undefined" || !process.env) return;
-  const local = isLoopbackUrl(baseUrl);
-  const optIn = process.env[ALLOW_SELF_SIGNED_LOCALHOST_ENV]?.trim().toLowerCase() === "true";
-
-  if (optIn && local) {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-    reportTlsOnce(
-      `${ALLOW_SELF_SIGNED_LOCALHOST_ENV}=true and the Umbraco base URL is local: ` +
-        "TLS certificate verification is disabled for this process."
-    );
-    return;
-  }
-  if (optIn) {
-    reportTlsOnce(
-      `${ALLOW_SELF_SIGNED_LOCALHOST_ENV} is ignored: the Umbraco base URL is not localhost, ` +
-        "127.0.0.1 or [::1]. Certificate verification stays on."
-    );
-  }
-  if (!local && process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
-    reportTlsOnce(
-      "Warning: NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
-        "so its TLS certificate is not being verified. Remove it; for a local self-signed site use " +
-        `${ALLOW_SELF_SIGNED_LOCALHOST_ENV}=true or NODE_EXTRA_CA_CERTS instead.`
-    );
-  }
+function warnIfTlsDisabledForRemote(baseUrl: string): void {
+  if (warnedTlsDisabledForRemote || typeof process === "undefined") return;
+  if (process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0" || isLoopbackUrl(baseUrl)) return;
+  warnedTlsDisabledForRemote = true;
+  console.error(
+    "[umbraco-mcp] Warning: NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
+      "so its TLS certificate is not being verified. Only use it for a local Umbraco " +
+      "(localhost, 127.0.0.1 or [::1]), or trust the certificate with NODE_EXTRA_CA_CERTS instead."
+  );
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
@@ -178,7 +152,7 @@ export const requestClientCredentialsToken = async (config: {
     signal,
   } = config;
 
-  applyTlsPolicy(baseUrl);
+  warnIfTlsDisabledForRemote(baseUrl);
   const response = await fetch(`${baseUrl}${tokenPath}`, {
     method: "POST",
     headers: {
@@ -242,8 +216,8 @@ const getToken = async (): Promise<string> => {
  * Initialize the Umbraco fetch client with authentication config.
  * Must be called before making any API requests.
  *
- * Applies the TLS policy for the base URL (see applyTlsPolicy): certificate
- * verification stays on unless a local base URL is explicitly opted in.
+ * Does not change TLS certificate verification; warns if it has been disabled
+ * for a non-local base URL (see warnIfTlsDisabledForRemote).
  *
  * @param config - Authentication configuration
  */
@@ -260,7 +234,7 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
     throw new Error("Missing required configuration: clientSecret");
   }
 
-  applyTlsPolicy(baseUrl);
+  warnIfTlsDisabledForRemote(baseUrl);
   authConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
   clearUmbracoFetchToken();
 }
@@ -696,7 +670,7 @@ export function createUmbracoFetchClient(
       if (!clientSecret && clientId !== "umbraco-swagger") {
         throw new Error("Missing required configuration: clientSecret");
       }
-      applyTlsPolicy(baseUrl);
+      warnIfTlsDisabledForRemote(baseUrl);
       instanceAuthConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
     },
     isInitialized: () => instanceAuthConfig !== null,
