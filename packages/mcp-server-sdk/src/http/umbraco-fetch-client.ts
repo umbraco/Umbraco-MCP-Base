@@ -25,7 +25,7 @@
  */
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
-import { normalizeBaseUrl } from "../helpers/url.js";
+import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
@@ -63,16 +63,6 @@ export interface UmbracoManagementClientOptions {
 // Module State
 // ============================================================================
 
-const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-function isLoopbackUrl(url: string): boolean {
-  try {
-    return LOOPBACK_HOSTNAMES.has(new URL(url).hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
 /**
  * TLS certificate verification is left to Node.js (on by default). A local
  * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
@@ -81,8 +71,8 @@ function isLoopbackUrl(url: string): boolean {
  * stdout carries the MCP stdio protocol.
  */
 function assertTlsNotDisabledForRemote(baseUrl: string): void {
-  if (typeof process === "undefined") return;
-  if (process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0" || isLoopbackUrl(baseUrl)) return;
+  if (typeof process === "undefined" || process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
+  if (isLoopbackUrl(baseUrl)) return;
   const message =
     "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
     "so its TLS certificate would not be verified. Refusing to start. Remove NODE_TLS_REJECT_UNAUTHORIZED " +
@@ -223,6 +213,12 @@ const getToken = async (): Promise<string> => {
  * @param config - Authentication configuration
  */
 export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
+  authConfig = resolveAuthConfig(config);
+  clearUmbracoFetchToken();
+}
+
+/** Validates an auth config, applies the TLS check and normalizes the base URL. */
+function resolveAuthConfig(config: UmbracoFetchAuthConfig): UmbracoFetchAuthConfig {
   const { clientId, clientSecret, baseUrl } = config;
 
   if (!baseUrl) {
@@ -236,8 +232,7 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
   }
 
   assertTlsNotDisabledForRemote(baseUrl);
-  authConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
-  clearUmbracoFetchToken();
+  return { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
 }
 
 /**
@@ -665,14 +660,7 @@ export function createUmbracoFetchClient(
 
   return {
     initialize: (config: UmbracoFetchAuthConfig) => {
-      const { clientId, clientSecret, baseUrl } = config;
-      if (!baseUrl) throw new Error("Missing required configuration: baseUrl");
-      if (!clientId) throw new Error("Missing required configuration: clientId");
-      if (!clientSecret && clientId !== "umbraco-swagger") {
-        throw new Error("Missing required configuration: clientSecret");
-      }
-      assertTlsNotDisabledForRemote(baseUrl);
-      instanceAuthConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
+      instanceAuthConfig = resolveAuthConfig(config);
     },
     isInitialized: () => instanceAuthConfig !== null,
     clearToken: () => {

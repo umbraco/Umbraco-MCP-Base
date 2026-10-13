@@ -97,9 +97,8 @@ export async function runDiscover(dir?: string): Promise<void> {
     baseUrl = await promptBaseUrl(detected.url);
 
     // Step 3: Health check
-    // Allow self-signed certs for localhost
-    const isLocalhost = isLoopbackUrl(baseUrl);
-    if (isLocalhost) {
+    // Allow self-signed certs for a local instance only
+    if (isLoopbackUrl(baseUrl)) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
 

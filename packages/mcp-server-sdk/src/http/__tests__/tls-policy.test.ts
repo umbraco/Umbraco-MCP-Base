@@ -70,16 +70,11 @@ describe("TLS certificate verification", () => {
   it("refuses the build-time token request before sending the secret (npm run generate)", async () => {
     const mod = await loadClient();
     process.env[TLS_ENV] = "0";
-    const originalFetch = globalThis.fetch;
-    const fetchMock = jest.fn();
-    (globalThis as any).fetch = fetchMock;
-    try {
-      await expect(mod.requestClientCredentialsToken(config("https://example.umbraco.io"))).rejects.toThrow(
-        "Refusing to start",
-      );
-    } finally {
-      (globalThis as any).fetch = originalFetch;
-    }
-    expect(fetchMock).not.toHaveBeenCalled();
+    const fetchSpy = jest.spyOn(globalThis, "fetch");
+    await expect(mod.requestClientCredentialsToken(config("https://example.umbraco.io"))).rejects.toThrow(
+      "Refusing to start",
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });

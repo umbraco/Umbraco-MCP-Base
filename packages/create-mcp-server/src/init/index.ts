@@ -186,8 +186,7 @@ export async function runInit(dir?: string): Promise<void> {
   if (existingInstance && !isContainerMode) {
     const { baseUrl, adminEmail, adminPassword } = existingInstance;
 
-    const isLocalhost = isLoopbackUrl(baseUrl);
-    if (isLocalhost) {
+    if (isLoopbackUrl(baseUrl)) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
 
