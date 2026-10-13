@@ -50,40 +50,36 @@ describe("TLS certificate verification", () => {
   );
 
   it.each(["https://example.umbraco.io", "https://localhost.example.com", "https://127.0.0.1.example.com"])(
-    "warns when NODE_TLS_REJECT_UNAUTHORIZED=0 is used for a non-local site (%s)",
+    "refuses to start when NODE_TLS_REJECT_UNAUTHORIZED=0 is used for a non-local site (%s)",
     async (baseUrl) => {
       process.env[TLS_ENV] = "0";
-      (await loadClient()).initializeUmbracoFetch(config(baseUrl));
-      expect(String(errorSpy.mock.calls[0]?.[0])).toContain("not being verified");
+      const mod = await loadClient();
+      expect(() => mod.initializeUmbracoFetch(config(baseUrl))).toThrow("Refusing to start");
+      expect(String(errorSpy.mock.calls[0]?.[0])).toContain("Refusing to start");
+      expect(mod.isUmbracoFetchInitialized()).toBe(false);
     },
   );
 
-  it("warns for clients from createUmbracoFetchClient", async () => {
+  it("refuses for clients from createUmbracoFetchClient", async () => {
     process.env[TLS_ENV] = "0";
-    (await loadClient()).createUmbracoFetchClient().initialize(config("https://example.umbraco.io"));
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const client = (await loadClient()).createUmbracoFetchClient();
+    expect(() => client.initialize(config("https://example.umbraco.io"))).toThrow("Refusing to start");
+    expect(client.isInitialized()).toBe(false);
   });
 
-  it("warns for the build-time token request (npm run generate)", async () => {
+  it("refuses the build-time token request before sending the secret (npm run generate)", async () => {
     const mod = await loadClient();
     process.env[TLS_ENV] = "0";
     const originalFetch = globalThis.fetch;
-    (globalThis as any).fetch = jest.fn(async () =>
-      new Response(JSON.stringify({ access_token: "t", expires_in: 60 }), { status: 200, headers: { "Content-Type": "application/json" } }),
-    );
+    const fetchMock = jest.fn();
+    (globalThis as any).fetch = fetchMock;
     try {
-      await mod.requestClientCredentialsToken(config("https://example.umbraco.io"));
+      await expect(mod.requestClientCredentialsToken(config("https://example.umbraco.io"))).rejects.toThrow(
+        "Refusing to start",
+      );
     } finally {
       (globalThis as any).fetch = originalFetch;
     }
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("warns once per process", async () => {
-    const mod = await loadClient();
-    process.env[TLS_ENV] = "0";
-    mod.initializeUmbracoFetch(config("https://example.umbraco.io"));
-    mod.initializeUmbracoFetch(config("https://example.umbraco.io"));
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

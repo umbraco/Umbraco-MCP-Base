@@ -22,12 +22,18 @@ function response(status: number, body: unknown, contentType: string): Response 
   );
 }
 
+// These tests use remote example URLs; CI sets NODE_TLS_REJECT_UNAUTHORIZED=0
+// for the local instance, which the client refuses for a remote URL.
+const savedTlsSetting = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+
 beforeEach(() => {
+  delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
   mockFetch.mockReset();
   (globalThis as any).fetch = mockFetch;
 });
 
 afterEach(() => {
+  if (savedTlsSetting !== undefined) process.env.NODE_TLS_REJECT_UNAUTHORIZED = savedTlsSetting;
   (globalThis as any).fetch = originalFetch;
 });
 
