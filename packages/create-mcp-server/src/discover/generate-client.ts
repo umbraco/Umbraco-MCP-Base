@@ -8,10 +8,6 @@ export interface GenerateResult {
   error?: string;
 }
 
-/**
- * @param baseUrl - The Umbraco base URL. Only a loopback URL (a local site with a
- *   self-signed certificate) relaxes TLS verification for the generate step.
- */
 export function generateClient(projectDir: string, baseUrl?: string): GenerateResult {
   try {
     // Ensure dependencies are installed (Orval needs to be available)
@@ -28,11 +24,9 @@ export function generateClient(projectDir: string, baseUrl?: string): GenerateRe
       timeout: 180_000,
       env: {
         ...process.env,
-        // Codegen also fetches the OpenAPI document outside the SDK, so a local
+        // Orval fetches the OpenAPI document outside the SDK, so a local
         // self-signed site needs the process-wide switch. Never for a remote URL.
-        ...(baseUrl && isLoopbackUrl(baseUrl)
-          ? { NODE_TLS_REJECT_UNAUTHORIZED: "0", UMBRACO_ALLOW_SELF_SIGNED_LOCALHOST: "true" }
-          : {}),
+        ...(baseUrl && isLoopbackUrl(baseUrl) ? { NODE_TLS_REJECT_UNAUTHORIZED: "0" } : {}),
       },
     });
 

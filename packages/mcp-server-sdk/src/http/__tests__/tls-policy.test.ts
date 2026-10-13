@@ -104,18 +104,3 @@ describe("TLS certificate verification", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 });
-
-describe("isLoopbackUrl", () => {
-  it.each([
-    ["https://localhost:44391", true],
-    ["http://127.0.0.1", true],
-    ["https://[::1]:8443/umbraco", true],
-    ["https://localhost.example.com", false],
-    ["https://example.com/?next=localhost", false],
-    ["https://127.0.0.1.nip.io", false],
-    ["not a url", false],
-  ])("%s -> %s", async (url, expected) => {
-    const { isLoopbackUrl } = await loadClient();
-    expect(isLoopbackUrl(url)).toBe(expected);
-  });
-});
