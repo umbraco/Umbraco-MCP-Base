@@ -898,7 +898,7 @@ For a **local** Umbraco (`localhost`, `127.0.0.1` or `[::1]`) with a self-signed
 NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-**Only use it locally.** It turns verification off for every HTTPS request the process makes, not just requests to Umbraco. Never set it for a remote site: if it is set and `UMBRACO_BASE_URL` is not local, the server prints an error to stderr and refuses to start (`npm run generate` fails the same way, before orval downloads the spec), so the client secret is never sent over an unverified connection. To keep verification on locally, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
+**Only use it locally.** It turns verification off for every HTTPS request the process makes, not just requests to Umbraco. Never set it for a remote site: if it is set and `UMBRACO_BASE_URL` is not local, the server prints an error to stderr and refuses to start (`npm run generate` fails the same way, before orval downloads the spec; the check is on `UMBRACO_BASE_URL`, not on orval's input URL), so the client secret is never sent over an unverified connection. To keep verification on locally, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
 
 ## License
 

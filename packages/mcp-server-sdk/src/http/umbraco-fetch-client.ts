@@ -71,7 +71,7 @@ export interface UmbracoManagementClientOptions {
  * stdout carries the MCP stdio protocol.
  */
 export function assertTlsNotDisabledForRemote(baseUrl: string): void {
-  if (typeof process === "undefined" || process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
+  if (typeof process === "undefined" || process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
   if (isLoopbackUrl(baseUrl)) return;
   const message =
     "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +

@@ -258,10 +258,16 @@ describe("updateEnvBaseUrl TLS override", () => {
     expect(mockFs.files.get(ENV)).toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=0$/m);
   });
 
-  it("adds the override for a local base URL when it is missing", () => {
+  it("does not add the override when the user removed it", () => {
     mockFs.files.set(ENV, "FOO=bar\n");
     updateEnvBaseUrl(PROJECT_DIR, "https://127.0.0.1:44391");
-    expect(mockFs.files.get(ENV)).toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=0$/m);
+    expect(mockFs.files.get(ENV)).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
+  });
+
+  it("leaves a different value alone", () => {
+    mockFs.files.set(ENV, "NODE_TLS_REJECT_UNAUTHORIZED=1\n");
+    updateEnvBaseUrl(PROJECT_DIR, "https://localhost:44391");
+    expect(mockFs.files.get(ENV)).toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=1$/m);
   });
 
   it("comments out the override for a remote base URL", () => {

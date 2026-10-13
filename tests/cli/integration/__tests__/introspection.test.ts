@@ -171,6 +171,21 @@ describe("CLI with TLS verification disabled for a remote site", () => {
     expect(output).toContain("Name");
   });
 
+  it("reports the refusal for --call instead of running the tool", () => {
+    let stderr = "";
+    try {
+      execFileSync("node", [entryPoint, "--call", "get-example"], {
+        env: { ...baseEnv, ...remoteTlsOff },
+        timeout: 15000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      stderr = (error as { stderr: string }).stderr;
+    }
+    expect(stderr).toContain("Refusing to start");
+  });
+
   it("refuses to start the server", () => {
     let stderr = "";
     let status: number | null = 0;
