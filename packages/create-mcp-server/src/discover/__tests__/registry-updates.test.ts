@@ -249,6 +249,36 @@ describe("updateEnvBaseUrl", () => {
   });
 });
 
+describe("updateEnvBaseUrl TLS override", () => {
+  const ENV = path.resolve(PROJECT_DIR, ".env");
+
+  it("enables a commented-out override for a local base URL", () => {
+    mockFs.files.set(ENV, "# NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+    updateEnvBaseUrl(PROJECT_DIR, "https://localhost:44391");
+    expect(mockFs.files.get(ENV)).toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=0$/m);
+  });
+
+  it("adds the override for a local base URL when it is missing", () => {
+    mockFs.files.set(ENV, "FOO=bar\n");
+    updateEnvBaseUrl(PROJECT_DIR, "https://127.0.0.1:44391");
+    expect(mockFs.files.get(ENV)).toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=0$/m);
+  });
+
+  it("comments out the override for a remote base URL", () => {
+    mockFs.files.set(ENV, "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+    updateEnvBaseUrl(PROJECT_DIR, "https://my-site.euwest01.umbraco.io");
+    const content = mockFs.files.get(ENV)!;
+    expect(content).toContain("# NODE_TLS_REJECT_UNAUTHORIZED=0");
+    expect(content).not.toMatch(/^NODE_TLS_REJECT_UNAUTHORIZED=0$/m);
+  });
+
+  it("does not add the override for a remote base URL", () => {
+    mockFs.files.set(ENV, "FOO=bar\n");
+    updateEnvBaseUrl(PROJECT_DIR, "https://localhost.example.com");
+    expect(mockFs.files.get(ENV)).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
+  });
+});
+
 describe("updateEnvVar", () => {
   it("should append new var to .env", () => {
     // Seed .env first

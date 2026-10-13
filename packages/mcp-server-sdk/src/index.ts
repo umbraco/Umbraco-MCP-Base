@@ -131,7 +131,7 @@ export {
 } from "./helpers/cursor-pagination.js";
 
 // URL helpers
-export { normalizeBaseUrl } from "./helpers/url.js";
+export { normalizeBaseUrl, isLoopbackUrl } from "./helpers/url.js";
 
 // ============================================================================
 // Telemetry

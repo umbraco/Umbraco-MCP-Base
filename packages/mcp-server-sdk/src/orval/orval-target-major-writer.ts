@@ -83,7 +83,10 @@
 import fs from "fs";
 import path from "path";
 import { normalizeBaseUrl } from "../helpers/url.js";
-import { requestClientCredentialsToken } from "../http/umbraco-fetch-client.js";
+import {
+  assertTlsNotDisabledForRemote,
+  requestClientCredentialsToken,
+} from "../http/umbraco-fetch-client.js";
 import { SERVER_INFORMATION_PATH } from "../constants/index.js";
 import { majorFromVersion } from "../version-check/major-from-version.js";
 
@@ -382,6 +385,13 @@ export function createUmbracoTargetMajorTransformer(
   options: UmbracoTargetMajorOptions
 ): <T extends OpenApiDocumentPassthrough>(spec: T) => Promise<T> {
   const { outputPath, constantName = DEFAULT_TARGET_MAJOR_CONSTANT } = options;
+
+  // Runs when orval.config.ts loads, before orval downloads the spec, so a
+  // remote site with TLS verification disabled fails here, not in a caught
+  // error later.
+  if (process.env.UMBRACO_BASE_URL) {
+    assertTlsNotDisabledForRemote(process.env.UMBRACO_BASE_URL);
+  }
 
   return async <T extends OpenApiDocumentPassthrough>(spec: T): Promise<T> => {
     const resolved = path.resolve(process.cwd(), outputPath);

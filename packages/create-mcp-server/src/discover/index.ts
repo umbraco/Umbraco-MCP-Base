@@ -464,6 +464,27 @@ export function updateEnvVar(projectDir: string, key: string, value: string): bo
   return true;
 }
 
+const TLS_OVERRIDE_LINE = /^#?[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=.*$/m;
+
+/**
+ * Writes UMBRACO_BASE_URL, and enables NODE_TLS_REJECT_UNAUTHORIZED=0 only for
+ * a local base URL (commenting it out otherwise): the SDK refuses to start
+ * with it set for a remote site.
+ */
 export function updateEnvBaseUrl(projectDir: string, baseUrl: string): boolean {
-  return updateEnvVar(projectDir, "UMBRACO_BASE_URL", baseUrl);
+  const baseUrlChanged = updateEnvVar(projectDir, "UMBRACO_BASE_URL", baseUrl);
+
+  const envPath = path.join(projectDir, ".env");
+  const content = fs.readFileSync(envPath, "utf-8");
+  const local = isLoopbackUrl(baseUrl);
+  const tlsLine = `${local ? "" : "# "}NODE_TLS_REJECT_UNAUTHORIZED=0`;
+  let next = content;
+  if (TLS_OVERRIDE_LINE.test(content)) {
+    next = content.replace(TLS_OVERRIDE_LINE, tlsLine);
+  } else if (local) {
+    next = `${content}${content.endsWith("\n") ? "" : "\n"}${tlsLine}\n`;
+  }
+  if (next === content) return baseUrlChanged;
+  fs.writeFileSync(envPath, next);
+  return true;
 }
