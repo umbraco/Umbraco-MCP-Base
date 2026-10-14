@@ -5,7 +5,8 @@
  * (--list-tools, --describe-tool, --generate-context).
  *
  * Consumers call this once after loading config and collections.
- * If a CLI flag is active, the function prints to stdout and calls process.exit(0).
+ * If a CLI flag is active, the function prints to stdout, waits for stdout/stderr
+ * to flush completely, then calls process.exit (0 on success, 1 on error).
  * If no CLI flags are active, it returns normally so the server can start.
  *
  * @example
@@ -56,6 +57,23 @@ export interface HandleCliCommandsOptions {
    * connected — collections then list their oldest variants.
    */
   umbracoVersion?: string;
+}
+
+/**
+ * Wait until everything written to a stream so far has been handed to the OS.
+ * Writes to pipes are asynchronous on POSIX, so exiting right after console.log
+ * truncates output larger than the pipe buffer (64 KB).
+ */
+function drain(stream: NodeJS.WriteStream): Promise<void> {
+  return new Promise((resolve) => {
+    stream.write("", () => resolve());
+  });
+}
+
+/** Flush stdout and stderr completely, then exit with the given code. */
+async function exitAfterFlush(code: number): Promise<never> {
+  await Promise.all([drain(process.stdout), drain(process.stderr)]);
+  process.exit(code);
 }
 
 /**
@@ -116,7 +134,7 @@ export async function handleCliCommands(
     }
 
     console.log(JSON.stringify(debug, null, 2));
-    process.exit(0);
+    await exitAfterFlush(0);
   }
 
   if (cliFlags?.listTools) {
@@ -126,7 +144,7 @@ export async function handleCliCommands(
         .map((tool) => toolToSummary(tool, col.metadata.name)),
     );
     console.log(formatToolTable(summaries));
-    process.exit(0);
+    await exitAfterFlush(0);
   }
 
   if (cliFlags?.describeTool) {
@@ -152,13 +170,13 @@ export async function handleCliCommands(
             2,
           ),
         );
-        process.exit(0);
+        await exitAfterFlush(0);
       }
     }
     console.error(
       `Tool '${toolName}' not found. Use --list-tools to see available tools.`,
     );
-    process.exit(1);
+    await exitAfterFlush(1);
   }
 
   if (cliFlags?.generateContext) {
@@ -170,7 +188,7 @@ export async function handleCliCommands(
       umbracoVersion,
     });
     console.log(context);
-    process.exit(0);
+    await exitAfterFlush(0);
   }
 
   if (cliFlags?.callTool) {
@@ -188,12 +206,12 @@ export async function handleCliCommands(
         let args: Record<string, unknown> = {};
         if (cliFlags.callToolArgs && cliFlags.callToolArgsFile) {
           console.error("Cannot use --call-args and --call-args-file together. Choose one.");
-          process.exit(1);
+          await exitAfterFlush(1);
           return; // unreachable but satisfies TS
         } else if (cliFlags.callToolArgsFile !== undefined) {
           if (cliFlags.callToolArgsFile === "") {
             console.error("--call-args-file was provided but is empty. Pass a file path.");
-            process.exit(1);
+            await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
           let fileContents: string;
@@ -203,14 +221,14 @@ export async function handleCliCommands(
             fileContents = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
           } catch (error: any) {
             console.error(`Could not read --call-args-file '${cliFlags.callToolArgsFile}': ${error.message}`);
-            process.exit(1);
+            await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
           try {
             args = JSON.parse(fileContents);
           } catch (error: any) {
             console.error(`Invalid JSON in --call-args-file '${cliFlags.callToolArgsFile}': ${error.message}`);
-            process.exit(1);
+            await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
         } else if (cliFlags.callToolArgs) {
@@ -218,7 +236,7 @@ export async function handleCliCommands(
             args = JSON.parse(cliFlags.callToolArgs);
           } catch {
             console.error(`Invalid JSON for --call-args: ${cliFlags.callToolArgs}`);
-            process.exit(1);
+            await exitAfterFlush(1);
           }
         }
 
@@ -232,7 +250,7 @@ export async function handleCliCommands(
           result = await Promise.resolve(tool.handler(args as any, extra));
         } catch (error: any) {
           console.error(`Tool '${toolName}' failed: ${error.message}`);
-          process.exit(1);
+          await exitAfterFlush(1);
           return; // unreachable but satisfies TS
         }
 
@@ -250,7 +268,7 @@ export async function handleCliCommands(
           }
         }
 
-        process.exit(result.isError ? 1 : 0);
+        await exitAfterFlush(result.isError ? 1 : 0);
         return;
       }
     }
@@ -258,6 +276,6 @@ export async function handleCliCommands(
     console.error(
       `Tool '${toolName}' not found. Use --list-tools to see available tools.`,
     );
-    process.exit(1);
+    await exitAfterFlush(1);
   }
 }
