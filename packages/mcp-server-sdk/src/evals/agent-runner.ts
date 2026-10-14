@@ -82,6 +82,8 @@ export async function runAgentTest(
           env
         }
       },
+      // Only the target server above: don't also load the project's ambient .mcp.json
+      strictMcpConfig: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: [],
