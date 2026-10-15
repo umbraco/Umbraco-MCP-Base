@@ -133,8 +133,9 @@ export const TOOLS_CALL_METHOD = "tools/call";
  * | ------------------ | ----- |
  * | `success`          | Handler returned a result without `isError` |
  * | `error_result`     | Handler returned `isError: true` rather than throwing (e.g. a pre-execution block) |
- * | `validation_error` | `ToolValidationError` — business-rule rejection |
- * | `api_error`        | `UmbracoApiError`, or an error carrying `response.data` — the API answered, unhappily |
+ * | `validation_error` | `ToolValidationError` — business-rule rejection — or an `UmbracoApiError` with status 400/422 and a non-empty ASP.NET validation `errors` body |
+ * | `client_error`     | `UmbracoApiError` with any other 4xx status (404, 409, a 400 without `errors`, ...) — Umbraco rejected the request. 401/403 are excluded, see `api_error` |
+ * | `api_error`        | `UmbracoApiError` with a 5xx, 401 or 403 status or no status, or an error carrying `response.data` — the API answered, unhappily. 401/403 stay here deliberately: auth and permission problems are for operators to see |
  * | `handler_error`    | Any other `Error` — network failure or a bug in the tool |
  * | `unknown_error`    | A non-`Error` value was thrown |
  *
@@ -145,6 +146,7 @@ export type ToolOutcome =
   | "success"
   | "error_result"
   | "validation_error"
+  | "client_error"
   | "api_error"
   | "handler_error"
   | "unknown_error";
