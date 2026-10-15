@@ -63,8 +63,13 @@ export interface HandleCliCommandsOptions {
  * Wait until everything written to a stream so far has been handed to the OS.
  * Writes to pipes are asynchronous on POSIX, so exiting right after console.log
  * truncates output larger than the pipe buffer (64 KB).
+ *
+ * Only waits when bytes are still buffered: the callback of the empty write is
+ * not guaranteed to fire in every host (it never fires under Jest on Linux), so
+ * an unconditional wait can hang when there is nothing to flush.
  */
 function drain(stream: NodeJS.WriteStream): Promise<void> {
+  if (stream.writableLength === 0) return Promise.resolve();
   return new Promise((resolve) => {
     stream.write("", () => resolve());
   });
