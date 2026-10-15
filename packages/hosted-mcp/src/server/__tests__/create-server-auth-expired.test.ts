@@ -123,6 +123,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     errSpy.mockRestore();
     expect(lines.some((l: string) => l.includes("createPerRequestServer:start"))).toBe(true);
     for (const l of lines) expect(l).not.toContain("secret-alias");
+    expect(lines.find((l: string) => l.includes("createPerRequestServer:done"))).toBeDefined();
     expect(lines.find((l: string) => l.includes(":start"))).toMatch(/siteId=[0-9a-f]{12}/);
   });
 

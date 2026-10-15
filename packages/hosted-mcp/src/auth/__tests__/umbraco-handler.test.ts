@@ -1433,7 +1433,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
     });
 
     it("returns 502 when resolveSite throws (upstream error)", async () => {
-      const env = createMockEnv();
+      const env = createMockEnv({ TENANT_HASH_KEY: "k".repeat(32) });
       siteRouting.resolveSite.mockImplementation(() => {
         throw new Error("DNS lookup failed");
       });
@@ -1449,6 +1449,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
 
       expect(response.status).toBe(502);
       expect(consoleSpy).toHaveBeenCalled();
+      expect(String(consoleSpy.mock.calls[0][0])).toMatch(/site=[0-9a-f]{12}/);
       expect(String(consoleSpy.mock.calls[0][0])).not.toContain("my-project");
       consoleSpy.mockRestore();
     });
