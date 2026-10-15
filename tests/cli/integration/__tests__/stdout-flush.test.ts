@@ -42,6 +42,7 @@ const collections = [{
 const cliFlags =
   mode === "describe" ? { describeTool: "big-tool" } :
   mode === "list" ? { listTools: true } :
+  mode === "context" ? { generateContext: true } :
   { callTool: "big-tool" };
 await handleCliCommands(collections, { cliFlags });
 `;
@@ -53,6 +54,7 @@ function run(mode: string): Promise<{ code: number | null; stdout: Buffer }> {
     });
     const chunks: Buffer[] = [];
     child.stdout.on("data", (c) => chunks.push(c));
+    child.stderr.resume(); // keep reading so a large stderr can't block the child
     child.on("error", reject);
     child.on("close", (code) => resolvePromise({ code, stdout: Buffer.concat(chunks) }));
   });
@@ -72,6 +74,13 @@ describe("CLI output flushing with piped stdout", () => {
     const lines = stdout.toString("utf-8").trimEnd().split("\n");
     expect(stdout.length).toBeGreaterThan(64 * 1024);
     expect(lines[lines.length - 1]).toContain("big-tool-2999");
+  });
+
+  it("--generate-context delivers the full context larger than 64 KB", async () => {
+    const { code, stdout } = await run("context");
+    expect(code).toBe(0);
+    expect(stdout.length).toBeGreaterThan(PAYLOAD_BYTES);
+    expect(stdout.toString("utf-8")).toContain("x".repeat(PAYLOAD_BYTES));
   });
 
   it("--call delivers complete JSON larger than 64 KB", async () => {

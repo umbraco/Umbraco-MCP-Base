@@ -242,6 +242,7 @@ export async function handleCliCommands(
           } catch {
             console.error(`Invalid JSON for --call-args: ${cliFlags.callToolArgs}`);
             await exitAfterFlush(1);
+            return; // unreachable but satisfies TS
           }
         }
 
