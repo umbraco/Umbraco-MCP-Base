@@ -155,6 +155,7 @@ describe("createSiteRouter", () => {
     expect(response.status).toBe(502);
     expect(captured.request).toBeNull();
     expect(consoleSpy).toHaveBeenCalled();
+    expect(JSON.stringify(consoleSpy.mock.calls.map((c) => String(c[0])))).not.toContain("abc");
     consoleSpy.mockRestore();
   });
 

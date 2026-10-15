@@ -21,6 +21,7 @@
  * 8. Worker completes the original OAuth flow with the MCP client
  */
 
+import { siteRef } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv, OAuthAuthRequest } from "../types/env.js";
 import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from "../types/auth.js";
@@ -286,7 +287,7 @@ export function createAuthorizeHandler(
     try {
       site = await siteRouting.resolveSite(siteId, env);
     } catch (err) {
-      console.error(`siteRouting.resolveSite threw for "${siteId}":`, err);
+      console.error(`siteRouting.resolveSite threw for site=${await siteRef(siteId, env)}:`, err);
       return {
         ok: false,
         response: new Response(

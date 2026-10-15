@@ -1448,6 +1448,8 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       );
 
       expect(response.status).toBe(502);
+      expect(consoleSpy).toHaveBeenCalled();
+      expect(String(consoleSpy.mock.calls[0][0])).not.toContain("my-project");
       consoleSpy.mockRestore();
     });
   });
