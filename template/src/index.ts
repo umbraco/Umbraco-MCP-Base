@@ -107,7 +107,8 @@ const collections = [exampleCollection, example2Collection, chainedCollection];
 if (fetchInitError && serverConfig.cliFlags?.callTool) throw fetchInitError;
 
 // handleCliCommands checks --list-tools, --describe-tool, --generate-context, --call.
-// If any flag is set it prints output and calls process.exit(0).
+// If any flag is set it prints output, waits for it to flush, and exits
+// (0 on success, 1 on error).
 // Otherwise it returns and the server continues to start.
 await handleCliCommands(collections, {
   cliFlags: serverConfig.cliFlags,
