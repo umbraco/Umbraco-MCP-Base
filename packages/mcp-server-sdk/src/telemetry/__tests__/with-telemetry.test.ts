@@ -189,17 +189,47 @@ describe("withTelemetry outcome classification", () => {
     expect(spans[0].attributes[TelemetryAttributes.OUTCOME]).toBe("validation_error");
   });
 
-  it("records api_error for an UmbracoApiError", async () => {
-    const { withTelemetry, UmbracoApiError, TelemetryAttributes, spans } = await setup();
-    const tool = makeTool({
-      handler: async () => {
-        throw new UmbracoApiError({ title: "Not Found", status: 404, detail: "no such node" });
-      },
+  describe("UmbracoApiError by status", () => {
+    const outcomeFor = async (problem: Record<string, unknown>) => {
+      const { withTelemetry, UmbracoApiError, TelemetryAttributes, spans } = await setup();
+      const tool = makeTool({
+        handler: async () => {
+          throw new UmbracoApiError(problem as any);
+        },
+      });
+      await expect(withTelemetry(tool).handler({} as any, {} as any)).rejects.toThrow();
+      return spans[0].attributes[TelemetryAttributes.OUTCOME];
+    };
+    const errors = { Name: ["Name is required"] };
+
+    it.each([400, 422])("records validation_error for %i with validation errors", async (status) => {
+      expect(await outcomeFor({ title: "Bad", status, errors })).toBe("validation_error");
     });
 
-    await expect(withTelemetry(tool).handler({} as any, {} as any)).rejects.toThrow();
+    it("records client_error for 400 without validation errors", async () => {
+      expect(await outcomeFor({ title: "Bad Request", status: 400 })).toBe("client_error");
+      expect(await outcomeFor({ title: "Bad Request", status: 400, errors: {} })).toBe("client_error");
+    });
 
-    expect(spans[0].attributes[TelemetryAttributes.OUTCOME]).toBe("api_error");
+    it("records client_error for 404", async () => {
+      expect(await outcomeFor({ title: "Not Found", status: 404 })).toBe("client_error");
+    });
+
+    it("records client_error for 409", async () => {
+      expect(await outcomeFor({ title: "Conflict", status: 409 })).toBe("client_error");
+    });
+
+    it.each([401, 403])("keeps api_error for %i so operators see auth problems", async (status) => {
+      expect(await outcomeFor({ title: "Denied", status })).toBe("api_error");
+    });
+
+    it("records api_error for 500", async () => {
+      expect(await outcomeFor({ title: "Server Error", status: 500 })).toBe("api_error");
+    });
+
+    it("records api_error when there is no status", async () => {
+      expect(await outcomeFor({ title: "Mystery" })).toBe("api_error");
+    });
   });
 
   it("records api_error for an error carrying a response body", async () => {
