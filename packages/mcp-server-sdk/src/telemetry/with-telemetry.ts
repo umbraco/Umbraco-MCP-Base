@@ -40,6 +40,49 @@ import { getToolCollection } from "./tool-collection-registry.js";
 import { applyRequestTelemetryAttributes } from "./request-context.js";
 import { TelemetryAttributes, TOOLS_CALL_METHOD, type ToolOutcome } from "./attributes.js";
 
+/** True for an ASP.NET validation `errors` dictionary with at least one entry. */
+function hasValidationErrors(problem: unknown): boolean {
+  if (typeof problem !== "object" || problem === null) {
+    return false;
+  }
+  const errors = (problem as { errors?: unknown }).errors;
+  return (
+    typeof errors === "object" &&
+    errors !== null &&
+    !Array.isArray(errors) &&
+    Object.keys(errors).length > 0
+  );
+}
+
+/**
+ * Splits an `UmbracoApiError` by who is at fault:
+ * - 400/422 carrying ASP.NET validation `errors` -> `validation_error`
+ * - other 4xx (404, 409, 400 without `errors`, ...) -> `client_error`
+ * - 401/403 stay `api_error` on purpose: expired credentials or missing
+ *   permissions are something operators need to see, not a caller's bad input
+ * - 5xx, or no usable status -> `api_error`
+ */
+function classifyUmbracoApiError(error: UmbracoApiError): ToolOutcome {
+  const problem = error.problemDetails as unknown;
+  const status =
+    typeof problem === "object" && problem !== null
+      ? (problem as { status?: unknown }).status
+      : undefined;
+  if (typeof status !== "number" || !Number.isFinite(status)) {
+    return "api_error";
+  }
+  if ((status === 400 || status === 422) && hasValidationErrors(problem)) {
+    return "validation_error";
+  }
+  if (status === 401 || status === 403) {
+    return "api_error";
+  }
+  if (status >= 400 && status < 500) {
+    return "client_error";
+  }
+  return "api_error";
+}
+
 /**
  * Classifies a thrown value, mirroring `withErrorHandling`'s branches so the
  * span outcome and the error the caller receives describe the same event.
@@ -49,7 +92,7 @@ function classifyThrown(error: unknown): ToolOutcome {
     return "validation_error";
   }
   if (error instanceof UmbracoApiError) {
-    return "api_error";
+    return classifyUmbracoApiError(error);
   }
   if (error instanceof Error) {
     // An error carrying a response body means the API answered — same bucket as
