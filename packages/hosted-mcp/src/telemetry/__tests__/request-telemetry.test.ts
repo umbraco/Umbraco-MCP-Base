@@ -15,7 +15,7 @@
 import { describe, it, expect, jest, afterEach } from "@jest/globals";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { AuthProps } from "../../types/auth.js";
-import { hashWithKey, resolveRequestTelemetry } from "../request-telemetry.js";
+import { hashWithKey, resolveRequestTelemetry, siteRef } from "../request-telemetry.js";
 import { aliasOnly, regionOnly, hasEmbeddedRegion } from "../../cloud/site-id.js";
 
 const HASH_KEY = "0123456789abcdef0123456789abcdef";
@@ -65,6 +65,19 @@ describe("site-id splitting", () => {
     expect(regionOnly("staging.example")).toBeUndefined();
     expect(regionOnly("project.eu")).toBeUndefined();
     expect(regionOnly("project.euwest1")).toBeUndefined();
+  });
+});
+
+describe("siteRef", () => {
+  it("is the 12-char prefix of the tenant hash, never the alias", async () => {
+    const ref = await siteRef("example-project.euwest01", { TENANT_HASH_KEY: HASH_KEY } as HostedMcpEnv);
+    const full = await hashWithKey("example-project.euwest01", HASH_KEY);
+    expect(ref).toBe(full.slice(0, 12));
+    expect(ref).not.toContain("example-project");
+  });
+
+  it("returns <unhashed> when no key is configured", async () => {
+    expect(await siteRef("example-project", {} as HostedMcpEnv)).toBe("<unhashed>");
   });
 });
 

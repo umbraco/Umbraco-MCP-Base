@@ -147,14 +147,17 @@ describe("createSiteRouter", () => {
     const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await router.fetch(
-      new Request("https://host/at/abc/"),
-      env,
+      new Request("https://host/at/zzz-secret-alias/"),
+      { ...env, TENANT_HASH_KEY: "k".repeat(32) } as HostedMcpEnv,
       ctx
     );
 
     expect(response.status).toBe(502);
     expect(captured.request).toBeNull();
     expect(consoleSpy).toHaveBeenCalled();
+    const logged = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toMatch(/site=[0-9a-f]{12}/);
+    expect(logged).not.toContain("zzz-secret-alias");
     consoleSpy.mockRestore();
   });
 

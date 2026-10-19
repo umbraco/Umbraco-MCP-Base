@@ -104,6 +104,25 @@ export async function hashWithKey(value: string, key: string): Promise<string> {
 }
 
 /**
+ * A log-safe reference to a site: the first 12 hex chars of the same keyed
+ * hash `resolveRequestTelemetry` exports as `umbraco.mcp.tenant`, so a log
+ * line can be matched to its traces. Returns `<unhashed>` when no
+ * `TENANT_HASH_KEY` is configured or hashing fails. Console output is exported
+ * through the same OTLP destination as traces, so log lines must use this
+ * instead of the plaintext alias.
+ */
+export async function siteRef(siteId: string, env: HostedMcpEnv): Promise<string> {
+  const key = env?.TENANT_HASH_KEY;
+  if (!key) return "<unhashed>";
+  try {
+    return (await hashWithKey(siteId, key)).slice(0, 12);
+  } catch (err) {
+    console.warn("[mcp-hosted] failed to hash site reference for logging:", err);
+    return "<unhashed>";
+  }
+}
+
+/**
  * Builds the per-request telemetry values for one authenticated MCP request.
  *
  * Never throws: a broken or missing `TENANT_HASH_KEY` costs a dimension on a
