@@ -17,7 +17,7 @@ const originalFetch = globalThis.fetch;
 
 let tokenRequests: number;
 let tokenResponder: () => Promise<Response>;
-let apiResponder: (authorization: string | undefined) => Response;
+let apiResponder: (authorization: string | undefined) => Response | Promise<Response>;
 let apiRequests: Array<{ method?: string; authorization?: string; body?: unknown }>;
 
 function json(status: number, body: unknown): Response {
@@ -126,6 +126,21 @@ describe("client-credentials token cache (#401)", () => {
     await get();
     expect(tokenRequests).toBe(2);
     expect(apiRequests.at(-1)?.authorization).toBe("Bearer t2");
+  });
+
+  it("3. a 401 after a re-init is returned as is, not retried with the new config's token", async () => {
+    const reply = deferred<Response>();
+    apiResponder = () => reply.promise;
+    const first = get();
+    await jest.advanceTimersByTimeAsync(0);
+
+    initializeUmbracoFetch({ baseUrl: BASE_URL, clientId: "cid2", clientSecret: "sec2" });
+    reply.resolve(json(401, { title: "Unauthorized" }));
+    const result = await first;
+
+    expect(result.status).toBe(401);
+    expect(apiRequests).toHaveLength(1);
+    expect(tokenRequests).toBe(1);
   });
 
   it.each([

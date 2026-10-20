@@ -351,6 +351,7 @@ async function doFetch<T>(
     );
   }
 
+  const generation = tokenGeneration;
   const token = await getToken();
   const queryString = serializeParams(config.params);
   const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
@@ -413,8 +414,14 @@ async function doFetch<T>(
   // A 401 is rejected at authentication, before the action runs, so resending
   // once with a fresh token is safe for every method. Done before the
   // returnFullResponse branch so tool calls (which return the 401) get it too.
-  // Skipped when the caller supplied its own Authorization header.
-  if (resp.status === 401 && !options?.signal?.aborted && sentOurToken(headers, token)) {
+  // Skipped when the caller supplied its own Authorization header, or when the
+  // client was re-initialised meanwhile (the new token belongs to another config).
+  if (
+    resp.status === 401
+    && !options?.signal?.aborted
+    && generation === tokenGeneration
+    && sentOurToken(headers, token)
+  ) {
     void resp.body?.cancel().catch(() => {});
     invalidateToken(token);
     headers.Authorization = `Bearer ${await getToken()}`;
