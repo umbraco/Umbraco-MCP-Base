@@ -245,6 +245,35 @@ describe("Agent Testing", () => {
       },
       TEST_TIMEOUT
     );
+
+    it(
+      "should assert created entity presence in list-all tests",
+      async () => {
+        const agentContent = loadPluginContent("agents/integration-test-creator.md");
+        const result = await runAgentContentTest(
+          "Use the integration-test-creator skill: How should I write a test for a list-all tool on a collection that has a delete endpoint?",
+          agentContent,
+          { maxTurns: SKILL_TURNS }
+        );
+
+        expect(result.success).toBe(true);
+
+        // Should assert the created entity is present, not just that items exist
+        const verification = verifyOutputContainsAny(result.finalResult, [
+          "getId",
+          "toContain",
+          "created entity",
+          "id is present"
+        ]);
+
+        if (!verification.passed) {
+          logTestResult(result, "List-all content assertion");
+        }
+
+        expect(verification.passed).toBe(true);
+      },
+      TEST_TIMEOUT
+    );
   });
 
   describe("eval-test-creator agent", () => {
