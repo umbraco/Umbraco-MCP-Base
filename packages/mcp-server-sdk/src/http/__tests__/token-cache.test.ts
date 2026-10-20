@@ -8,7 +8,7 @@ import {
 // Regression for #401: the singleton client's client-credentials token cache
 // (single flight, expiry margin, one retry after a 401).
 
-const BASE_URL = "https://example.com";
+const BASE_URL = "https://localhost:44391";
 const API_URL = "/umbraco/management/api/v1/item";
 const START = new Date("2026-01-01T00:00:00Z").getTime();
 
