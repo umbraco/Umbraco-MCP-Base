@@ -167,3 +167,151 @@ describe("withDryRun", () => {
     expect(annotations.readOnlyHint).toBe(false);
   });
 });
+
+describe("dry-run over MCP with an outputSchema", () => {
+  // Fresh modules per test so dry-run state and the decorators agree on one
+  // copy of dry-run.ts.
+  async function setup() {
+    jest.resetModules();
+    const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { z } = await import("zod");
+    const dryRun = await import("../dry-run.js");
+    const decorators = await import("../tool-decorators.js");
+    const { createToolResult } = await import("../tool-result.js");
+
+    const outputSchema = { id: z.string(), message: z.string() };
+    const makeTool = (name: string, annotations: Record<string, boolean> = {}) =>
+      ({
+        name,
+        description: "test tool",
+        inputSchema: { name: z.string() },
+        outputSchema,
+        slices: [],
+        annotations: { openWorldHint: true, ...annotations },
+        handler: async () => createToolResult({ id: "real-id", message: "real" }),
+      }) as any;
+
+    // Registers like a product does: config is loaded (dry-run set) first,
+    // then registerTool reads tool.outputSchema.
+    async function connect(tools: any[]) {
+      const server = new McpServer({ name: "test-server", version: "1.0.0" });
+      for (const tool of tools) {
+        server.registerTool(
+          tool.name,
+          {
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            outputSchema: tool.outputSchema,
+            annotations: tool.annotations,
+          },
+          tool.handler,
+        );
+      }
+      const client = new Client({ name: "test-client", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      return { client, close: async () => { await client.close(); await server.close(); } };
+    }
+
+    return { ...dryRun, ...decorators, makeTool, connect };
+  }
+
+  it("returns the preview for a mutation tool via withStandardDecorators", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+      expect(result.structuredContent.toolName).toBe("create-thing");
+      expect(result.structuredContent.inputReceived).toEqual({ name: "x" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("returns the preview for a Forms-style stack without withStandardDecorators", async () => {
+    const { configureDryRunMode, withDryRun, withPreExecutionCheck, withErrorHandling, compose, makeTool, connect } =
+      await setup();
+    const tool = withErrorHandling(compose(withDryRun, withPreExecutionCheck)(makeTool("create-form-body")));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: "create-form-body", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it("omits outputSchema from tools/list for a mutation tool while dry-run is on", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema and runs a read-only tool normally in dry-run", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("get-thing", { readOnlyHint: true }));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "get-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "get-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema and validated output when dry-run is off", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(false);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema for a tool no dry-run interception wrapped", async () => {
+    const { configureDryRunMode, withErrorHandling, makeTool, connect } = await setup();
+    const tool = withErrorHandling(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+});
