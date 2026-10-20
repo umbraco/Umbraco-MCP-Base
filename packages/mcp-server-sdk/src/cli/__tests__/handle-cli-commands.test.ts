@@ -491,6 +491,7 @@ describe("handleCliCommands", () => {
 
         expect(handler).not.toHaveBeenCalled();
         expect(consoleErrorOutput).toContain("Input validation error: Invalid arguments for tool get-item: ");
+        expect(consoleErrorOutput).toMatch(/expected object/i);
       });
 
       it("passes parsed data to the handler so defaults apply", async () => {
