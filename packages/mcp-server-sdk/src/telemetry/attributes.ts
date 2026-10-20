@@ -137,7 +137,7 @@ export const TOOLS_CALL_METHOD = "tools/call";
  * | `client_error`     | `UmbracoApiError` with any other 4xx status (404, 409, a 400 without `errors`, ...) — Umbraco rejected the request. 401/403 are excluded, see `api_error` |
  * | `api_error`        | `UmbracoApiError` with a 5xx, 401 or 403 status or no status, or an error carrying `response.data` — the API answered, unhappily. 401/403 stay here deliberately: auth and permission problems are for operators to see |
  * | `handler_error`    | Any other `Error` — network failure or a bug in the tool |
- * | `confirmation_timeout` | `ConfirmationTimeoutError` — a confirmation prompt went unanswered, so nothing was changed. Not a fault: excluded from system-error alerts |
+ * | `confirmation_timeout` | `ConfirmationTimeoutError` — a confirmation prompt went unanswered, so nothing was changed. Not a fault, so it should not count as a system error |
  * | `unknown_error`    | A non-`Error` value was thrown |
  *
  * Kept to a small closed set on purpose: this is the highest-value dimension
