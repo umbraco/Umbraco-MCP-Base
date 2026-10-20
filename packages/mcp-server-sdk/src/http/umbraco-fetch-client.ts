@@ -88,6 +88,14 @@ export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-offi
 let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
+// Shared by concurrent callers so a cold start or expiry sends one token request.
+let inFlightToken: Promise<string> | null = null;
+// Bumped by clearUmbracoFetchToken, so a token request started before a
+// re-init or clear doesn't store its late response.
+let tokenGeneration = 0;
+
+/** Cap on the refresh margin: it only has to cover latency and clock skew. */
+const MAX_TOKEN_EXPIRY_MARGIN_MS = 30_000;
 
 // ============================================================================
 // Query String Serialization
@@ -173,6 +181,9 @@ export const requestClientCredentialsToken = async (config: {
 
 /**
  * Fetches a new access token from Umbraco.
+ *
+ * The stored expiry is brought forward by min(30 s, 10% of expires_in), so a
+ * token isn't sent just before it expires.
  */
 const fetchAccessToken = async (): Promise<string> => {
   if (!authConfig) {
@@ -181,23 +192,46 @@ const fetchAccessToken = async (): Promise<string> => {
     );
   }
 
+  const generation = tokenGeneration;
   const { accessToken: token, expiresIn } = await requestClientCredentialsToken(
     authConfig
   );
 
-  accessToken = token;
-  tokenExpiry = Date.now() + expiresIn * 1000;
+  // Re-initialized or cleared while in flight: the response is for the old config.
+  if (generation === tokenGeneration) {
+    const lifetimeMs = expiresIn * 1000;
+    accessToken = token;
+    tokenExpiry = Date.now() + lifetimeMs - Math.min(MAX_TOKEN_EXPIRY_MARGIN_MS, lifetimeMs * 0.1);
+  }
   return token;
 };
 
 /**
- * Gets a valid access token, refreshing if expired.
+ * Gets a valid access token, refreshing if expired. Concurrent callers share
+ * one token request; a failed request isn't cached.
  */
 const getToken = async (): Promise<string> => {
-  if (!accessToken || (tokenExpiry && Date.now() >= tokenExpiry)) {
-    await fetchAccessToken();
+  if (accessToken && !(tokenExpiry && Date.now() >= tokenExpiry)) {
+    return accessToken;
   }
-  return accessToken!;
+  if (!inFlightToken) {
+    const request = fetchAccessToken().finally(() => {
+      if (inFlightToken === request) inFlightToken = null;
+    });
+    inFlightToken = request;
+  }
+  return inFlightToken;
+};
+
+/**
+ * Drops the cached token after a 401, but only if it is still the one that was
+ * sent, so concurrent 401s for the same token cause one refresh.
+ */
+const invalidateToken = (rejectedToken: string): void => {
+  if (accessToken === rejectedToken) {
+    accessToken = null;
+    tokenExpiry = null;
+  }
 };
 
 // ============================================================================
@@ -249,6 +283,8 @@ export function isUmbracoFetchInitialized(): boolean {
 export function clearUmbracoFetchToken(): void {
   accessToken = null;
   tokenExpiry = null;
+  inFlightToken = null;
+  tokenGeneration++;
 }
 
 // ============================================================================
@@ -293,6 +329,13 @@ export function setCustomTransport(transport: CustomTransport | null): void {
 // ============================================================================
 // Core fetch implementation
 // ============================================================================
+
+/** True when every Authorization header in `headers` carries our cached token. */
+function sentOurToken(headers: Record<string, string>, token: string): boolean {
+  return Object.entries(headers).every(
+    ([name, value]) => name.toLowerCase() !== "authorization" || value === `Bearer ${token}`
+  );
+}
 
 /**
  * Makes a fetch request to the Umbraco API.
@@ -365,7 +408,18 @@ async function doFetch<T>(
     }
   }
 
-  const resp = await fetch(fullUrl, fetchOptions);
+  let resp = await fetch(fullUrl, fetchOptions);
+
+  // A 401 is rejected at authentication, before the action runs, so resending
+  // once with a fresh token is safe for every method. Done before the
+  // returnFullResponse branch so tool calls (which return the 401) get it too.
+  // Skipped when the caller supplied its own Authorization header.
+  if (resp.status === 401 && !options?.signal?.aborted && sentOurToken(headers, token)) {
+    void resp.body?.cancel().catch(() => {});
+    invalidateToken(token);
+    headers.Authorization = `Bearer ${await getToken()}`;
+    resp = await fetch(fullUrl, fetchOptions);
+  }
 
   // Parse response body
   let data: T;
