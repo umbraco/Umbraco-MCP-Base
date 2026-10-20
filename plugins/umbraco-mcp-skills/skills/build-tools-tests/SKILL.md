@@ -442,12 +442,14 @@ import { encodeCursor } from "@umbraco-cms/mcp-server-sdk";
 import { validateToolResponse, type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
-it("should list entities", async () => {
+it("should list entities, including one we created", async () => {
+  const builder = await new EntityBuilder().withName("TEST_list-entity").create();
+
   const result = await listEntitiesTool.handler({}, createMockRequestHandlerExtra());
 
   // Cast to CursorPaginatedResult for nextCursor access
   const data = validateToolResponse(listEntitiesTool, result) as CursorPaginatedResult;
-  expect(data.items.length).toBeGreaterThan(0);
+  expect(data.items.map((item) => item.id)).toContain(builder.getId());
 });
 
 it("should paginate with cursor to a second page", async () => {
@@ -468,6 +470,11 @@ it("should paginate with cursor to a second page", async () => {
 ```
 
 This works for read-only collections too (cultures, languages, server info), where `beforeEach` can't seed rows — you set the page size rather than relying on how much data exists.
+
+**A "list all" test must assert real content, not just shape.** `expect(items.length).toBeGreaterThan(0)` or a type check passes identically whether the endpoint is wired up or silently returns static data. Ask first: *can I create (and delete) a row for this list?*
+- **Yes** — create one via the builder, call the list tool, assert the created id is among the items, and delete it in the usual cleanup.
+- **No delete endpoint** (e.g. goals) — create one with a unique `TEST_`-prefixed name and assert its id is present. Don't snapshot the list or assert counts; rows accumulate across runs, so say so in a comment.
+- **Read-only collection** (cultures, server info) — nothing to create, so assert on the first page (`items.length > 0` plus an expected item) and use the cursor test above.
 
 **`nextCursor` requires a `total` in the response.** The decorator only computes it when `structuredContent` carries a numeric `total` alongside `items` — Umbraco's paged Management API endpoints do. If a tool's response has no `total`, `nextCursor` is always `undefined`, so don't write a second-page test for it: assert on the first page instead. Check the tool's `outputSchema` before assuming pagination is testable.
 

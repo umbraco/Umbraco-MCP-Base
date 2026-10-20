@@ -123,12 +123,16 @@ import { encodeCursor } from "@umbraco-cms/mcp-server-sdk";
 import { validateToolResponse, type CursorPaginatedResult } from "@umbraco-cms/mcp-server-sdk/testing";
 import listEntitiesTool from "../get/list-entities.js";
 
-it("should list entities", async () => {
+it("should list entities, including one we created", async () => {
+  const builder = await new EntityBuilder().withName("TEST_list-entity").create();
+
   const result = await listEntitiesTool.handler({}, createMockRequestHandlerExtra());
   const data = validateToolResponse(listEntitiesTool, result) as CursorPaginatedResult;
-  expect(data.items.length).toBeGreaterThan(0);
+  expect(data.items.map((item) => item.id)).toContain(builder.getId());
 });
 ```
+
+**A "list all" test must assert real content, not just shape** — a length or type check passes even if the endpoint returns static data. Create an entity via the builder, list, assert its id is present, then delete it. If the entity has no delete endpoint, use a unique `TEST_`-prefixed name, assert presence only (no snapshot, no counts) and accept that rows accumulate. Read-only collections have nothing to create: assert on the first page.
 
 **Rules:**
 - **NEVER** pass `skip` or `take` to handlers — the decorated schema doesn't accept them
