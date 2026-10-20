@@ -1,5 +1,5 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
-import { confirmAction, ElicitationUnsupportedError } from "../elicitation.js";
+import { confirmAction, ConfirmationTimeoutError, ElicitationUnsupportedError } from "../elicitation.js";
 import { setServerRef, clearServerRef } from "../server-ref.js";
 
 describe("confirmAction", () => {
@@ -252,6 +252,45 @@ describe("confirmAction", () => {
 
       await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
         .rejects.toBeInstanceOf(ElicitationUnsupportedError);
+    });
+  });
+
+  describe("request timeout", () => {
+    const timeout = { code: -32001, message: "MCP error -32001: Request timed out" };
+
+    it("throws ConfirmationTimeoutError on the form path (legacy mock)", async () => {
+      mockElicitInput.mockRejectedValue(timeout);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
+        .rejects.toBeInstanceOf(ConfirmationTimeoutError);
+    });
+
+    it("throws ConfirmationTimeoutError on the form-capability path", async () => {
+      setServerRef({
+        elicitInput: jest.fn<any>().mockRejectedValue(timeout),
+        getClientCapabilities: () => ({ elicitation: { form: {} } }),
+      } as any);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
+        .rejects.toBeInstanceOf(ConfirmationTimeoutError);
+    });
+
+    it("throws ConfirmationTimeoutError on the base path", async () => {
+      setServerRef({
+        elicitInput: jest.fn(),
+        request: jest.fn<any>().mockRejectedValue(timeout),
+        getClientCapabilities: () => ({ elicitation: {} }),
+      } as any);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?"))
+        .rejects.toBeInstanceOf(ConfirmationTimeoutError);
+    });
+
+    it("lets other error codes propagate untouched", async () => {
+      const other = { code: -32603, message: "Internal error" };
+      mockElicitInput.mockRejectedValue(other);
+
+      await expect(confirmAction({ requestId: "req-1" }, "Do it?")).rejects.toBe(other);
     });
   });
 });

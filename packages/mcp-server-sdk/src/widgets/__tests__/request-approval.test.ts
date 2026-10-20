@@ -1,6 +1,7 @@
 import { describe, expect, it, jest, beforeEach, afterEach } from "@jest/globals";
 import { setServerRef, clearServerRef } from "../../helpers/server-ref.js";
 import {
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   requestApproval,
 } from "../request-approval.js";
@@ -152,6 +153,38 @@ describe("widgets/requestApproval", () => {
       // actual return value depends on host capabilities.
       process.env.UMBRACO_AUTO_CONFIRM = "1";
       await expect(requestApproval(undefined, "Proceed?")).resolves.toBe(true);
+    });
+  });
+
+  describe("request timeout", () => {
+    const timeout = { code: -32001, message: "MCP error -32001: Request timed out" };
+
+    it.each([
+      ["form", { elicitation: { form: true } }],
+      ["base", { elicitation: {} }],
+    ])("throws ConfirmationTimeoutError on the %s path", async (_kind, caps) => {
+      mockElicitInput.mockRejectedValue(timeout);
+      mockRequest.mockRejectedValue(timeout);
+      setServerRef({
+        elicitInput: mockElicitInput,
+        request: mockRequest,
+        getClientCapabilities: () => caps,
+      } as any);
+
+      await expect(requestApproval(undefined, "Proceed?")).rejects.toBeInstanceOf(
+        ConfirmationTimeoutError,
+      );
+    });
+
+    it("lets other error codes propagate untouched", async () => {
+      const other = { code: -32603, message: "Internal error" };
+      mockElicitInput.mockRejectedValue(other);
+      setServerRef({
+        elicitInput: mockElicitInput,
+        getClientCapabilities: () => ({ elicitation: { form: true } }),
+      } as any);
+
+      await expect(requestApproval(undefined, "Proceed?")).rejects.toBe(other);
     });
   });
 });
