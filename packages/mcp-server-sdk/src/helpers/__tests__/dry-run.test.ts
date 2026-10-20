@@ -14,6 +14,7 @@ async function getDryRunModule() {
 
 describe("configureDryRunMode", () => {
   it("should default to disabled", async () => {
+    delete process.env.UMBRACO_DRY_RUN;
     const { isDryRunEnabled } = await getDryRunModule();
     expect(isDryRunEnabled()).toBe(false);
   });
@@ -43,6 +44,34 @@ describe("isDryRunEnabled env fallback", () => {
     process.env.UMBRACO_DRY_RUN = "true";
     const { isDryRunEnabled } = await getDryRunModule();
     expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it("only enables for 'true' (case-insensitive), read at call time", async () => {
+    const { isDryRunEnabled } = await getDryRunModule();
+    for (const value of ["false", "1", ""]) {
+      process.env.UMBRACO_DRY_RUN = value;
+      expect(isDryRunEnabled()).toBe(false);
+    }
+    process.env.UMBRACO_DRY_RUN = "TRUE";
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it("intercepts mutation tools through withDryRun when only the env var is set", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { withDryRun } = await getDryRunModule();
+    const handler = jest.fn();
+    const tool = {
+      name: "test-mutation",
+      description: "test",
+      handler,
+      slices: ["create"],
+      annotations: { destructiveHint: true },
+    } as any;
+
+    const result: any = await withDryRun(tool).handler({ input: "x" } as any, {} as any);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.structuredContent.dryRun).toBe(true);
   });
 
   it("lets an explicit configureDryRunMode(false) beat the env var", async () => {

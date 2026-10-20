@@ -666,6 +666,28 @@ describe("getServerConfig", () => {
       expect(isDryRunEnabled()).toBe(false);
     });
 
+    it("the first call applies dry-run mode from the resolved config", async () => {
+      setAuthEnvVars();
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE, "--umbraco-dry-run"];
+      const { getServerConfig } = await loadModule();
+      const { isDryRunEnabled } = await import("../../helpers/dry-run.js");
+
+      await getServerConfig(true);
+
+      expect(isDryRunEnabled()).toBe(true);
+    });
+
+    it("an explicit --env file beats the default ./.env", async () => {
+      writeEnv(".env", "UMBRACO_BASE_URL=http://localhost:1111\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      process.chdir(dir);
+      process.argv = ["node", "index.js", "--env", file];
+
+      const { config } = await getServerConfigFresh(true);
+
+      expect(config.auth.baseUrl).toBe("http://localhost:3333");
+    });
+
     it("a second call with required config missing throws instead of exiting", async () => {
       setAuthEnvVars();
       process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
@@ -711,6 +733,7 @@ describe("getServerConfig", () => {
       const { cliFlags } = await getServerConfigFresh(true);
 
       expect(cliFlags.listTools).toBe(true);
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
     });
 
     it("allows a .env that disables TLS verification for a local base URL", async () => {
@@ -723,6 +746,7 @@ describe("getServerConfig", () => {
       const { config } = await getServerConfigFresh(true);
 
       expect(config.auth.baseUrl).toBe("https://localhost:44331");
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
     });
   });
 });
