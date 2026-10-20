@@ -2,6 +2,7 @@ import { config as loadEnv } from "dotenv";
 import { resolve } from "path";
 import { configureToolResultMode } from "../helpers/tool-result.js";
 import { configureDryRunMode } from "../helpers/dry-run.js";
+import { assertTlsNotDisabledForRemote } from "../http/umbraco-fetch-client.js";
 
 export interface UmbracoAuthConfig {
   clientId: string;
@@ -332,6 +333,13 @@ export interface GetServerConfigResult {
   };
 }
 
+/**
+ * Set once the first getServerConfig call has applied its process-wide side
+ * effects (.env load, output/dry-run mode, TLS check, config log). Later calls
+ * (e.g. from a tool handler) only resolve and return config.
+ */
+let bootstrapped = false;
+
 export async function getServerConfig(
   isStdioMode: boolean,
   options: GetServerConfigOptions = {}
@@ -354,8 +362,11 @@ export async function getServerConfig(
     envFileSource = "default";
   }
 
-  // Override anything auto-loaded from .env if a custom file is provided.
-  loadEnv({ path: envFilePath, override: true, quiet: true });
+  // Only an explicit --env file overrides the process environment; the default
+  // ./.env fills in variables that aren't already set. Later calls don't reload it.
+  if (!bootstrapped) {
+    loadEnv({ path: envFilePath, override: envFileSource === "cli", quiet: true });
+  }
 
   // Initialize config structures
   const auth: UmbracoAuthConfig = {
@@ -424,14 +435,24 @@ export async function getServerConfig(
         const hint = field.cliFlag
           ? `(via CLI argument --${field.cliFlag} or .env file)`
           : `(via environment variable or .env file)`;
-        console.error(`${field.envVar} is required ${hint}`);
+        const message = `${field.envVar} is required ${hint}`;
+        if (bootstrapped) {
+          // A later call (e.g. from a tool handler) must not end the server.
+          throw new Error(message);
+        }
+        console.error(message);
         process.exit(1);
       }
     }
   }
 
+  // .env may have added NODE_TLS_REJECT_UNAUTHORIZED after startup checks ran
+  if (!bootstrapped && auth.baseUrl) {
+    assertTlsNotDisabledForRemote(auth.baseUrl);
+  }
+
   // Log configuration sources
-  if (!isStdioMode) {
+  if (!bootstrapped && !isStdioMode) {
     console.log("\nUmbraco MCP Configuration:");
     console.log(`- ENV_FILE: ${envFilePath} (source: ${configSources.envFile})`);
 
@@ -443,11 +464,15 @@ export async function getServerConfig(
     console.log(); // Empty line for better readability
   }
 
-  // Auto-configure tool result mode from resolved config
-  configureToolResultMode(config.disableOutputCompatibilityMode === true);
+  if (!bootstrapped) {
+    // Auto-configure tool result mode from resolved config
+    configureToolResultMode(config.disableOutputCompatibilityMode === true);
 
-  // Auto-configure dry-run mode from resolved config
-  configureDryRunMode(config.dryRun === true);
+    // Auto-configure dry-run mode from resolved config
+    configureDryRunMode(config.dryRun === true);
+
+    bootstrapped = true;
+  }
 
   return {
     config: {

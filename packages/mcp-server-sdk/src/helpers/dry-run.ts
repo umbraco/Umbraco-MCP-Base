@@ -15,9 +15,10 @@ import { createToolResult } from "./tool-result.js";
 import { resolveToolCallParams } from "./tool-call-params.js";
 
 /**
- * Module-level dry-run toggle.
+ * Module-level dry-run toggle. `null` until configured, in which case
+ * UMBRACO_DRY_RUN is read directly (same as config.ts: only "true" enables).
  */
-let dryRunEnabled = false;
+let dryRunEnabled: boolean | null = null;
 
 /**
  * Enable or disable dry-run mode globally.
@@ -30,10 +31,15 @@ export function configureDryRunMode(enabled: boolean): void {
 }
 
 /**
- * Returns whether dry-run mode is currently enabled.
+ * Returns whether dry-run mode is currently enabled. Falls back to the
+ * UMBRACO_DRY_RUN env var for servers that never call getServerConfig().
  */
 export function isDryRunEnabled(): boolean {
-  return dryRunEnabled;
+  if (dryRunEnabled !== null) {
+    return dryRunEnabled;
+  }
+  const envValue = typeof process !== "undefined" ? process.env?.UMBRACO_DRY_RUN : undefined;
+  return envValue?.toLowerCase() === "true";
 }
 
 /**
@@ -55,7 +61,7 @@ export function withDryRun<
   return {
     ...tool,
     handler: ((...params: any[]) => {
-      if (!dryRunEnabled) {
+      if (!isDryRunEnabled()) {
         return originalHandler(...(params as [any, any]));
       }
 
