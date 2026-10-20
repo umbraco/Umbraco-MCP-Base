@@ -6,7 +6,9 @@
  */
 
 import { execFileSync } from "child_process";
-import { resolve, dirname } from "path";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -49,6 +51,34 @@ describe("CLI Introspection Commands", () => {
     expect(parsed.collection).toBeDefined();
     expect(parsed.description).toBeDefined();
     expect(parsed.inputSchema).toBeDefined();
+  });
+
+  it("--list-tools and --describe-tool should work with no credentials and no .env", () => {
+    // Introspection must not need auth or a running Umbraco. Remove the
+    // credentials entirely (not blank strings), run from an empty cwd so no
+    // ./.env is loaded, and leave USE_MOCK_API unset.
+    const {
+      UMBRACO_CLIENT_ID: _id,
+      UMBRACO_CLIENT_SECRET: _secret,
+      UMBRACO_BASE_URL: _url,
+      USE_MOCK_API: _mock,
+      ...noCredsEnv
+    } = baseEnv;
+    const emptyDir = mkdtempSync(join(tmpdir(), "mcp-introspection-"));
+    try {
+      const run = (args: string[]) =>
+        execFileSync("node", [entryPoint, ...args], {
+          env: noCredsEnv,
+          cwd: emptyDir,
+          timeout: 15000,
+          encoding: "utf-8",
+        });
+
+      expect(run(["--list-tools"])).toContain("get-example");
+      expect(JSON.parse(run(["--describe-tool", "get-example"])).name).toBe("get-example");
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
   });
 
   it("--describe-tool with unknown tool should exit with error", () => {
