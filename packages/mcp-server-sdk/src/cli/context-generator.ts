@@ -94,7 +94,7 @@ export function generateContextFile(
         lines.push("");
         for (const [key, schema] of Object.entries(properties)) {
           const s = schema as Record<string, unknown>;
-          const type = s.type ?? "unknown";
+          const type = describeType(s);
           const desc = s.description ? ` — ${s.description}` : "";
           const required = (jsonSchema.required as string[] | undefined)?.includes(key);
           lines.push(`- \`${key}\` (${type}${required ? ", required" : ""})${desc}`);
@@ -135,4 +135,16 @@ export function generateContextFile(
   lines.push("");
 
   return lines.join("\n");
+}
+
+/**
+ * Render a JSON Schema property's type for display: `type`, `anyOf` branches
+ * joined with " | ", or "any" for an unconstrained `{}` schema.
+ */
+function describeType(schema: Record<string, unknown>): string {
+  if (typeof schema.type === "string") return schema.type;
+  if (Array.isArray(schema.anyOf)) {
+    return schema.anyOf.map((branch) => describeType(branch as Record<string, unknown>)).join(" | ");
+  }
+  return "any";
 }

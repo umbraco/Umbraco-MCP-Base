@@ -6,7 +6,7 @@
  * for command-line use (--list-tools, --describe-tool).
  */
 
-import { ZodRawShape, ZodType, ZodObject, ZodString, ZodNumber, ZodBoolean, ZodOptional, ZodDefault, ZodEnum, ZodArray, ZodUUID, ZodNullable, ZodLiteral } from "zod";
+import { z, ZodRawShape } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 
 /**
@@ -22,8 +22,9 @@ export interface ToolSummary {
 }
 
 /**
- * Convert a Zod schema shape to a simplified JSON Schema representation.
- * This is a best-effort conversion for display purposes.
+ * Convert a tool's Zod input shape to JSON Schema (draft 2020-12), the same
+ * dialect `tools/list` advertises. Unrepresentable types (e.g. z.date()) become
+ * `{}` rather than throwing, since the CLI must never crash on a schema.
  */
 export function toolToJsonSchema(tool: ToolDefinition<any, any>): Record<string, unknown> {
   const schema = tool.inputSchema;
@@ -31,73 +32,11 @@ export function toolToJsonSchema(tool: ToolDefinition<any, any>): Record<string,
     return { type: "object", properties: {} };
   }
 
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-
-  for (const [key, zodField] of Object.entries(schema as ZodRawShape)) {
-    const { schema: propSchema, isRequired } = zodFieldToJsonSchema(zodField as ZodType);
-    properties[key] = propSchema;
-    if (isRequired) {
-      required.push(key);
-    }
-  }
-
-  return {
-    type: "object",
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-  };
-}
-
-function zodFieldToJsonSchema(field: ZodType): { schema: Record<string, unknown>; isRequired: boolean } {
-  let isRequired = true;
-  let current: ZodType = field;
-
-  // Unwrap optional/default/nullable wrappers
-  if (current instanceof ZodOptional) {
-    isRequired = false;
-    current = (current as any)._def.innerType;
-  }
-  if (current instanceof ZodDefault) {
-    isRequired = false;
-    current = (current as any)._def.innerType;
-  }
-  if (current instanceof ZodNullable) {
-    current = (current as any)._def.innerType;
-  }
-
-  const desc = (current as any).description;
-
-  let schema: Record<string, unknown>;
-
-  if (current instanceof ZodString) {
-    schema = { type: "string" };
-  } else if (current instanceof ZodUUID) {
-    schema = { type: "string", format: "uuid" };
-  } else if (current instanceof ZodNumber) {
-    schema = { type: "number" };
-  } else if (current instanceof ZodBoolean) {
-    schema = { type: "boolean" };
-  } else if (current instanceof ZodEnum) {
-    schema = { type: "string", enum: (current as any)._def.values };
-  } else if (current instanceof ZodLiteral) {
-    const value = (current as any)._def.value;
-    schema = { type: typeof value, const: value };
-  } else if (current instanceof ZodArray) {
-    const itemSchema = zodFieldToJsonSchema((current as any)._def.type);
-    schema = { type: "array", items: itemSchema.schema };
-  } else if (current instanceof ZodObject) {
-    const nested = toolToJsonSchema({ inputSchema: (current as any).shape } as any);
-    schema = nested;
-  } else {
-    schema = { type: "unknown" };
-  }
-
-  if (desc) {
-    schema.description = desc;
-  }
-
-  return { schema, isRequired };
+  return z.toJSONSchema(z.object(schema as ZodRawShape), {
+    target: "draft-2020-12",
+    io: "input",
+    unrepresentable: "any",
+  }) as Record<string, unknown>;
 }
 
 /**
