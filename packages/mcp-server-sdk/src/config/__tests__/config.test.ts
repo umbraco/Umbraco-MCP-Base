@@ -77,6 +77,8 @@ describe("getServerConfig", () => {
 
     // Start with clean environment
     process.env = { ...originalEnv };
+    // CI sets this for the local Umbraco; tests that use a remote base URL must not inherit it
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     // Clear any Umbraco-related env vars
     Object.keys(process.env).forEach(key => {
       if (key.startsWith("UMBRACO_")) {
