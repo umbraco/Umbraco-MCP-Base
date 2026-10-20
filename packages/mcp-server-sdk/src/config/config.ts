@@ -446,8 +446,9 @@ export async function getServerConfig(
     }
   }
 
-  // .env may have added NODE_TLS_REJECT_UNAUTHORIZED after startup checks ran
-  if (!bootstrapped && auth.baseUrl) {
+  // .env may have added NODE_TLS_REJECT_UNAUTHORIZED after startup checks ran.
+  // Introspection commands are offline and never send credentials.
+  if (!bootstrapped && auth.baseUrl && !isIntrospectionOnly) {
     assertTlsNotDisabledForRemote(auth.baseUrl);
   }
 

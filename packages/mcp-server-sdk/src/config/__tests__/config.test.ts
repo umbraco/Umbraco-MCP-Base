@@ -701,6 +701,18 @@ describe("getServerConfig", () => {
       await expect(getServerConfigFresh(true)).rejects.toThrow("NODE_TLS_REJECT_UNAUTHORIZED=0");
     });
 
+    it("does not apply the TLS check to offline introspection commands", async () => {
+      const file = writeEnv("custom.env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+      process.env.UMBRACO_CLIENT_ID = "a";
+      process.env.UMBRACO_CLIENT_SECRET = "b";
+      process.env.UMBRACO_BASE_URL = "https://umbraco.example.com";
+      process.argv = ["node", "index.js", "--env", file, "--list-tools"];
+
+      const { cliFlags } = await getServerConfigFresh(true);
+
+      expect(cliFlags.listTools).toBe(true);
+    });
+
     it("allows a .env that disables TLS verification for a local base URL", async () => {
       const file = writeEnv("custom.env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
       process.env.UMBRACO_CLIENT_ID = "a";
