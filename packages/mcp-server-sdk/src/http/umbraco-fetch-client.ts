@@ -25,6 +25,7 @@
  */
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
+import { resolveStatusText } from "../helpers/status-text.js";
 import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
@@ -159,7 +160,7 @@ export const requestClientCredentialsToken = async (config: {
 
   if (!response.ok) {
     throw new Error(
-      `Token request failed: ${response.status} ${response.statusText}`
+      `Token request failed: ${response.status} ${resolveStatusText(response.status, response.statusText)}`
     );
   }
 
@@ -391,7 +392,7 @@ async function doFetch<T>(
   if (returnFullResponse) {
     return {
       status: resp.status,
-      statusText: resp.statusText,
+      statusText: resolveStatusText(resp.status, resp.statusText),
       data,
       headers: responseHeaders,
     } satisfies HttpResponse<T>;
@@ -401,7 +402,7 @@ async function doFetch<T>(
   if (!options?.validateStatus && resp.status >= 400) {
     console.error(`HTTP Error: ${resp.status}`, data);
     const error = new Error(
-      `Request failed with status ${resp.status}: ${resp.statusText}`
+      `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
     );
     (error as any).response = { status: resp.status, data };
     throw error;
@@ -640,7 +641,7 @@ export function createUmbracoFetchClient(
     if (opts?.returnFullResponse) {
       return {
         status: resp.status,
-        statusText: resp.statusText,
+        statusText: resolveStatusText(resp.status, resp.statusText),
         data,
         headers: responseHeaders,
       } as T;
@@ -649,7 +650,7 @@ export function createUmbracoFetchClient(
     if (!opts?.validateStatus && resp.status >= 400) {
       console.error(`HTTP Error: ${resp.status}`, data);
       const error = new Error(
-        `Request failed with status ${resp.status}: ${resp.statusText}`
+        `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
       );
       (error as any).response = { status: resp.status, data };
       throw error;
