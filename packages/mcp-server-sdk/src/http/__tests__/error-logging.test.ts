@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("failed request logging", () => {
-  const auth = { baseUrl: "https://example.com", clientId: "cid", clientSecret: "sec" };
+  const auth = { baseUrl: "https://localhost:5201", clientId: "cid", clientSecret: "sec" };
 
   describe("singleton client", () => {
     it("logs status, method and path but not the body by default", async () => {
