@@ -284,6 +284,22 @@ describe("createUmbracoTargetMajorTransformer", () => {
 
   });
 
+  describe("TLS verification", () => {
+    it("refuses at creation, before orval downloads the spec, when disabled for a remote site", () => {
+      setCredentials("https://example.umbraco.io");
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+      expect(() => makeTransformer()).toThrow("Refusing to start");
+      errorSpy.mockRestore();
+    });
+
+    it("allows it for a local site", () => {
+      setCredentials("https://localhost:44391");
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      expect(() => makeTransformer()).not.toThrow();
+    });
+  });
+
   describe("failure is loud", () => {
     it("throws rather than preserving a previously-generated value", async () => {
       // Arrange - THE regression this change exists to prevent. Before, an

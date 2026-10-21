@@ -113,7 +113,7 @@ export {
 } from "./cursor-pagination.js";
 
 // URL helpers
-export { normalizeBaseUrl } from "./url.js";
+export { normalizeBaseUrl, isLoopbackUrl } from "./url.js";
 
 // Telemetry (the decorator lives in ../telemetry; re-exported here because
 // withStandardDecorators applies it and callers look for it alongside the other

@@ -61,8 +61,16 @@ import {
 const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:44391";
 const clientId = process.env.UMBRACO_CLIENT_ID || "";
 const clientSecret = process.env.UMBRACO_CLIENT_SECRET || "";
+// A config the SDK refuses (e.g. TLS verification disabled for a remote site)
+// is rethrown after the offline CLI commands below, so they
+// (--list-tools, --describe-tool, --debug-config, ...) still work to diagnose it.
+let fetchInitError: unknown;
 if (clientId) {
-  initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+  try {
+    initializeUmbracoFetch({ baseUrl, clientId, clientSecret });
+  } catch (error) {
+    fetchInitError = error;
+  }
 }
 
 // Configure the API client for use with toolkit helpers
@@ -95,8 +103,12 @@ const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(server
 
 const collections = [exampleCollection, example2Collection, chainedCollection];
 
+// --call talks to Umbraco, so it reports a refused config instead of running the tool.
+if (fetchInitError && serverConfig.cliFlags?.callTool) throw fetchInitError;
+
 // handleCliCommands checks --list-tools, --describe-tool, --generate-context, --call.
-// If any flag is set it prints output and calls process.exit(0).
+// If any flag is set it prints output, waits for it to flush, and exits
+// (0 on success, 1 on error).
 // Otherwise it returns and the server continues to start.
 await handleCliCommands(collections, {
   cliFlags: serverConfig.cliFlags,
@@ -105,6 +117,8 @@ await handleCliCommands(collections, {
   filterConfig,
   serverConfig: serverConfig.umbraco,
 });
+
+if (fetchInitError) throw fetchInitError;
 
 // ============================================================================
 // Version Check

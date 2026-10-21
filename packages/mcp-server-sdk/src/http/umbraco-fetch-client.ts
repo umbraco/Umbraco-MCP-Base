@@ -25,7 +25,8 @@
  */
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
-import { normalizeBaseUrl } from "../helpers/url.js";
+import { resolveStatusText } from "../helpers/status-text.js";
+import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
@@ -63,11 +64,23 @@ export interface UmbracoManagementClientOptions {
 // Module State
 // ============================================================================
 
-// Accept self-signed certificates in non-production environments.
-// Must run at module load time (before any fetch calls) because Node.js
-// reads this env var when establishing TLS connections.
-if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+/**
+ * TLS certificate verification is left to Node.js (on by default). A local
+ * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
+ * refuse to talk to a non-local site with it set, so the client secret is never
+ * sent over an unverified connection. The message also goes to stderr, because
+ * stdout carries the MCP stdio protocol.
+ */
+export function assertTlsNotDisabledForRemote(baseUrl: string): void {
+  if (typeof process === "undefined" || process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
+  if (isLoopbackUrl(baseUrl)) return;
+  const message =
+    "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
+    "so its TLS certificate would not be verified. Refusing to start. Remove NODE_TLS_REJECT_UNAUTHORIZED " +
+    "(it is only for a local Umbraco on localhost, 127.0.0.1 or [::1]), or trust the certificate " +
+    "with NODE_EXTRA_CA_CERTS instead.";
+  console.error(message);
+  throw new Error(message);
 }
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
@@ -131,6 +144,7 @@ export const requestClientCredentialsToken = async (config: {
     signal,
   } = config;
 
+  assertTlsNotDisabledForRemote(baseUrl);
   const response = await fetch(`${baseUrl}${tokenPath}`, {
     method: "POST",
     headers: {
@@ -146,7 +160,7 @@ export const requestClientCredentialsToken = async (config: {
 
   if (!response.ok) {
     throw new Error(
-      `Token request failed: ${response.status} ${response.statusText}`
+      `Token request failed: ${response.status} ${resolveStatusText(response.status, response.statusText)}`
     );
   }
 
@@ -194,12 +208,18 @@ const getToken = async (): Promise<string> => {
  * Initialize the Umbraco fetch client with authentication config.
  * Must be called before making any API requests.
  *
- * In non-production environments, automatically disables TLS certificate
- * verification to support self-signed certificates during local development.
+ * Does not change TLS certificate verification; throws if it has been disabled
+ * for a non-local base URL (see assertTlsNotDisabledForRemote).
  *
  * @param config - Authentication configuration
  */
 export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
+  authConfig = resolveAuthConfig(config);
+  clearUmbracoFetchToken();
+}
+
+/** Validates an auth config, applies the TLS check and normalizes the base URL. */
+function resolveAuthConfig(config: UmbracoFetchAuthConfig): UmbracoFetchAuthConfig {
   const { clientId, clientSecret, baseUrl } = config;
 
   if (!baseUrl) {
@@ -212,8 +232,8 @@ export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
     throw new Error("Missing required configuration: clientSecret");
   }
 
-  authConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
-  clearUmbracoFetchToken();
+  assertTlsNotDisabledForRemote(baseUrl);
+  return { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
 }
 
 /**
@@ -372,7 +392,7 @@ async function doFetch<T>(
   if (returnFullResponse) {
     return {
       status: resp.status,
-      statusText: resp.statusText,
+      statusText: resolveStatusText(resp.status, resp.statusText),
       data,
       headers: responseHeaders,
     } satisfies HttpResponse<T>;
@@ -382,7 +402,7 @@ async function doFetch<T>(
   if (!options?.validateStatus && resp.status >= 400) {
     console.error(`HTTP Error: ${resp.status}`, data);
     const error = new Error(
-      `Request failed with status ${resp.status}: ${resp.statusText}`
+      `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
     );
     (error as any).response = { status: resp.status, data };
     throw error;
@@ -621,7 +641,7 @@ export function createUmbracoFetchClient(
     if (opts?.returnFullResponse) {
       return {
         status: resp.status,
-        statusText: resp.statusText,
+        statusText: resolveStatusText(resp.status, resp.statusText),
         data,
         headers: responseHeaders,
       } as T;
@@ -630,7 +650,7 @@ export function createUmbracoFetchClient(
     if (!opts?.validateStatus && resp.status >= 400) {
       console.error(`HTTP Error: ${resp.status}`, data);
       const error = new Error(
-        `Request failed with status ${resp.status}: ${resp.statusText}`
+        `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
       );
       (error as any).response = { status: resp.status, data };
       throw error;
@@ -641,13 +661,7 @@ export function createUmbracoFetchClient(
 
   return {
     initialize: (config: UmbracoFetchAuthConfig) => {
-      const { clientId, clientSecret, baseUrl } = config;
-      if (!baseUrl) throw new Error("Missing required configuration: baseUrl");
-      if (!clientId) throw new Error("Missing required configuration: clientId");
-      if (!clientSecret && clientId !== "umbraco-swagger") {
-        throw new Error("Missing required configuration: clientSecret");
-      }
-      instanceAuthConfig = { ...config, baseUrl: normalizeBaseUrl(baseUrl) };
+      instanceAuthConfig = resolveAuthConfig(config);
     },
     isInitialized: () => instanceAuthConfig !== null,
     clearToken: () => {

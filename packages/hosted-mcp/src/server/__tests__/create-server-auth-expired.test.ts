@@ -110,6 +110,23 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected");
   });
 
+  it("never logs the raw site alias, only a keyed-hash reference", async () => {
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const { createPerRequestServer } = await import("../create-server.js");
+    await createPerRequestServer(
+      baseOptions,
+      { ...env, TENANT_HASH_KEY: "k".repeat(32) } as unknown as HostedMcpEnv,
+      { ...props, consentChoices: { siteId: "secret-alias" } } as AuthProps
+    );
+    const lines = [...logSpy.mock.calls, ...errSpy.mock.calls].map((c: unknown[]) => String(c[0]));
+    errSpy.mockRestore();
+    expect(lines.some((l: string) => l.includes("createPerRequestServer:start"))).toBe(true);
+    for (const l of lines) expect(l).not.toContain("secret-alias");
+    expect(lines.find((l: string) => l.includes("createPerRequestServer:done"))).toBeDefined();
+    expect(lines.find((l: string) => l.includes(":start"))).toMatch(/siteId=[0-9a-f]{12}/);
+  });
+
   it("tells the user why, and how to recover", async () => {
     refreshFailure = {
       ok: false,

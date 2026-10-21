@@ -35,6 +35,7 @@
 
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ProblemDetails } from "./problem-details.js";
+import { resolveStatusText } from "./status-text.js";
 import { createToolResult } from "./tool-result.js";
 import { pickFields, omitFields } from "./response-trimmer.js";
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
@@ -76,26 +77,27 @@ const MAX_STRING_DETAIL_LENGTH = 500;
 /**
  * Builds ProblemDetails from an error response, always carrying the HTTP status.
  * A numeric status supplied by the body wins; a string body (e.g. an HTML 502) becomes `detail`.
- * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText` as the `title`, so the message keeps the status.
+ * A body with neither `detail` nor `title` (null, array, `{}`) falls back to `statusText` (or the standard reason phrase for the status, since HTTP/2 sends none) as the `title`, so the message keeps the status.
  * Use this wherever you construct an `UmbracoApiError` from a raw response.
  */
 export function toProblemDetails(
   response: Pick<HttpResponse<unknown>, 'status' | 'statusText' | 'data'>
 ): ProblemDetails {
   const body = response.data;
+  const statusText = resolveStatusText(response.status, response.statusText);
   if (typeof body === 'string' && body.trim()) {
     return { status: response.status, detail: body.trim().slice(0, MAX_STRING_DETAIL_LENGTH) };
   }
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     const problem = body as ProblemDetails;
     const status = typeof problem.status === 'number' ? problem.status : response.status;
-    if (!problem.detail && !problem.title && response.statusText) {
-      return { ...problem, status, title: response.statusText };
+    if (!problem.detail && !problem.title && statusText) {
+      return { ...problem, status, title: statusText };
     }
     return { ...problem, status };
   }
-  return response.statusText
-    ? { status: response.status, title: response.statusText }
+  return statusText
+    ? { status: response.status, title: statusText }
     : { status: response.status };
 }
 

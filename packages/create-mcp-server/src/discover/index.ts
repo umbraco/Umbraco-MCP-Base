@@ -23,6 +23,7 @@ import {
   promptUpdateModeRegistry,
   promptUpdateSliceRegistry,
 } from "./prompts.js";
+import { isLoopbackUrl } from "../loopback.js";
 
 export async function runDiscover(dir?: string): Promise<void> {
   const projectDir = path.resolve(dir || process.cwd());
@@ -96,10 +97,8 @@ export async function runDiscover(dir?: string): Promise<void> {
     baseUrl = await promptBaseUrl(detected.url);
 
     // Step 3: Health check
-    // Allow self-signed certs for localhost
-    const isLocalhost =
-      baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
-    if (isLocalhost) {
+    // Allow self-signed certs for a local instance only
+    if (isLoopbackUrl(baseUrl)) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
 
@@ -180,7 +179,7 @@ export async function runDiscover(dir?: string): Promise<void> {
 
   if (shouldGenerate) {
     console.log(pc.dim("\nGenerating API client...\n"));
-    const genResult = generateClient(projectDir);
+    const genResult = generateClient(projectDir, baseUrl);
 
     if (!genResult.success) {
       console.log(
@@ -465,6 +464,23 @@ export function updateEnvVar(projectDir: string, key: string, value: string): bo
   return true;
 }
 
+const TLS_OVERRIDE_LINE = /^#?[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*0[ \t]*$/gm;
+
+/**
+ * Writes UMBRACO_BASE_URL, and toggles the `NODE_TLS_REJECT_UNAUTHORIZED=0`
+ * line from .env.example: enabled for a local base URL, commented out for a
+ * remote one (the SDK refuses to start with it set for a remote site). Never
+ * adds the line or touches another value, so a user who removed it (e.g. to
+ * use NODE_EXTRA_CA_CERTS) keeps verification on.
+ */
 export function updateEnvBaseUrl(projectDir: string, baseUrl: string): boolean {
-  return updateEnvVar(projectDir, "UMBRACO_BASE_URL", baseUrl);
+  const baseUrlChanged = updateEnvVar(projectDir, "UMBRACO_BASE_URL", baseUrl);
+
+  const envPath = path.join(projectDir, ".env");
+  const content = fs.readFileSync(envPath, "utf-8");
+  const tlsLine = `${isLoopbackUrl(baseUrl) ? "" : "# "}NODE_TLS_REJECT_UNAUTHORIZED=0`;
+  const next = content.replace(TLS_OVERRIDE_LINE, tlsLine);
+  if (next === content) return baseUrlChanged;
+  fs.writeFileSync(envPath, next);
+  return true;
 }
