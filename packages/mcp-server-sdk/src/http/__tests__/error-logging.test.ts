@@ -58,12 +58,37 @@ describe("failed request logging", () => {
       expect(loggedText()).not.toContain("jane.doe@example.com");
     });
 
+    it("strips the query string from the logged path", async () => {
+      mockFetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(failure());
+      initializeUmbracoFetch(auth);
+
+      await expect(
+        UmbracoManagementClient({ method: "get", url: `${path}?email=jane.doe@example.com` })
+      ).rejects.toThrow();
+
+      expect(loggedText()).toContain(path);
+      expect(loggedText()).not.toContain("jane.doe@example.com");
+    });
+
+    it.each(["false", "1", ""])("does not log the body when UMBRACO_MCP_LOG_ERROR_BODIES=%j", async (value) => {
+      process.env.UMBRACO_MCP_LOG_ERROR_BODIES = value;
+      mockFetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(failure());
+      initializeUmbracoFetch(auth);
+
+      await expect(UmbracoManagementClient({ method: "post", url: path })).rejects.toThrow();
+
+      expect(loggedText()).not.toContain("jane.doe@example.com");
+    });
+
     it("logs the body when UMBRACO_MCP_LOG_ERROR_BODIES=true", async () => {
       process.env.UMBRACO_MCP_LOG_ERROR_BODIES = "true";
       mockFetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(failure());
       initializeUmbracoFetch(auth);
 
-      await expect(UmbracoManagementClient({ method: "post", url: path })).rejects.toThrow();
+      await expect(UmbracoManagementClient({ method: "post", url: path })).rejects.toMatchObject({
+        message: expect.stringContaining("400"),
+        response: { status: 400, data: secretBody },
+      });
 
       expect(loggedText()).toContain("jane.doe@example.com");
     });
@@ -90,8 +115,14 @@ describe("failed request logging", () => {
       const { initialize, mutator } = createUmbracoFetchClient({ enableLogging: true });
       initialize(auth);
 
-      await expect(mutator({ method: "post", url: path })).rejects.toThrow();
-      logSpy.mockRestore();
+      try {
+        await expect(mutator({ method: "post", url: path })).rejects.toMatchObject({
+          message: expect.stringContaining("400"),
+          response: { status: 400, data: secretBody },
+        });
+      } finally {
+        logSpy.mockRestore();
+      }
 
       expect(loggedText()).toContain("jane.doe@example.com");
     });

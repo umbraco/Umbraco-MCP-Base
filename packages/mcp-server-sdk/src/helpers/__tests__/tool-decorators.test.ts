@@ -160,3 +160,41 @@ describe("withErrorHandling with a status-less error body", () => {
     expect(text).not.toContain("undefined");
   });
 });
+
+describe("withErrorHandling stderr logging", () => {
+  const secret = "jane.doe@example.com is already in use";
+
+  async function run(optIn: boolean) {
+    const { withErrorHandling } = await import("../tool-decorators.js");
+    const { UmbracoApiError } = await import("../api-call-helpers.js");
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+    if (optIn) process.env.UMBRACO_MCP_LOG_ERROR_BODIES = "true";
+    try {
+      const tool = {
+        name: "create-member",
+        description: "",
+        handler: async () => {
+          throw new UmbracoApiError({ status: 400, title: "Invalid", detail: secret });
+        },
+      } as any;
+      const result: any = await (withErrorHandling(tool).handler as (...args: any[]) => any)({}, {});
+      return { logged: JSON.stringify(spy.mock.calls), result };
+    } finally {
+      delete process.env.UMBRACO_MCP_LOG_ERROR_BODIES;
+      spy.mockRestore();
+    }
+  }
+
+  it("logs the tool name and status but not the error body by default, and still returns it to the caller", async () => {
+    const { logged, result } = await run(false);
+    expect(logged).toContain("create-member");
+    expect(logged).toContain("400");
+    expect(logged).not.toContain("jane.doe@example.com");
+    expect(JSON.stringify(result.content)).toContain("jane.doe@example.com");
+  });
+
+  it("logs the full error when UMBRACO_MCP_LOG_ERROR_BODIES=true", async () => {
+    const { logged } = await run(true);
+    expect(logged).toContain("jane.doe@example.com");
+  });
+});
