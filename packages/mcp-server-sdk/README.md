@@ -112,7 +112,7 @@ Features:
 - Automatic OAuth token refresh
 - Self-signed certificate support in development
 - Repeat-style query string serialization for array params
-- Error logging
+- Error logging — failed requests log status, method and path to stderr only. Response bodies can echo submitted values (names, emails, content fields) and MCP clients capture stderr in their own logs, so bodies are logged only on opt-in: `enableLogging: true` on `createUmbracoFetchClient`, or `UMBRACO_MCP_LOG_ERROR_BODIES=true` for the singleton client
 
 #### `UmbracoManagementClient`
 
