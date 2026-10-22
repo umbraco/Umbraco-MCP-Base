@@ -26,6 +26,7 @@
  * ```
  */
 
+import { z, ZodType } from "zod";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -244,6 +245,19 @@ export async function handleCliCommands(
             await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
+        }
+
+        // Validate against the input schema as the MCP path does, so defaults and
+        // transforms apply and bad args fail here rather than reaching the API
+        if (tool.inputSchema) {
+          const schema = tool.inputSchema instanceof ZodType ? tool.inputSchema : z.object(tool.inputSchema);
+          const parsed = await schema.safeParseAsync(args);
+          if (!parsed.success) {
+            console.error(`Input validation error: Invalid arguments for tool ${toolName}: ${parsed.error.message}`);
+            await exitAfterFlush(1);
+            return; // unreachable but satisfies TS
+          }
+          args = parsed.data as Record<string, unknown>;
         }
 
         // Call the tool handler and print result
