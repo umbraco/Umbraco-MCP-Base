@@ -152,7 +152,7 @@ node dist/index.js --umbraco-dry-run
 
 ## Introspection Commands
 
-These flags print output and exit immediately — they do not start the MCP server and do not require auth credentials or a running Umbraco instance.
+These flags print output and exit immediately — they do not start the MCP server. `handleCliCommands` itself needs no credentials and no running Umbraco instance, and servers built from the template run introspection offline. A server whose entry point authenticates first in order to filter tools by the current user (such as Umbraco-CMS-MCP-Dev) needs a configured, reachable site before introspection works.
 
 Introspection respects all filtering configuration. If you set `UMBRACO_READONLY=true` or any filtering env var, the output only shows tools that pass those filters — exactly what the LLM would see at runtime.
 
