@@ -192,6 +192,22 @@ export interface CreateServerOptions {
 }
 
 /**
+ * The Umbraco major the version check targets: `env.UMBRACO_EXPECTED_MAJOR`
+ * when it holds a non-blank value, otherwise the operator-configured
+ * `options.expectedUmbracoMajor`, otherwise `undefined` (check skipped).
+ *
+ * Blank and whitespace-only env values count as unset, mirroring the stdio
+ * entry point's `?.trim() || UMBRACO_TARGET_MAJOR`. A plain `??` would let an
+ * empty binding win over the option and silently disable the check.
+ */
+export function resolveExpectedUmbracoMajor(
+  env: Pick<HostedMcpEnv, "UMBRACO_EXPECTED_MAJOR">,
+  options: Pick<CreateServerOptions, "expectedUmbracoMajor">
+): string | undefined {
+  return env.UMBRACO_EXPECTED_MAJOR?.trim() || options.expectedUmbracoMajor;
+}
+
+/**
  * Merges user consent choices into the env-level config.
  *
  * Consent choices can only **narrow** the admin config, never expand it.
@@ -462,7 +478,7 @@ export async function createPerRequestServer(
       [TelemetryAttributes.SERVER_NAME]: options.name,
       [TelemetryAttributes.SERVER_VERSION]: options.version,
     };
-    const expectedMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+    const expectedMajor = resolveExpectedUmbracoMajor(env, options);
     if (expectedMajor) {
       staticAttributes[TelemetryAttributes.UMBRACO_MAJOR] = expectedMajor;
     }
@@ -606,7 +622,7 @@ async function initPerRequestServer(
   // tool calls. Folding the message into this request's own `instructions`
   // gives the same "the model/user sees the warning" outcome without that
   // cross-request leakage — see umbraco/Umbraco-MCP-Base#224.
-  const expectedUmbracoMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+  const expectedUmbracoMajor = resolveExpectedUmbracoMajor(env, options);
 
   // One `/server/information` request per server creation, shared by the
   // version check and the version capture below, so the site is never asked

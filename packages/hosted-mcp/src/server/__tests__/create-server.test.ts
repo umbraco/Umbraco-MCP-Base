@@ -1115,6 +1115,51 @@ describe("createPerRequestServer — version check", () => {
     expect(getInstructions(server)).toMatch(/Version Mismatch/);
   });
 
+  it.each([
+    ["an empty string", ""],
+    ["a whitespace-only string", "   \t"],
+  ])("falls back to expectedUmbracoMajor when env.UMBRACO_EXPECTED_MAJOR is %s", async (_label, blank) => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      { ...baseOptions, expectedUmbracoMajor: "17" },
+      makeMockEnv({ UMBRACO_EXPECTED_MAJOR: blank } as Partial<HostedMcpEnv>),
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toMatch(/Version Mismatch/);
+  });
+
+  it("skips the check when env.UMBRACO_EXPECTED_MAJOR is blank and expectedUmbracoMajor is unset", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const server = await createPerRequestServer(
+      baseOptions,
+      makeMockEnv({ UMBRACO_EXPECTED_MAJOR: " " } as Partial<HostedMcpEnv>),
+      mockProps,
+    );
+
+    expect(getInstructions(server)).toBeUndefined();
+  });
+
+  describe("resolveExpectedUmbracoMajor", () => {
+    it.each([
+      ["unset env", undefined, "17", "17"],
+      ["empty env", "", "17", "17"],
+      ["whitespace-only env", "  \t", "17", "17"],
+      ["non-blank env", "16", "17", "16"],
+      ["padded non-blank env", " 16 ", "17", "16"],
+      ["blank env and no option", "", undefined, undefined],
+      ["unset env and no option", undefined, undefined, undefined],
+    ])("%s", async (_label, envValue, optionValue, expected) => {
+      const { resolveExpectedUmbracoMajor } = await import("../create-server.js");
+      expect(
+        resolveExpectedUmbracoMajor(
+          { UMBRACO_EXPECTED_MAJOR: envValue },
+          { expectedUmbracoMajor: optionValue },
+        ),
+      ).toBe(expected);
+    });
+  });
+
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     await createPerRequestServer(
