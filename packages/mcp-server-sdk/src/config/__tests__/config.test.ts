@@ -10,6 +10,9 @@
  * - Source tracking accuracy
  */
 
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 
 // Store original values to restore after tests
@@ -74,6 +77,8 @@ describe("getServerConfig", () => {
 
     // Start with clean environment
     process.env = { ...originalEnv };
+    // CI sets this for the local Umbraco; tests that use a remote base URL must not inherit it
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     // Clear any Umbraco-related env vars
     Object.keys(process.env).forEach(key => {
       if (key.startsWith("UMBRACO_")) {
@@ -594,6 +599,154 @@ describe("getServerConfig", () => {
 
       expect(config.auth.clientId).toBe("test-client");
       expect(Object.keys(custom)).toHaveLength(0);
+    });
+  });
+
+  describe("process-wide side effects", () => {
+    let dir: string;
+    const originalCwd = process.cwd();
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "mcp-config-"));
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    function writeEnv(name: string, content: string) {
+      const file = join(dir, name);
+      writeFileSync(file, content);
+      return file;
+    }
+
+    async function loadModule() {
+      jest.resetModules();
+      return import("../config.js");
+    }
+
+    it("process env beats the default ./.env", async () => {
+      writeEnv(".env", "UMBRACO_BASE_URL=http://localhost:1111\nUMBRACO_CLIENT_ID=file-id\nUMBRACO_CLIENT_SECRET=file-secret\n");
+      process.chdir(dir);
+      process.env.UMBRACO_BASE_URL = "http://localhost:2222";
+      process.argv = ["node", "index.js"];
+
+      const { config } = await getServerConfigFresh(true);
+
+      expect(config.auth.baseUrl).toBe("http://localhost:2222");
+      expect(config.auth.clientId).toBe("file-id");
+    });
+
+    it("an explicit --env file beats the process env", async () => {
+      const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=file-id\nUMBRACO_CLIENT_SECRET=file-secret\n");
+      process.env.UMBRACO_BASE_URL = "http://localhost:2222";
+      process.argv = ["node", "index.js", "--env", file];
+
+      const { config } = await getServerConfigFresh(true);
+
+      expect(config.auth.baseUrl).toBe("http://localhost:3333");
+    });
+
+    it("a second call does not re-read .env or change dry-run mode", async () => {
+      const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      process.argv = ["node", "index.js", "--env", file];
+      const { getServerConfig } = await loadModule();
+      const { isDryRunEnabled } = await import("../../helpers/dry-run.js");
+
+      await getServerConfig(true);
+      expect(isDryRunEnabled()).toBe(false);
+
+      writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:4444\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\nUMBRACO_DRY_RUN=true\n");
+      process.argv = ["node", "index.js", "--env", file, "--umbraco-dry-run"];
+      const second = await getServerConfig(true);
+
+      expect(second.config.auth.baseUrl).toBe("http://localhost:3333");
+      expect(isDryRunEnabled()).toBe(false);
+    });
+
+    it("the first call applies dry-run mode from the resolved config", async () => {
+      setAuthEnvVars();
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE, "--umbraco-dry-run"];
+      const { getServerConfig } = await loadModule();
+      const { isDryRunEnabled } = await import("../../helpers/dry-run.js");
+
+      await getServerConfig(true);
+
+      expect(isDryRunEnabled()).toBe(true);
+    });
+
+    it("an explicit --env file beats the default ./.env", async () => {
+      writeEnv(".env", "UMBRACO_BASE_URL=http://localhost:1111\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      process.chdir(dir);
+      process.argv = ["node", "index.js", "--env", file];
+
+      const { config } = await getServerConfigFresh(true);
+
+      expect(config.auth.baseUrl).toBe("http://localhost:3333");
+    });
+
+    it("a second call with required config missing throws instead of exiting", async () => {
+      setAuthEnvVars();
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+      const { getServerConfig } = await loadModule();
+      await getServerConfig(true);
+
+      delete process.env.UMBRACO_CLIENT_SECRET;
+
+      await expect(getServerConfig(true)).rejects.toThrow("UMBRACO_CLIENT_SECRET is required");
+      expect(exitCode).toBeUndefined();
+    });
+
+    it("a second call returns its own additionalFields values", async () => {
+      setAuthEnvVars();
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+      const { getServerConfig } = await loadModule();
+      const field: ConfigFieldDefinition = { name: "apiKey", envVar: "MY_API_KEY", type: "string" };
+      await getServerConfig(true);
+
+      process.env.MY_API_KEY = "late-value";
+      const { custom } = await getServerConfig(true, { additionalFields: [field] });
+
+      expect(custom.apiKey).toBe("late-value");
+    });
+
+    it("refuses a .env that disables TLS verification for a remote base URL", async () => {
+      const file = writeEnv("custom.env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+      process.env.UMBRACO_CLIENT_ID = "a";
+      process.env.UMBRACO_CLIENT_SECRET = "b";
+      process.env.UMBRACO_BASE_URL = "https://umbraco.example.com";
+      process.argv = ["node", "index.js", "--env", file];
+
+      await expect(getServerConfigFresh(true)).rejects.toThrow("NODE_TLS_REJECT_UNAUTHORIZED=0");
+    });
+
+    it("does not apply the TLS check to offline introspection commands", async () => {
+      const file = writeEnv("custom.env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+      process.env.UMBRACO_CLIENT_ID = "a";
+      process.env.UMBRACO_CLIENT_SECRET = "b";
+      process.env.UMBRACO_BASE_URL = "https://umbraco.example.com";
+      process.argv = ["node", "index.js", "--env", file, "--list-tools"];
+
+      const { cliFlags } = await getServerConfigFresh(true);
+
+      expect(cliFlags.listTools).toBe(true);
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
+    });
+
+    it("allows a .env that disables TLS verification for a local base URL", async () => {
+      const file = writeEnv("custom.env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+      process.env.UMBRACO_CLIENT_ID = "a";
+      process.env.UMBRACO_CLIENT_SECRET = "b";
+      process.env.UMBRACO_BASE_URL = "https://localhost:44331";
+      process.argv = ["node", "index.js", "--env", file];
+
+      const { config } = await getServerConfigFresh(true);
+
+      expect(config.auth.baseUrl).toBe("https://localhost:44331");
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
     });
   });
 });
