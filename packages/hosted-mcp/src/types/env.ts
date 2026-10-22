@@ -113,6 +113,8 @@ export interface HostedMcpEnv {
    * generated `UMBRACO_TARGET_MAJOR`) for the version-mismatch check — set
    * only when deliberately targeting a different Umbraco major. Mirrors the
    * stdio entry point's `UMBRACO_EXPECTED_MAJOR` / `--umbraco-expected-major`.
+   * A blank value falls back to the operator-configured one (the SDK's
+   * `resolveExpectedUmbracoMajor`).
    */
   UMBRACO_EXPECTED_MAJOR?: string;
 

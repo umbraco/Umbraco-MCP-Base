@@ -310,6 +310,15 @@ export {
   type CheckVersionOptions,
 } from "./version-check/check-umbraco-version.js";
 
+export {
+  runStartupVersionCheck,
+  resolveExpectedUmbracoMajor,
+  withVersionCheckDeadline,
+  DEFAULT_VERSION_CHECK_TIMEOUT_MS,
+  SKIP_VERSION_CHECK_ENV,
+  type StartupVersionCheckOptions,
+} from "./version-check/startup-version-check.js";
+
 // ============================================================================
 // Server Configuration
 // ============================================================================

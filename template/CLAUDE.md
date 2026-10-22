@@ -185,9 +185,22 @@ If it can't answer, `npm run generate` **fails**. There is no spec fallback, no 
 and no env override: the spec's `info.version` is `"Latest"` on every Umbraco, and a
 hand-written value is one nobody revisits, which is how Umbraco-MCP-Base#220 shipped.
 
-`src/index.ts` passes `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` to the
-SDK's `checkUmbracoVersion`, where `expectedUmbracoMajor` is a **required** field — so the check
-can't be silently left off.
+`src/index.ts` runs the whole startup guard with one SDK call, `runStartupVersionCheck`, passing
+`serverConfig.custom.expectedUmbracoMajor` as the override and `UMBRACO_TARGET_MAJOR` as the
+generated major (`generatedUmbracoMajor` is **required**, so the check can't be silently left
+off). It:
+
+- resolves the expected major with `resolveExpectedUmbracoMajor`: a non-blank override wins, a
+  blank or whitespace one falls back to the generated major;
+- looks up the connected version under a 5 s deadline (`timeoutMs` option; the token request is
+  covered too). A timeout or unreachable CMS is a warning in `instructions`, never a block;
+- on a mismatch blocks the first tool call once with the warning, and a retry succeeds;
+- returns the message for the server's `instructions` (or `null`), and never throws.
+
+`UMBRACO_MCP_SKIP_VERSION_CHECK=true` turns the call into a no-op (no request, no block, no
+message). It is for a **parent** MCP server that chains this one as a child process and runs its
+own guard — the parent sets it in the child's spawn env so a mismatch isn't reported twice. It is
+not a general opt-out.
 
 Rules:
 - **Never edit the generated file by hand** — regenerate instead.
@@ -214,7 +227,7 @@ The template includes a Cloudflare Worker entry point for hosted deployment. Key
 - `.dev.vars` — local secrets including `UMBRACO_SERVER_URL` for self-signed cert workaround
 - Umbraco needs the Worker registered as an authorization_code OpenIdDict client (backoffice UI only supports client_credentials) — handled by the `Umbraco.Mcp.HostedAuth` NuGet package (`dotnet add package Umbraco.Mcp.HostedAuth`), not a hand-written composer. See "Hosted Worker OAuth Setup" in `README.md`.
 - Registered OAuth client ID: `umbraco-back-office-hosted-mcp` (via `HostedMcp:Clients` config) — must match `UMBRACO_OAUTH_CLIENT_ID` in `.dev.vars`
-- `expectedUmbracoMajor: UMBRACO_TARGET_MAJOR` in the `options` object wires the version-mismatch check into every request (`env.UMBRACO_EXPECTED_MAJOR` overrides it, mirroring stdio's `UMBRACO_EXPECTED_MAJOR`). Checked fresh per request via a request-scoped `VersionCheckService` and folded into that request's `instructions` — deliberately **not** wired through `configureVersionCheckHook()`, since that hook is a module-level singleton shared by every request in the Worker isolate and would leak one user's/site's mismatch state into another's tool calls (see `createPerRequestServer` in `@umbraco-cms/mcp-hosted`)
+- `expectedUmbracoMajor: UMBRACO_TARGET_MAJOR` in the `options` object wires the version-mismatch check into every request (a non-blank `env.UMBRACO_EXPECTED_MAJOR` overrides it, using the same `resolveExpectedUmbracoMajor` rule as stdio; the lookup has the same 5 s default deadline, and a timeout is an "Unable to verify" warning, never a block). Checked fresh per request via a request-scoped `VersionCheckService` and folded into that request's `instructions` — deliberately **not** wired through `configureVersionCheckHook()`, since that hook is a module-level singleton shared by every request in the Worker isolate and would leak one user's/site's mismatch state into another's tool calls (see `createPerRequestServer` in `@umbraco-cms/mcp-hosted`)
 
 Run locally: `npx wrangler dev --port 8787`
 Test with MCP Inspector in Direct mode: `http://localhost:8787/`
