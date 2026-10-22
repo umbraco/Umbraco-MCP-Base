@@ -20,6 +20,15 @@ import { resolveToolCallParams } from "./tool-call-params.js";
 let dryRunEnabled = false;
 
 /**
+ * Marker set on a tool that `withDryRun` can intercept (mutation tools only).
+ * It is an enumerable symbol so it survives the `...tool` spread every other
+ * decorator does. `withErrorHandling` reads it to know the tool's
+ * `outputSchema` must not be advertised while dry-run is on — the preview
+ * doesn't match it, and the MCP SDK rejects a result that doesn't.
+ */
+export const DRY_RUN_INTERCEPTS = Symbol("umbraco-mcp.dryRunIntercepts");
+
+/**
  * Enable or disable dry-run mode globally.
  * When enabled, mutation tools return a preview instead of executing.
  *
@@ -52,7 +61,7 @@ export function withDryRun<
 ): ToolDefinition<Args, OutputArgs> {
   const originalHandler = tool.handler;
 
-  return {
+  const wrapped: ToolDefinition<Args, OutputArgs> = {
     ...tool,
     handler: ((...params: any[]) => {
       if (!dryRunEnabled) {
@@ -83,4 +92,14 @@ export function withDryRun<
       });
     }) as ToolCallback<Args>,
   };
+
+  // Read-only tools are never intercepted, so they keep their outputSchema
+  if (tool.annotations?.readOnlyHint !== true) {
+    Object.defineProperty(wrapped, DRY_RUN_INTERCEPTS, {
+      value: true,
+      enumerable: true,
+    });
+  }
+
+  return wrapped;
 }

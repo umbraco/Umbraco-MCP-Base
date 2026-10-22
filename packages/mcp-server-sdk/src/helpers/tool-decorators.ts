@@ -12,7 +12,7 @@ import { createToolResultError } from "./tool-result.js";
 import { UmbracoApiError } from "./api-call-helpers.js";
 import { ToolValidationError } from "./tool-validation-error.js";
 import { withInputSanitization } from "./input-sanitizer.js";
-import { withDryRun } from "./dry-run.js";
+import { withDryRun, isDryRunEnabled, DRY_RUN_INTERCEPTS } from "./dry-run.js";
 import { withCursorPagination, type CursorPaginatedArgs } from "./cursor-pagination.js";
 import { withTelemetry } from "../telemetry/with-telemetry.js";
 
@@ -56,7 +56,7 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
 ): ToolDefinition<Args, OutputArgs> {
   const originalHandler = tool.handler;
 
-  return {
+  const wrapped: ToolDefinition<Args, OutputArgs> = {
     ...tool,
     handler: (async (...params: any[]) => {
       try {
@@ -110,6 +110,21 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
       }
     }) as ToolCallback<Args>,
   };
+
+  // A dry-run preview doesn't match the tool's outputSchema, and the MCP SDK
+  // rejects a result that doesn't. Dry-run mode isn't known when tools are
+  // wrapped (import time) but is by registration, so the schema is a getter
+  // read then. It lives here because this is the outermost decorator in
+  // every stack (including products' own) and the others spread `...tool`,
+  // which would evaluate a getter immediately and freeze it.
+  if ((tool as any)[DRY_RUN_INTERCEPTS] === true) {
+    Object.defineProperty(wrapped, "outputSchema", {
+      enumerable: true,
+      get: () => (isDryRunEnabled() ? undefined : tool.outputSchema),
+    });
+  }
+
+  return wrapped;
 }
 
 /**
