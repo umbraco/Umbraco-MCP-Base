@@ -7,7 +7,8 @@
  * major — or, offline, the spec's `info.version` — into
  * `template/src/config/umbraco-target.generated.ts` as `UMBRACO_TARGET_MAJOR`,
  * and the template passes
- * `serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR`.
+ * `serverConfig.custom.expectedUmbracoMajor` as the override (blank falls back)
+ * and `UMBRACO_TARGET_MAJOR` as the generated major to `runStartupVersionCheck`.
  *
  * So there are exactly two sources of the compared major:
  *   - the generated default (`UMBRACO_TARGET_MAJOR`, "17" here, from the

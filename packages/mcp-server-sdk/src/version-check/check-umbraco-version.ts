@@ -13,7 +13,41 @@ import { majorFromVersion } from "./major-from-version.js";
  * Implement this in your project to provide version info.
  */
 export interface VersionCheckClient {
-  getServerInformation(): Promise<{ version: string }>;
+  /**
+   * Fetches the connected instance's server information.
+   *
+   * @param options.signal - Aborts the request (token exchange included, when
+   *   the client goes through `UmbracoManagementClient`). Supplied by
+   *   `runStartupVersionCheck` to enforce its deadline; optional, so existing
+   *   clients that take no arguments keep working.
+   */
+  getServerInformation(options?: { signal?: AbortSignal }): Promise<{ version: string }>;
+}
+
+/** Longest instance- or config-supplied fragment kept in a version-check message. */
+export const MAX_VERSION_CHECK_DETAIL_LENGTH = 200;
+
+/**
+ * Makes externally supplied text safe to fold into a version-check message.
+ *
+ * Those messages end up in the server's `instructions`, which most clients put
+ * straight into the model's context. The connected instance controls the
+ * reported version and, through ProblemDetails or response bodies, the text of
+ * a fetch error — so control characters (including newlines and Unicode line
+ * separators) are replaced, whitespace is collapsed and the result is capped
+ * at `MAX_VERSION_CHECK_DETAIL_LENGTH` characters.
+ *
+ * @internal Exported for tests.
+ */
+export function sanitizeVersionCheckDetail(text: unknown): string {
+  const cleaned = String(text)
+    // C0/C1 control characters, DEL and the Unicode line/paragraph separators.
+    .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > MAX_VERSION_CHECK_DETAIL_LENGTH
+    ? `${cleaned.slice(0, MAX_VERSION_CHECK_DETAIL_LENGTH - 1)}…`
+    : cleaned;
 }
 
 /**
@@ -145,6 +179,13 @@ export interface CheckVersionOptions {
  *
  * Non-blocking - never throws errors, always continues execution.
  *
+ * Every message it stores passes externally supplied text (the reported
+ * version, a fetch error's message) through `sanitizeVersionCheckDetail`, since
+ * the message is meant for the server's `instructions`.
+ *
+ * Most stdio entry points want `runStartupVersionCheck` instead, which wraps
+ * this with a deadline, the hook and the chained-child skip switch.
+ *
  * @param options - Version check options
  */
 export async function checkUmbracoVersion(options: CheckVersionOptions): Promise<void> {
@@ -168,11 +209,13 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
 
     if (declared) {
       // Present but unusable — a misconfigured override, not an absent one.
+      // Sanitised like the instance-supplied text below: it is echoed into
+      // `instructions` too.
       // Worth saying out loud: the user set something and it did nothing. Same
       // treatment as an instance that reports an unparseable version.
       const message =
         `⚠️ Unable to verify Umbraco version compatibility: the declared target major ` +
-        `"${declared}" is not a version. Set it to the Umbraco major these tools target ` +
+        `"${sanitizeVersionCheckDetail(declared)}" is not a version. Set it to the Umbraco major these tools target ` +
         `(e.g. "17"), or unset it to use the generated default.`;
       service.setMessage(message);
       service.setBlocked(false);
@@ -198,7 +241,7 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
       // this is not the "false mismatch" case #220 was about — it's an
       // instance reporting something unparseable. Treat it like the network
       // error below: don't block on it, but don't stay silent either.
-      const message = `⚠️ Unable to verify Umbraco version compatibility: connected instance reported an unparseable version "${umbracoVersion}".`;
+      const message = `⚠️ Unable to verify Umbraco version compatibility: connected instance reported an unparseable version "${sanitizeVersionCheckDetail(umbracoVersion)}".`;
       service.setMessage(message);
       service.setBlocked(false);
       console.error(message);
@@ -217,7 +260,9 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const message = `⚠️ Unable to verify Umbraco version compatibility: ${errorMessage}`;
+    // The error text can carry instance-supplied content (a ProblemDetails
+    // `detail`, a response body), so it is sanitised like the version above.
+    const message = `⚠️ Unable to verify Umbraco version compatibility: ${sanitizeVersionCheckDetail(errorMessage)}`;
     service.setMessage(message);
     service.setBlocked(false); // Don't block on API errors
     console.error(message);
@@ -250,7 +295,7 @@ export async function checkUmbracoVersion(options: CheckVersionOptions): Promise
  * await checkUmbracoVersion({
  *   mcpVersion: packageJson.version,
  *   // Required. Override via UMBRACO_EXPECTED_MAJOR to target a different major.
- *   expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
+ *   expectedUmbracoMajor: resolveExpectedUmbracoMajor(process.env.UMBRACO_EXPECTED_MAJOR, UMBRACO_TARGET_MAJOR),
  *   client,
  * });
  * configureVersionCheckHook();
