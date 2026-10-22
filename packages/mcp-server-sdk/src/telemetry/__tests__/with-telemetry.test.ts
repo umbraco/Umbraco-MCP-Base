@@ -261,6 +261,20 @@ describe("withTelemetry outcome classification", () => {
     expect(spans[0].attributes[TelemetryAttributes.OUTCOME]).toBe("handler_error");
   });
 
+  it("records confirmation_timeout for an unanswered confirmation", async () => {
+    const { withTelemetry, TelemetryAttributes, spans } = await setup();
+    const { ConfirmationTimeoutError } = await import("../../helpers/elicitation.js");
+    const tool = makeTool({
+      handler: async () => {
+        throw new ConfirmationTimeoutError();
+      },
+    });
+
+    await expect(withTelemetry(tool).handler({} as any, {} as any)).rejects.toThrow();
+
+    expect(spans[0].attributes[TelemetryAttributes.OUTCOME]).toBe("confirmation_timeout");
+  });
+
   it("records unknown_error when a non-Error is thrown", async () => {
     const { withTelemetry, TelemetryAttributes, spans } = await setup();
     const tool = makeTool({

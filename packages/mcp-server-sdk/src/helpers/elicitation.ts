@@ -37,7 +37,7 @@
  * ```
  */
 
-import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ElicitResultSchema, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { getServerRef } from "./server-ref.js";
 
 /**
@@ -82,6 +82,37 @@ export class ElicitationUnsupportedError extends Error {
 }
 
 /**
+ * Thrown when an elicitation prompt gets no answer before the MCP SDK's request
+ * timeout. Distinct from a decline (which returns `false`): the user never
+ * decided, so the action was not performed and the caller can ask again.
+ */
+export class ConfirmationTimeoutError extends Error {
+  constructor(
+    message = "No response to the confirmation prompt, so nothing was changed. Ask the user and call the tool again to retry.",
+  ) {
+    super(message);
+    this.name = "ConfirmationTimeoutError";
+  }
+}
+
+/**
+ * Awaits an elicitation request, turning the MCP SDK's request timeout into
+ * {@link ConfirmationTimeoutError}. Matches on `code` rather than
+ * `instanceof McpError` because a host can load two copies of the MCP SDK.
+ * Neither helper passes a `signal`, so `-32001` here means nobody answered.
+ */
+export async function awaitElicitation<T>(request: () => Promise<T>): Promise<T> {
+  try {
+    return await request();
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === ErrorCode.RequestTimeout) {
+      throw new ConfirmationTimeoutError();
+    }
+    throw error;
+  }
+}
+
+/**
  * Ask the user to confirm an action via MCP elicitation.
  *
  * Sends an elicitation request with a boolean confirm checkbox and waits
@@ -109,6 +140,7 @@ export class ElicitationUnsupportedError extends Error {
  * @param options - Optional title and default value
  * @returns true if confirmed, false if cancelled/declined
  * @throws {ElicitationUnsupportedError} when the client advertises no elicitation capability
+ * @throws {ConfirmationTimeoutError} when the prompt gets no answer before the request times out
  *
  * @example
  * ```typescript
@@ -150,9 +182,8 @@ export async function confirmAction(
   const getCaps = (server as { getClientCapabilities?: () => unknown })
     .getClientCapabilities;
   if (typeof getCaps !== "function") {
-    const result = await server.elicitInput(
-      { message, requestedSchema },
-      requestOptions,
+    const result = await awaitElicitation(() =>
+      server.elicitInput({ message, requestedSchema }, requestOptions),
     );
     return result.action === "accept" && !!(result.content as any)?.confirm;
   }
@@ -164,9 +195,8 @@ export async function confirmAction(
 
   // Form-mode path: client explicitly advertises `elicitation.form`.
   if (caps?.elicitation?.form) {
-    const result = await server.elicitInput(
-      { message, requestedSchema },
-      requestOptions,
+    const result = await awaitElicitation(() =>
+      server.elicitInput({ message, requestedSchema }, requestOptions),
     );
     return result.action === "accept" && !!(result.content as any)?.confirm;
   }
@@ -176,19 +206,21 @@ export async function confirmAction(
   // driven UI works on any client with the base capability. Bypasses
   // `elicitInput()`'s mode-based capability check and JSON Schema validator.
   if (caps?.elicitation) {
-    const result = await (server as unknown as {
-      request: (
-        req: { method: string; params: unknown },
-        schema: typeof ElicitResultSchema,
-        opts?: typeof requestOptions,
-      ) => Promise<{ action: string; content?: { confirm?: boolean } }>;
-    }).request(
-      {
-        method: "elicitation/create",
-        params: { message, requestedSchema },
-      },
-      ElicitResultSchema,
-      requestOptions,
+    const result = await awaitElicitation(() =>
+      (server as unknown as {
+        request: (
+          req: { method: string; params: unknown },
+          schema: typeof ElicitResultSchema,
+          opts?: typeof requestOptions,
+        ) => Promise<{ action: string; content?: { confirm?: boolean } }>;
+      }).request(
+        {
+          method: "elicitation/create",
+          params: { message, requestedSchema },
+        },
+        ElicitResultSchema,
+        requestOptions,
+      ),
     );
     return result.action === "accept" && !!result.content?.confirm;
   }

@@ -33,11 +33,15 @@
  */
 
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { ElicitationUnsupportedError } from "../helpers/elicitation.js";
+import {
+  awaitElicitation,
+  ConfirmationTimeoutError,
+  ElicitationUnsupportedError,
+} from "../helpers/elicitation.js";
 import { getServerRef } from "../helpers/server-ref.js";
 import { getSupportedElicitationKind } from "./capability.js";
 
-export { ElicitationUnsupportedError };
+export { ConfirmationTimeoutError, ElicitationUnsupportedError };
 
 export interface RequestApprovalOptions {
   /**
@@ -75,6 +79,8 @@ function autoConfirmOverride(): boolean {
  *  host's native permission UI already gates the call); `false` on Decline.
  * @throws {ElicitationUnsupportedError} only when `allowAutoAccept: false`
  *  is explicitly passed AND the client advertises no elicitation.
+ * @throws {ConfirmationTimeoutError} when the prompt gets no answer before the
+ *  request times out.
  */
 export async function requestApproval(
   extra: HandlerExtra | undefined,
@@ -95,24 +101,25 @@ export async function requestApproval(
   // `getClientCapabilities` — treat that as the form path so existing
   // tests don't need per-test capability setup.
   if (kind === "unknown" || kind === "form") {
-    const result = await server.elicitInput(
-      { message, requestedSchema },
-      requestOptions,
+    const result = await awaitElicitation(() =>
+      server.elicitInput({ message, requestedSchema }, requestOptions),
     );
     return result.action === "accept";
   }
 
   if (kind === "base") {
-    const result = await (server as unknown as {
-      request: (
-        req: { method: string; params: unknown },
-        schema: typeof ElicitResultSchema,
-        opts?: typeof requestOptions,
-      ) => Promise<{ action: string }>;
-    }).request(
-      { method: "elicitation/create", params: { message, requestedSchema } },
-      ElicitResultSchema,
-      requestOptions,
+    const result = await awaitElicitation(() =>
+      (server as unknown as {
+        request: (
+          req: { method: string; params: unknown },
+          schema: typeof ElicitResultSchema,
+          opts?: typeof requestOptions,
+        ) => Promise<{ action: string }>;
+      }).request(
+        { method: "elicitation/create", params: { message, requestedSchema } },
+        ElicitResultSchema,
+        requestOptions,
+      ),
     );
     return result.action === "accept";
   }
