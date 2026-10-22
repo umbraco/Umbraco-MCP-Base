@@ -5,7 +5,7 @@
  * - OAuth client credentials authentication
  * - Automatic token refresh
  * - Query string serialization for arrays
- * - Error logging
+ * - Error logging (status only; bodies are opt-in)
  *
  * Works in Node.js 22+ and Cloudflare Workers.
  *
@@ -291,6 +291,39 @@ export function setCustomTransport(transport: CustomTransport | null): void {
 }
 
 // ============================================================================
+// Error logging
+// ============================================================================
+
+/**
+ * Logs a failed request to stderr. Only status, method and path are written by
+ * default: error bodies (e.g. `application/problem+json`) can echo submitted
+ * values such as member names or emails, and MCP clients capture a stdio
+ * server's stderr in their own log files. The full body is written only when
+ * the caller opts in (`enableLogging` on the factory, or the
+ * `UMBRACO_MCP_LOG_ERROR_BODIES=true` env var for the singleton client).
+ * @internal
+ */
+function logHttpError(
+  status: number,
+  method: string,
+  url: string,
+  data: unknown,
+  includeBody: boolean
+): void {
+  const path = url.split("?")[0];
+  const line = `HTTP Error: ${status} ${method.toUpperCase()} ${path}`;
+  if (includeBody) {
+    console.error(line, data);
+  } else {
+    console.error(line);
+  }
+}
+
+function errorBodyLoggingEnabled(): boolean {
+  return typeof process !== "undefined" && process.env?.UMBRACO_MCP_LOG_ERROR_BODIES === "true";
+}
+
+// ============================================================================
 // Core fetch implementation
 // ============================================================================
 
@@ -400,7 +433,7 @@ async function doFetch<T>(
 
   // Without returnFullResponse, check status and throw or return data
   if (!options?.validateStatus && resp.status >= 400) {
-    console.error(`HTTP Error: ${resp.status}`, data);
+    logHttpError(resp.status, config.method, config.url, data, errorBodyLoggingEnabled());
     const error = new Error(
       `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
     );
@@ -472,7 +505,7 @@ export const UmbracoManagementClient = <T>(
 export interface CreateUmbracoFetchClientOptions {
   /** Token endpoint path (defaults to Umbraco's standard path) */
   tokenPath?: string;
-  /** Enable request logging (defaults to false) */
+  /** Enable request logging, including full error response bodies (defaults to false) */
   enableLogging?: boolean;
 }
 
@@ -648,7 +681,7 @@ export function createUmbracoFetchClient(
     }
 
     if (!opts?.validateStatus && resp.status >= 400) {
-      console.error(`HTTP Error: ${resp.status}`, data);
+      logHttpError(resp.status, config.method, config.url, data, enableLogging);
       const error = new Error(
         `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
       );

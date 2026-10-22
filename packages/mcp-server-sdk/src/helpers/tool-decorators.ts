@@ -41,6 +41,30 @@ export {
 } from "./api-call-helpers.js";
 
 /**
+ * Logs a failed tool call to stderr. Umbraco error bodies (`problemDetails`,
+ * `response.data`, and the `detail` used as the error message) can echo
+ * submitted values such as names and emails, and MCP clients capture a stdio
+ * server's stderr in their own log files, so API errors log only the tool name
+ * and status by default. The full error is logged when
+ * `UMBRACO_MCP_LOG_ERROR_BODIES=true`.
+ */
+function logToolError(toolName: string, error: unknown): void {
+  if (typeof process !== "undefined" && process.env?.UMBRACO_MCP_LOG_ERROR_BODIES === "true") {
+    console.error(`Error in tool ${toolName}:`, error);
+    return;
+  }
+  const status =
+    error instanceof UmbracoApiError
+      ? error.problemDetails.status
+      : (error as any)?.response?.status;
+  if (error instanceof UmbracoApiError || status !== undefined) {
+    console.error(`Error in tool ${toolName}: ${(error as Error).name}${status !== undefined ? ` (HTTP ${status})` : ""}`);
+  } else {
+    console.error(`Error in tool ${toolName}:`, error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+  }
+}
+
+/**
  * Wraps a tool handler with standardized error handling.
  * Catches all errors and converts them to MCP tool error results.
  *
@@ -71,7 +95,7 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
         // declare no input.
         return await (originalHandler as (...a: any[]) => any)(...params);
       } catch (error) {
-        console.error(`Error in tool ${tool.name}:`, error);
+        logToolError(tool.name, error);
 
         let errorResult;
 
