@@ -50,6 +50,8 @@ The starter kit bundled by `@umbraco-cms/create-umbraco-mcp-server`. Pre-configu
 
 ## Getting Started
 
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (Brotli decoder out-of-bounds write), which Node's built-in `fetch` reaches when it decompresses a Brotli response. Upgrading Node.js is the only fix; on an affected version the server prints a warning to stderr at startup. Check your version with `node --version`.
+
 ### Create a New MCP Server
 
 ```bash

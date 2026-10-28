@@ -27,7 +27,7 @@
     "test:cli:evals": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config evals/jest.config.ts --runInBand --forceExit"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "repository": {
     "type": "git",

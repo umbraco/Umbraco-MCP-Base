@@ -37,7 +37,7 @@ describe("TLS certificate verification", () => {
     mod.initializeUmbracoFetch(config("https://localhost:44391"));
     mod.initializeUmbracoFetch(config("https://example.umbraco.io"));
     expect(process.env[TLS_ENV]).toBeUndefined();
-    expect(errorSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(TLS_ENV));
   });
 
   it.each(["https://localhost:44391", "https://127.0.0.1:44391", "https://[::1]:44391", "https://LOCALHOST:44391"])(
@@ -45,7 +45,7 @@ describe("TLS certificate verification", () => {
     async (baseUrl) => {
       process.env[TLS_ENV] = "0";
       (await loadClient()).initializeUmbracoFetch(config(baseUrl));
-      expect(errorSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining(TLS_ENV));
     },
   );
 

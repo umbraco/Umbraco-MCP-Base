@@ -310,6 +310,17 @@ export {
   type CheckVersionOptions,
 } from "./version-check/check-umbraco-version.js";
 
+export {
+  checkNodeVersion,
+  assessNodeVersion,
+  formatNodeVersionWarning,
+  resetNodeVersionCheck,
+  NODE_BROTLI_CVE,
+  FIXED_NODE_VERSIONS,
+  SUPPORTED_NODE_RANGE,
+  type NodeVersionAssessment,
+} from "./version-check/check-node-version.js";
+
 // ============================================================================
 // Server Configuration
 // ============================================================================
