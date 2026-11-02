@@ -28,6 +28,7 @@ import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { resolveStatusText } from "../helpers/status-text.js";
 import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
+import { checkNodeVersion } from "../version-check/check-node-version.js";
 
 /**
  * Authentication configuration for Umbraco API.
@@ -209,12 +210,14 @@ const getToken = async (): Promise<string> => {
  * Must be called before making any API requests.
  *
  * Does not change TLS certificate verification; throws if it has been disabled
- * for a non-local base URL (see assertTlsNotDisabledForRemote).
+ * for a non-local base URL (see assertTlsNotDisabledForRemote). Warns on stderr
+ * if the Node.js version is affected by CVE-2026-111497 (see checkNodeVersion).
  *
  * @param config - Authentication configuration
  */
 export function initializeUmbracoFetch(config: UmbracoFetchAuthConfig): void {
   authConfig = resolveAuthConfig(config);
+  checkNodeVersion();
   clearUmbracoFetchToken();
 }
 
