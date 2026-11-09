@@ -240,6 +240,6 @@ The `create-mcp-server` scaffold tool (`src/scaffold.ts`) further rewrites these
 
 ## Requirements
 
-- Node.js 22+
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (CVE-2026-111497)
 - .NET 10 (for test Umbraco instance)
 - ESM modules (type: "module")

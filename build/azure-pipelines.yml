@@ -24,7 +24,7 @@ pool:
 
 variables:
   - name: nodeVersion
-    value: '22.x'
+    value: '^22.23.4'
   # Dependency-Track product name
   - name: productName
     value: 'Umbraco.Mcp-Base'

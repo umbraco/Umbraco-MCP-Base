@@ -884,9 +884,13 @@ The SDK provides several subpath exports for tree-shaking:
 
 ## Requirements
 
-- Node.js >= 22.3.0
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (see [Node.js version](#nodejs-version))
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
+
+## Node.js version
+
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (high: out-of-bounds write in the Brotli decoder bundled with Node.js), which Node's built-in `fetch` can reach when it decompresses a Brotli response. Upgrading Node.js is the only fix. Check your version with `node --version`.
 
 ## TLS certificates
 
