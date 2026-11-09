@@ -27,6 +27,7 @@
 import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
+import { ConfirmationTimeoutError } from "../helpers/elicitation.js";
 import { ToolValidationError } from "../helpers/tool-validation-error.js";
 import { UmbracoApiError } from "../helpers/api-call-helpers.js";
 import { isDryRunEnabled } from "../helpers/dry-run.js";
@@ -93,6 +94,9 @@ function classifyThrown(error: unknown): ToolOutcome {
   }
   if (error instanceof UmbracoApiError) {
     return classifyUmbracoApiError(error);
+  }
+  if (error instanceof ConfirmationTimeoutError) {
+    return "confirmation_timeout";
   }
   if (error instanceof Error) {
     // An error carrying a response body means the API answered — same bucket as
