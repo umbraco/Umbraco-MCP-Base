@@ -64,8 +64,39 @@ describe("token request abort signal", () => {
     setTimeout(() => controller.abort(), 20);
 
     await expect(settleWithin(request, 1000)).rejects.toMatchObject({ name: "AbortError" });
+    // The token request is shared between callers, so it has its own signal;
+    // with its only waiter gone it is aborted too.
     const tokenCall = fetchMock.mock.calls.find(([input]) => String(input).includes(TOKEN_PATH));
-    expect(tokenCall?.[1]?.signal).toBe(controller.signal);
+    expect(tokenCall?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("doFetch path: one caller aborting doesn't fail another caller waiting on the same token request", async () => {
+    let answerToken!: () => void;
+    globalThis.fetch = jest.fn<typeof fetch>((input, init) => {
+      if (!String(input).includes(TOKEN_PATH)) {
+        return Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+        answerToken = () =>
+          resolve(new Response(JSON.stringify({ access_token: "t", expires_in: 300 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+      });
+    }) as unknown as typeof fetch;
+    initializeUmbracoFetch(auth);
+
+    const impatient = new AbortController();
+    const url = { url: "/umbraco/management/api/v1/server/information", method: "GET" };
+    const first = UmbracoManagementClient(url, { signal: impatient.signal });
+    const second = UmbracoManagementClient(url, { signal: new AbortController().signal });
+    await new Promise((r) => setTimeout(r, 0));
+
+    impatient.abort();
+    await expect(settleWithin(first, 1000)).rejects.toMatchObject({ name: "AbortError" });
+    answerToken();
+    await expect(settleWithin(second, 1000)).resolves.toEqual({});
   });
 
   it("createUmbracoFetchClient's mutator rejects with an abort once the signal fires during a stalled token request", async () => {

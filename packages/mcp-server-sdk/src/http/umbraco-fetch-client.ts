@@ -88,6 +88,20 @@ export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-offi
 let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
+// Shared by concurrent callers so a cold start or expiry sends one token request.
+interface TokenFlight {
+  promise: Promise<string>;
+  /** Aborts the shared request; fired once every waiting caller has given up. */
+  controller: AbortController;
+  waiters: number;
+}
+let inFlightToken: TokenFlight | null = null;
+// Bumped by clearUmbracoFetchToken, so a token request started before a
+// re-init or clear doesn't store its late response.
+let tokenGeneration = 0;
+
+/** Cap on the refresh margin: it only has to cover latency and clock skew. */
+const MAX_TOKEN_EXPIRY_MARGIN_MS = 30_000;
 
 // ============================================================================
 // Query String Serialization
@@ -174,8 +188,10 @@ export const requestClientCredentialsToken = async (config: {
 /**
  * Fetches a new access token from Umbraco.
  *
- * @param signal - The calling request's abort signal, so a caller's deadline
- *   also bounds the token exchange that precedes its request.
+ * The stored expiry is brought forward by min(30 s, 10% of expires_in), so a
+ * token isn't sent just before it expires.
+ *
+ * @param signal - Aborts the token exchange (see `getToken` for whose signal).
  */
 const fetchAccessToken = async (signal?: AbortSignal): Promise<string> => {
   if (!authConfig) {
@@ -184,26 +200,71 @@ const fetchAccessToken = async (signal?: AbortSignal): Promise<string> => {
     );
   }
 
+  const generation = tokenGeneration;
   const { accessToken: token, expiresIn } = await requestClientCredentialsToken({
     ...authConfig,
     signal,
   });
 
-  accessToken = token;
-  tokenExpiry = Date.now() + expiresIn * 1000;
+  // Re-initialized or cleared while in flight: the response is for the old config.
+  if (generation === tokenGeneration) {
+    const lifetimeMs = expiresIn * 1000;
+    accessToken = token;
+    tokenExpiry = Date.now() + lifetimeMs - Math.min(MAX_TOKEN_EXPIRY_MARGIN_MS, lifetimeMs * 0.1);
+  }
   return token;
 };
 
 /**
- * Gets a valid access token, refreshing if expired.
+ * Gets a valid access token, refreshing if expired. Concurrent callers share
+ * one token request; a failed request isn't cached.
  *
- * @param signal - Forwarded to the token request (see `fetchAccessToken`).
+ * @param signal - The calling request's abort signal, so a caller's deadline
+ *   also bounds its wait for the token (umbraco/Umbraco-MCP-Base#428). The
+ *   shared request has its own signal: one caller giving up rejects only that
+ *   caller, and the request is aborted once every waiting caller has given up.
  */
 const getToken = async (signal?: AbortSignal): Promise<string> => {
-  if (!accessToken || (tokenExpiry && Date.now() >= tokenExpiry)) {
-    await fetchAccessToken(signal);
+  if (accessToken && !(tokenExpiry && Date.now() >= tokenExpiry)) {
+    return accessToken;
   }
-  return accessToken!;
+  signal?.throwIfAborted();
+  if (!inFlightToken) {
+    const controller = new AbortController();
+    const flight: TokenFlight = {
+      controller,
+      waiters: 0,
+      promise: fetchAccessToken(controller.signal).finally(() => {
+        if (inFlightToken === flight) inFlightToken = null;
+      }),
+    };
+    inFlightToken = flight;
+  }
+
+  const flight = inFlightToken;
+  flight.waiters++;
+  if (!signal) return flight.promise;
+  return new Promise<string>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason);
+      if (--flight.waiters === 0) flight.controller.abort(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    flight.promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+};
+
+/**
+ * Drops the cached token after a 401, but only if it is still the one that was
+ * sent, so concurrent 401s for the same token cause one refresh.
+ */
+const invalidateToken = (rejectedToken: string): void => {
+  if (accessToken === rejectedToken) {
+    accessToken = null;
+    tokenExpiry = null;
+  }
 };
 
 // ============================================================================
@@ -255,6 +316,8 @@ export function isUmbracoFetchInitialized(): boolean {
 export function clearUmbracoFetchToken(): void {
   accessToken = null;
   tokenExpiry = null;
+  inFlightToken = null;
+  tokenGeneration++;
 }
 
 // ============================================================================
@@ -333,6 +396,23 @@ function errorBodyLoggingEnabled(): boolean {
 // Core fetch implementation
 // ============================================================================
 
+/** True when every Authorization header in `headers` carries our cached token. */
+function sentOurToken(headers: Record<string, string>, token: string): boolean {
+  return Object.entries(headers).every(
+    ([name, value]) => name.toLowerCase() !== "authorization" || value === `Bearer ${token}`
+  );
+}
+
+/**
+ * True when a 401 is a bearer-token challenge from the token validation
+ * middleware (`WWW-Authenticate: Bearer …`), i.e. the token itself was refused.
+ * An endpoint that returns 401 from its own code (Umbraco does this for some
+ * permission checks) sends no challenge, and a fresh token wouldn't help.
+ */
+function isBearerChallenge(resp: Response): boolean {
+  return /(?:^|,)\s*Bearer\b/i.test(resp.headers.get("www-authenticate") ?? "");
+}
+
 /**
  * Makes a fetch request to the Umbraco API.
  * @internal
@@ -347,12 +427,16 @@ async function doFetch<T>(
     );
   }
 
-  // Pass the request's signal to the token exchange too: without it a CMS that
-  // accepts the connection but never answers the token request would hang the
-  // caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
+  // Read the config before waiting for the token: a re-init meanwhile would
+  // otherwise send the old config's token to the new base URL.
+  const auth = authConfig;
+  const generation = tokenGeneration;
+  // The request's signal bounds the wait for the token too: without it a CMS
+  // that accepts the connection but never answers the token request would hang
+  // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
   const token = await getToken(options?.signal);
   const queryString = serializeParams(config.params);
-  const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
+  const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
   // Detect FormData payloads. Two shapes are supported:
   //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
@@ -407,7 +491,26 @@ async function doFetch<T>(
     }
   }
 
-  const resp = await fetch(fullUrl, fetchOptions);
+  let resp = await fetch(fullUrl, fetchOptions);
+
+  // Resend once with a fresh token when the token itself was refused. Only a
+  // bearer challenge counts: it comes from token validation, before the
+  // endpoint runs, so resending is safe for every method. Done before the
+  // returnFullResponse branch so tool calls (which return the 401) get it too.
+  // Skipped when the caller supplied its own Authorization header, or when the
+  // client was re-initialised meanwhile (the new token belongs to another config).
+  if (
+    resp.status === 401
+    && isBearerChallenge(resp)
+    && !options?.signal?.aborted
+    && generation === tokenGeneration
+    && sentOurToken(headers, token)
+  ) {
+    void resp.body?.cancel().catch(() => {});
+    invalidateToken(token);
+    headers.Authorization = `Bearer ${await getToken(options?.signal)}`;
+    resp = await fetch(fullUrl, fetchOptions);
+  }
 
   // Parse response body
   let data: T;
