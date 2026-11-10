@@ -193,14 +193,16 @@ off). It:
 - resolves the expected major with `resolveExpectedUmbracoMajor`: a non-blank override wins, a
   blank or whitespace one falls back to the generated major;
 - looks up the connected version under a 5 s deadline (`timeoutMs` option; the token request is
-  covered too). A timeout or unreachable CMS is a warning in `instructions`, never a block;
+  covered too). A timeout or unreachable CMS is a warning in `instructions` saying the version
+  was not checked, never a block;
 - on a mismatch blocks the first tool call once with the warning, and a retry succeeds;
 - returns the message for the server's `instructions` (or `null`), and never throws.
 
-`UMBRACO_MCP_SKIP_VERSION_CHECK=true` turns the call into a no-op (no request, no block, no
-message). It is for a **parent** MCP server that chains this one as a child process and runs its
-own guard — the parent sets it in the child's spawn env so a mismatch isn't reported twice. It is
-not a general opt-out.
+`UMBRACO_MCP_PARENT_CHECKED_MAJOR` is for a **parent** MCP server that chains this one as a child
+process and runs its own guard: the parent sets it (with `chainedVersionCheckEnv`) to the major it
+checked. If that is the same major this server targets, the call is a no-op (no request, no block,
+no message), so a mismatch isn't reported twice. A different major is ignored and the check runs.
+It is not a general opt-out.
 
 Rules:
 - **Never edit the generated file by hand** — regenerate instead.

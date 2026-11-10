@@ -135,8 +135,9 @@ if (fetchInitError) throw fetchInitError;
 //     user deliberately retries;
 //   - returns the warning for the server's `instructions` (null otherwise).
 // It never throws. A parent MCP server that chains this one and runs its own
-// guard sets `UMBRACO_MCP_SKIP_VERSION_CHECK=true` in this process's env, which
-// makes the call a no-op so a mismatch isn't reported twice.
+// guard sets `UMBRACO_MCP_PARENT_CHECKED_MAJOR` in this process's env to the
+// major it checked; if that is the major this server targets, the call is a
+// no-op so a mismatch isn't reported twice.
 //
 // Skipped when no client credentials are configured (matches the
 // `initializeUmbracoFetch` gate above) so CLI introspection / offline usage

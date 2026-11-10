@@ -1,7 +1,8 @@
 /**
  * Tests for the shared stdio startup guard (umbraco/Umbraco-MCP-Base#428):
  * `resolveExpectedUmbracoMajor`, `runStartupVersionCheck` (deadline, hook,
- * skip switch, never throws) and `withVersionCheckDeadline`.
+ * chained-child skip, never throws), `chainedVersionCheckEnv` and
+ * `withVersionCheckDeadline`.
  */
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { z } from "zod";
@@ -10,7 +11,8 @@ import {
   resolveExpectedUmbracoMajor,
   runStartupVersionCheck,
   withVersionCheckDeadline,
-  SKIP_VERSION_CHECK_ENV,
+  PARENT_CHECKED_MAJOR_ENV,
+  chainedVersionCheckEnv,
   DEFAULT_VERSION_CHECK_TIMEOUT_MS,
 } from "../startup-version-check.js";
 import { configurePreExecutionHook, withStandardDecorators } from "../../helpers/tool-decorators.js";
@@ -41,19 +43,19 @@ function decoratedTool() {
 
 const callTool = (decorated: ToolDefinition<any, any>) => decorated.handler({}, {} as any) as Promise<any>;
 
-const savedSkip = process.env[SKIP_VERSION_CHECK_ENV];
+const savedParentMajor = process.env[PARENT_CHECKED_MAJOR_ENV];
 let errorSpy: ReturnType<typeof jest.spyOn>;
 
 beforeEach(() => {
-  delete process.env[SKIP_VERSION_CHECK_ENV];
+  delete process.env[PARENT_CHECKED_MAJOR_ENV];
   errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   errorSpy.mockRestore();
   configurePreExecutionHook(() => undefined);
-  if (savedSkip === undefined) delete process.env[SKIP_VERSION_CHECK_ENV];
-  else process.env[SKIP_VERSION_CHECK_ENV] = savedSkip;
+  if (savedParentMajor === undefined) delete process.env[PARENT_CHECKED_MAJOR_ENV];
+  else process.env[PARENT_CHECKED_MAJOR_ENV] = savedParentMajor;
 });
 
 describe("resolveExpectedUmbracoMajor", () => {
@@ -164,6 +166,7 @@ describe("runStartupVersionCheck", () => {
     expect(Date.now() - started).toBeLessThan(2000);
     expect(message).toContain("Unable to verify Umbraco version compatibility");
     expect(message).toContain("did not respond within 50ms");
+    expect(message).toContain("the Umbraco version was not checked and tools are not blocked");
     const { decorated, handler } = decoratedTool();
     await callTool(decorated);
     expect(handler).toHaveBeenCalledTimes(1);
@@ -213,10 +216,10 @@ describe("runStartupVersionCheck", () => {
     ).toBeNull();
   });
 
-  it.each(["true", "TRUE", "True"])(
-    "with %s=%s makes no request, arms no block and returns null",
+  it.each(["17", "17.4.0", " 17 "])(
+    "skips when the parent checked the same major (%j): no request, no block, null",
     async (value) => {
-      process.env[SKIP_VERSION_CHECK_ENV] = value;
+      process.env[PARENT_CHECKED_MAJOR_ENV] = value;
       const { client, getServerInformation } = clientReturning("15.0.0");
       const service = new VersionCheckService();
 
@@ -236,11 +239,12 @@ describe("runStartupVersionCheck", () => {
     }
   );
 
-  it.each(["false", "1", "yes", ""])("runs the check when the skip switch is %j", async (value) => {
-    process.env[SKIP_VERSION_CHECK_ENV] = value;
-    const { client, getServerInformation } = clientReturning("15.0.0");
+  it("compares the parent's major with the resolved override, not the generated major", async () => {
+    process.env[PARENT_CHECKED_MAJOR_ENV] = "17";
+    const { client, getServerInformation } = clientReturning("17.0.0");
 
     const message = await runStartupVersionCheck({
+      expectedUmbracoMajorOverride: "18",
       generatedUmbracoMajor: "17",
       mcpVersion: "1.0.0",
       client,
@@ -250,6 +254,24 @@ describe("runStartupVersionCheck", () => {
     expect(getServerInformation).toHaveBeenCalledTimes(1);
     expect(message).toMatch(/Version Mismatch/);
   });
+
+  it.each(["16", "true", "1", "Latest", ""])(
+    "runs the check when the parent checked %j and this server targets 17",
+    async (value) => {
+      process.env[PARENT_CHECKED_MAJOR_ENV] = value;
+      const { client, getServerInformation } = clientReturning("15.0.0");
+
+      const message = await runStartupVersionCheck({
+        generatedUmbracoMajor: "17",
+        mcpVersion: "1.0.0",
+        client,
+        service: new VersionCheckService(),
+      });
+
+      expect(getServerInformation).toHaveBeenCalledTimes(1);
+      expect(message).toMatch(/Version Mismatch/);
+    }
+  );
 
   it("never throws", async () => {
     // A client whose method throws synchronously.
@@ -283,15 +305,28 @@ describe("runStartupVersionCheck", () => {
         client: clientReturning("15.0.0").client,
         service: brokenService,
       })
-    ).resolves.toBeNull();
+    ).resolves.toBe(
+      "⚠️ Umbraco version check could not run, so the Umbraco version was not checked and tools are not blocked: service exploded"
+    );
 
     // Garbage options.
-    await expect(runStartupVersionCheck(undefined as any)).resolves.toBeNull();
+    await expect(runStartupVersionCheck(undefined as any)).resolves.toContain("Umbraco version check could not run");
     await expect(runStartupVersionCheck({ timeoutMs: -1 } as any)).resolves.toBeDefined();
   });
 
   it("defaults the deadline to 5 seconds", () => {
     expect(DEFAULT_VERSION_CHECK_TIMEOUT_MS).toBe(5000);
+  });
+});
+
+describe("chainedVersionCheckEnv", () => {
+  it("sets the parent-checked major, normalised to the major", () => {
+    expect(chainedVersionCheckEnv("17")).toEqual({ [PARENT_CHECKED_MAJOR_ENV]: "17" });
+    expect(chainedVersionCheckEnv(" 17.4.0 ")).toEqual({ [PARENT_CHECKED_MAJOR_ENV]: "17" });
+  });
+
+  it.each([[undefined], [null], [""], ["Latest"]])("returns {} for %j, so the child runs its own check", (major) => {
+    expect(chainedVersionCheckEnv(major)).toEqual({});
   });
 });
 

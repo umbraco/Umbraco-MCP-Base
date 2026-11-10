@@ -139,8 +139,8 @@ const options = {
   // `createPerRequestServer` in `@umbraco-cms/mcp-hosted` for why a global
   // block isn't safe here. The lookup has the same 5 s default deadline as
   // stdio; a site that doesn't answer in time gets an "Unable to verify"
-  // warning, never a block. (`UMBRACO_MCP_SKIP_VERSION_CHECK` is a stdio-only
-  // switch for chained child processes and doesn't apply here.)
+  // warning, never a block. (`UMBRACO_MCP_PARENT_CHECKED_MAJOR` is a stdio-only
+  // signal for chained child processes and doesn't apply here.)
   expectedUmbracoMajor: UMBRACO_TARGET_MAJOR,
 
   // ==========================================================================

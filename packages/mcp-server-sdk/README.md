@@ -514,17 +514,30 @@ It:
   `DEFAULT_VERSION_CHECK_TIMEOUT_MS` = 5000). It passes an `AbortSignal` to
   `getServerInformation` — `UmbracoManagementClient` and `createUmbracoFetchClient` also apply
   it to the token request — and enforces the deadline itself in case a client ignores the
-  signal. A timeout is handled like an unreachable CMS: a warning, no block;
+  signal. A timeout is handled like an unreachable CMS: a warning that says the version was not
+  checked and tools are not blocked;
 - calls `checkUmbracoVersion`, then `configureVersionCheckHook()`, so a mismatch blocks the first
   decorated tool call once and a retry succeeds;
-- returns `getVersionCheckMessage()` for the server's `instructions`, or `null`.
+- returns `getVersionCheckMessage()` for the server's `instructions`, or `null`;
+- never throws. If the guard itself fails, it logs to stderr and returns a message saying the
+  version was not checked, so the failure reaches `instructions` instead of looking like a pass.
 
-**Chained children: `UMBRACO_MCP_SKIP_VERSION_CHECK`.** When set to `true` (case-insensitive,
-like the SDK's other boolean env flags), `runStartupVersionCheck` does nothing at all: no
-request, no block, no message. It is for a **parent** MCP server that runs its own guard and
-chains this server as a child process — the parent sets it in the child's spawn env so a
-mismatch doesn't block the user twice. It is not a general opt-out; a standalone server should
-leave it unset.
+**Chained children: `UMBRACO_MCP_PARENT_CHECKED_MAJOR`.** A **parent** MCP server that runs its
+own guard and chains this server as a child process sets this in the child's spawn env to the
+major it checked against, using `chainedVersionCheckEnv(major)`:
+
+```typescript
+env: {
+  ...chainedVersionCheckEnv(resolveExpectedUmbracoMajor(override, UMBRACO_TARGET_MAJOR)),
+},
+```
+
+The child skips its own check (no request, no block, no message) **only when its resolved
+expected major is the same major**, so a mismatch isn't reported twice. A child built for a
+different major runs its own check, because the parent's check says nothing about it. Children
+inherit the env, so the value can reach grandchildren or be set by hand; neither turns the
+guard off for a server that targets a different major. Only set it for children that connect to
+the same Umbraco instance as the parent.
 
 Every message `checkUmbracoVersion` stores passes instance-supplied text (the reported version,
 a fetch error's message) through a sanitiser — control characters replaced, whitespace
@@ -711,7 +724,7 @@ a custom config field so users can retarget without editing code:
 | Env var | CLI flag | Effect |
 |---------|----------|--------|
 | `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset or blank (default) = use `UMBRACO_TARGET_MAJOR`. |
-| `UMBRACO_MCP_SKIP_VERSION_CHECK` | — | Set to `true` by a parent MCP server in a chained child's spawn env; the child then skips its startup version check entirely. Not a general opt-out. |
+| `UMBRACO_MCP_PARENT_CHECKED_MAJOR` | — | Set by a parent MCP server (via `chainedVersionCheckEnv`) in a chained child's spawn env to the major it already checked. The child skips its startup version check only if it targets that same major. Not a general opt-out. |
 
 `checkUmbracoVersion` still degrades to a no-op (no request, no message, nothing blocked) if the
 major it is given is blank — a runtime guard for direct callers, not a supported way to disable

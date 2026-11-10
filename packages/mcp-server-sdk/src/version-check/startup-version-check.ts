@@ -6,13 +6,15 @@
  * a deadline, arm the one-time block on a mismatch, and hand back the message
  * for the server's `instructions`. Built from `checkUmbracoVersion`,
  * `configureVersionCheckHook` and `getVersionCheckMessage`; it adds only the
- * deadline and the chained-child skip switch (umbraco/Umbraco-MCP-Base#428).
+ * deadline and the chained-child skip (umbraco/Umbraco-MCP-Base#428).
  */
 
+import { majorFromVersion } from "./major-from-version.js";
 import {
   checkUmbracoVersion,
   configureVersionCheckHook,
   getVersionCheckMessage,
+  sanitizeVersionCheckDetail,
   versionCheckService,
   type VersionCheckClient,
   type VersionCheckService,
@@ -22,15 +24,46 @@ import {
 export const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 5000;
 
 /**
- * Env var a parent MCP server sets in a chained child's spawn env so the child
- * skips its own startup version check.
+ * Env var a parent MCP server sets in a chained child's spawn env to the
+ * Umbraco major its own startup guard checked against.
  *
- * This is for parent servers that already run the guard themselves: without
- * it a mismatch blocks the user twice, once per server. It is not a general
- * opt-out for standalone servers. Parsed like the SDK's other boolean env
- * flags: only `"true"` (case-insensitive) enables it.
+ * The child skips its own check only when its resolved expected major is the
+ * same major: the parent has already compared that major with the instance, so
+ * a second check would report the same result again (and block the user twice
+ * on a mismatch). A child built for a different major ignores the value and
+ * runs its own check, because the parent's check says nothing about it.
+ *
+ * Children inherit their parent's environment, so the value can reach
+ * grandchildren and can be set by hand in a client's `env` block. Neither is
+ * a way to turn the guard off: only a server that targets the stated major
+ * skips, and the parent only sets it for children that connect to the same
+ * instance. Build the value with `chainedVersionCheckEnv`.
  */
-export const SKIP_VERSION_CHECK_ENV = "UMBRACO_MCP_SKIP_VERSION_CHECK";
+export const PARENT_CHECKED_MAJOR_ENV = "UMBRACO_MCP_PARENT_CHECKED_MAJOR";
+
+/**
+ * The env a parent MCP server merges into a chained child's spawn env after
+ * running its own startup guard, so a child that targets the same Umbraco
+ * major doesn't repeat the check.
+ *
+ * Only set it for children that connect to the same Umbraco instance as the
+ * parent.
+ *
+ * @param checkedUmbracoMajor - The major the parent checked against, e.g. the
+ *   result of `resolveExpectedUmbracoMajor`. Anything without a numeric major
+ *   gives `{}`, so the child runs its own check.
+ *
+ * @example
+ * ```typescript
+ * env: {
+ *   ...chainedVersionCheckEnv(resolveExpectedUmbracoMajor(override, UMBRACO_TARGET_MAJOR)),
+ * }
+ * ```
+ */
+export function chainedVersionCheckEnv(checkedUmbracoMajor: string | null | undefined): Record<string, string> {
+  const major = majorFromVersion(checkedUmbracoMajor);
+  return major ? { [PARENT_CHECKED_MAJOR_ENV]: major } : {};
+}
 
 /**
  * Resolves the Umbraco major a server should check against: the override when
@@ -76,7 +109,11 @@ export async function withVersionCheckDeadline<T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`${label} did not respond within ${timeoutMs}ms`));
+      reject(
+        new Error(
+          `${label} did not respond within ${timeoutMs}ms, so the Umbraco version was not checked and tools are not blocked`
+        )
+      );
       controller.abort();
     }, timeoutMs);
   });
@@ -110,9 +147,10 @@ export interface StartupVersionCheckOptions {
   service?: VersionCheckService;
 }
 
-function isSkipRequested(): boolean {
-  const value = typeof process !== "undefined" ? process.env?.[SKIP_VERSION_CHECK_ENV] : undefined;
-  return String(value ?? "").toLowerCase() === "true";
+function parentCheckedSameMajor(expectedUmbracoMajor: string | undefined): boolean {
+  const value = typeof process !== "undefined" ? process.env?.[PARENT_CHECKED_MAJOR_ENV] : undefined;
+  const parentMajor = majorFromVersion(value);
+  return parentMajor !== null && parentMajor === majorFromVersion(expectedUmbracoMajor);
 }
 
 /**
@@ -127,11 +165,12 @@ function isSkipRequested(): boolean {
  *   decorated tool call once and a retry succeeds.
  * - Returns `getVersionCheckMessage()` for the server's `instructions`.
  *
- * When `UMBRACO_MCP_SKIP_VERSION_CHECK=true` (set by a parent server for its
- * chained child) it does nothing at all: no request, no hook, no message.
+ * When `UMBRACO_MCP_PARENT_CHECKED_MAJOR` (set by a parent server for its
+ * chained child, see `chainedVersionCheckEnv`) names the same major this
+ * server targets, it does nothing at all: no request, no hook, no message.
  *
- * Never throws: any unexpected failure is logged to stderr and the server
- * starts without a block.
+ * Never throws: any unexpected failure is logged to stderr, returned as the
+ * `instructions` message, and the server starts without a block.
  *
  * @returns The message for the server's `instructions`, or `null`
  *
@@ -156,7 +195,11 @@ function isSkipRequested(): boolean {
 export async function runStartupVersionCheck(options: StartupVersionCheckOptions): Promise<string | null> {
   const service = options?.service ?? versionCheckService;
   try {
-    if (isSkipRequested()) {
+    const expectedUmbracoMajor = resolveExpectedUmbracoMajor(
+      options.expectedUmbracoMajorOverride,
+      options.generatedUmbracoMajor
+    );
+    if (parentCheckedSameMajor(expectedUmbracoMajor)) {
       return null;
     }
 
@@ -164,10 +207,7 @@ export async function runStartupVersionCheck(options: StartupVersionCheckOptions
 
     await checkUmbracoVersion({
       mcpVersion: options.mcpVersion,
-      expectedUmbracoMajor: resolveExpectedUmbracoMajor(
-        options.expectedUmbracoMajorOverride,
-        options.generatedUmbracoMajor
-      ),
+      expectedUmbracoMajor,
       client: {
         getServerInformation: () =>
           withVersionCheckDeadline((signal) => client.getServerInformation({ signal }), timeoutMs),
@@ -179,13 +219,17 @@ export async function runStartupVersionCheck(options: StartupVersionCheckOptions
   } catch (error) {
     // `checkUmbracoVersion` already never throws; this covers everything
     // around it (option access, env parsing, timers, hook wiring).
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error(`⚠️ Umbraco version check could not run: ${detail}`);
+    // The message goes into `instructions` too: on stdio nobody reads stderr,
+    // and a guard that silently didn't run looks the same as one that passed.
+    const message =
+      `⚠️ Umbraco version check could not run, so the Umbraco version was not checked and tools are not blocked: ` +
+      sanitizeVersionCheckDetail(error instanceof Error ? error.message : error);
+    console.error(message);
     try {
       service.setBlocked(false);
     } catch {
       // Nothing more to do: never throw from startup.
     }
-    return null;
+    return message;
   }
 }

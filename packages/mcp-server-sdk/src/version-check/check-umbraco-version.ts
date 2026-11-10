@@ -37,7 +37,7 @@ export const MAX_VERSION_CHECK_DETAIL_LENGTH = 200;
  * separators) are replaced, whitespace is collapsed and the result is capped
  * at `MAX_VERSION_CHECK_DETAIL_LENGTH` characters.
  *
- * @internal Exported for tests.
+ * @internal Shared with `runStartupVersionCheck`; exported for tests.
  */
 export function sanitizeVersionCheckDetail(text: unknown): string {
   const cleaned = String(text)
@@ -184,7 +184,7 @@ export interface CheckVersionOptions {
  * the message is meant for the server's `instructions`.
  *
  * Most stdio entry points want `runStartupVersionCheck` instead, which wraps
- * this with a deadline, the hook and the chained-child skip switch.
+ * this with a deadline, the hook and the chained-child skip.
  *
  * @param options - Version check options
  */

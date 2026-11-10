@@ -315,7 +315,8 @@ export {
   resolveExpectedUmbracoMajor,
   withVersionCheckDeadline,
   DEFAULT_VERSION_CHECK_TIMEOUT_MS,
-  SKIP_VERSION_CHECK_ENV,
+  PARENT_CHECKED_MAJOR_ENV,
+  chainedVersionCheckEnv,
   type StartupVersionCheckOptions,
 } from "./version-check/startup-version-check.js";
 
