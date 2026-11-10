@@ -19,6 +19,8 @@ export interface MockUmbracoServer {
   server: Server;
   /** `http://127.0.0.1:<port>` — an ephemeral port, so suites never collide. */
   baseUrl: string;
+  /** How many `server/information` requests the stub has answered. */
+  serverInformationRequests(): number;
   /** Idempotent; safe to call from `afterAll` and from a `finally`. */
   close(): Promise<void>;
 }
@@ -33,6 +35,7 @@ export interface MockUmbracoServer {
 export function startMockUmbracoServer(
   version: string | null
 ): Promise<MockUmbracoServer> {
+  let serverInformationRequests = 0;
   return new Promise((resolvePromise) => {
     const server = createServer((req, res) => {
       if (req.method === "POST" && req.url === TOKEN_PATH) {
@@ -41,6 +44,7 @@ export function startMockUmbracoServer(
         return;
       }
       if (req.method === "GET" && req.url === SERVER_INFORMATION_PATH) {
+        serverInformationRequests++;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify(
@@ -57,6 +61,7 @@ export function startMockUmbracoServer(
       resolvePromise({
         server,
         baseUrl: `http://127.0.0.1:${port}`,
+        serverInformationRequests: () => serverInformationRequests,
         close: () =>
           new Promise<void>((done) => {
             if (!server.listening) return done();

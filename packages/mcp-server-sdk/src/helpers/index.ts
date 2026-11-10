@@ -78,6 +78,8 @@ export {
   configureDryRunMode,
   isDryRunEnabled,
   withDryRun,
+  getRegisteredOutputSchema,
+  DRY_RUN_INTERCEPTS,
 } from "./dry-run.js";
 
 // Server reference (for tools that need elicitation)
@@ -94,6 +96,7 @@ export { useDraft202012ToolSchemas } from "./strict-json-schema-tools.js";
 // Elicitation helpers
 export {
   confirmAction,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./elicitation.js";

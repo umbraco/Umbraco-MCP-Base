@@ -27,6 +27,7 @@ export {
 
 export {
   requestApproval,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type RequestApprovalOptions,
 } from "./request-approval.js";

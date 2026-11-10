@@ -5,6 +5,7 @@ import {
   versionCheckService,
   getActiveRequestContext,
   getUmbracoVersion,
+  DEFAULT_VERSION_CHECK_TIMEOUT_MS,
 } from "@umbraco-cms/mcp-server-sdk";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition, ServerConfigForCollections, CollectionConfiguration } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
@@ -1113,6 +1114,56 @@ describe("createPerRequestServer — version check", () => {
     );
 
     expect(getInstructions(server)).toMatch(/Version Mismatch/);
+  });
+
+  it.each([[""], ["   "]])(
+    "still runs the check against the operator-configured major when env.UMBRACO_EXPECTED_MAJOR is blank (%j)",
+    async (blank) => {
+      const { createPerRequestServer } = await import("../create-server.js");
+      const server = await createPerRequestServer(
+        { ...baseOptions, expectedUmbracoMajor: "17" },
+        makeMockEnv({ UMBRACO_EXPECTED_MAJOR: blank } as Partial<HostedMcpEnv>),
+        mockProps,
+      );
+
+      // Connected 15.2.0 vs. the generated 17: a blank override must not
+      // disable the check (#426).
+      expect(getInstructions(server)).toMatch(/Version Mismatch/);
+      expect(getInstructions(server)).toContain("17");
+    },
+  );
+
+  it("resolves within the deadline when /server/information stalls, with an 'Unable to verify' warning", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    let serverInfoSignal: AbortSignal | undefined;
+    mockFetch.mockImplementation((async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/server/information")) {
+        serverInfoSignal = init?.signal ?? undefined;
+        return new Promise<Response>(() => {}); // Never answers, ignores the signal.
+      }
+      if (url.includes("/user/current")) return jsonResponse({});
+      return jsonResponse({}, 404);
+    }) as typeof fetch);
+
+    jest.useFakeTimers();
+    try {
+      const pending = createPerRequestServer(
+        { ...baseOptions, expectedUmbracoMajor: "17" },
+        makeMockEnv(),
+        mockProps,
+      );
+      await jest.advanceTimersByTimeAsync(DEFAULT_VERSION_CHECK_TIMEOUT_MS);
+      const server = await pending;
+
+      const instructions = getInstructions(server);
+      expect(instructions).toContain("Unable to verify Umbraco version compatibility");
+      expect(instructions).toContain(`did not respond within ${DEFAULT_VERSION_CHECK_TIMEOUT_MS}ms`);
+      expect(instructions).not.toMatch(/Version Mismatch/);
+      expect(serverInfoSignal?.aborted).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
