@@ -27,6 +27,7 @@
  */
 
 import { z, ZodType } from "zod";
+import { getParseErrorMessage } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -251,9 +252,19 @@ export async function handleCliCommands(
         // transforms apply and bad args fail here rather than reaching the API
         if (tool.inputSchema) {
           const schema = tool.inputSchema instanceof ZodType ? tool.inputSchema : z.object(tool.inputSchema);
-          const parsed = await schema.safeParseAsync(args);
+          // safeParseAsync still rejects when a refine/transform throws; exit through
+          // the same path as a throwing handler instead of an unhandled rejection
+          let parsed: Awaited<ReturnType<typeof schema.safeParseAsync>>;
+          try {
+            parsed = await schema.safeParseAsync(args);
+          } catch (error: any) {
+            console.error(`Tool '${toolName}' failed: ${error.message}`);
+            await exitAfterFlush(1);
+            return; // unreachable but satisfies TS
+          }
           if (!parsed.success) {
-            console.error(`Input validation error: Invalid arguments for tool ${toolName}: ${parsed.error.message}`);
+            // Same formatter McpServer.validateToolInput uses, so the message matches MCP
+            console.error(`Input validation error: Invalid arguments for tool ${toolName}: ${getParseErrorMessage(parsed.error)}`);
             await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
