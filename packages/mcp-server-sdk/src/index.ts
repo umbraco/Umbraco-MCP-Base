@@ -83,6 +83,8 @@ export {
   configureDryRunMode,
   isDryRunEnabled,
   withDryRun,
+  getRegisteredOutputSchema,
+  DRY_RUN_INTERCEPTS,
 } from "./helpers/dry-run.js";
 
 // Server Reference (for tools that need elicitation)

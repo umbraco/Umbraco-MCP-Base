@@ -18,6 +18,7 @@ import { z } from "zod";
 import {
   shouldIncludeTool,
   createToolAnnotations,
+  getRegisteredOutputSchema,
   createCollectionConfigLoader,
   expandModesToCollections,
   checkUmbracoVersion,
@@ -1014,7 +1015,7 @@ export function registerCollectionTools<TUser>(
         {
           description: tool.description,
           inputSchema: tool.inputSchema,
-          outputSchema: tool.outputSchema,
+          outputSchema: getRegisteredOutputSchema(tool),
           annotations,
           ...(tool._meta ? { _meta: tool._meta } : {}),
         },
