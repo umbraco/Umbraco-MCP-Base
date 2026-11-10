@@ -18,12 +18,23 @@ const originalFetch = globalThis.fetch;
 let tokenRequests: number;
 let tokenResponder: () => Promise<Response>;
 let apiResponder: (authorization: string | undefined) => Response | Promise<Response>;
-let apiRequests: Array<{ method?: string; authorization?: string; body?: unknown }>;
+let apiRequests: Array<{ url: string; method?: string; authorization?: string; body?: unknown }>;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** A 401 from token validation: carries the bearer challenge. */
+function tokenRejected(): Response {
+  return new Response(JSON.stringify({}), {
+    status: 401,
+    headers: {
+      "Content-Type": "application/json",
+      "WWW-Authenticate": 'Bearer error="invalid_token", error_description="The token is no longer valid."',
+    },
   });
 }
 
@@ -61,7 +72,7 @@ beforeEach(() => {
       return tokenResponder();
     }
     const authorization = (init?.headers as Record<string, string> | undefined)?.Authorization;
-    apiRequests.push({ method: init?.method, authorization, body: init?.body });
+    apiRequests.push({ url, method: init?.method, authorization, body: init?.body });
     return apiResponder(authorization);
   });
   (globalThis as any).fetch = mockFetch;
@@ -135,12 +146,27 @@ describe("client-credentials token cache (#401)", () => {
     await jest.advanceTimersByTimeAsync(0);
 
     initializeUmbracoFetch({ baseUrl: BASE_URL, clientId: "cid2", clientSecret: "sec2" });
-    reply.resolve(json(401, { title: "Unauthorized" }));
+    reply.resolve(tokenRejected());
     const result = await first;
 
     expect(result.status).toBe(401);
     expect(apiRequests).toHaveLength(1);
     expect(tokenRequests).toBe(1);
+  });
+
+  it("3. a request waiting on its token during a re-init to another URL goes to the URL its token is for", async () => {
+    const late = deferred<Response>();
+    tokenResponder = () => late.promise;
+
+    const first = get();
+    await jest.advanceTimersByTimeAsync(0);
+    initializeUmbracoFetch({ baseUrl: "https://127.0.0.1:5201", clientId: "cid2", clientSecret: "sec2" });
+    late.resolve(tokenResponse("old"));
+    await first;
+
+    expect(apiRequests).toEqual([
+      expect.objectContaining({ url: `${BASE_URL}${API_URL}`, authorization: "Bearer old" }),
+    ]);
   });
 
   it.each([
@@ -167,7 +193,7 @@ describe("client-credentials token cache (#401)", () => {
   describe("5. retry once on 401 with a fresh token", () => {
     beforeEach(() => {
       apiResponder = (authorization) =>
-        authorization === "Bearer t1" ? json(401, {}) : json(200, { ok: true });
+        authorization === "Bearer t1" ? tokenRejected() : json(200, { ok: true });
     });
 
     it("returnFullResponse returns the 200 from the retry", async () => {
@@ -202,7 +228,7 @@ describe("client-credentials token cache (#401)", () => {
 
   describe("6. retry limits", () => {
     it("doesn't retry when the signal is aborted", async () => {
-      apiResponder = () => json(401, {});
+      apiResponder = () => tokenRejected();
       const controller = new AbortController();
       controller.abort();
 
@@ -213,7 +239,7 @@ describe("client-credentials token cache (#401)", () => {
     });
 
     it("retries only once: a second 401 is returned or thrown as before", async () => {
-      apiResponder = () => json(401, {});
+      apiResponder = () => tokenRejected();
 
       const result = await get();
       expect(result.status).toBe(401);
@@ -230,7 +256,7 @@ describe("client-credentials token cache (#401)", () => {
       expect(tokenRequests).toBe(1);
 
       apiResponder = (authorization) =>
-        authorization === "Bearer t1" ? json(401, {}) : json(200, { ok: true });
+        authorization === "Bearer t1" ? tokenRejected() : json(200, { ok: true });
       const results = await Promise.all(Array.from({ length: 8 }, () => get()));
       expect(results.map((r) => r.status)).toEqual(Array(8).fill(200));
       expect(tokenRequests).toBe(2);
@@ -238,7 +264,7 @@ describe("client-credentials token cache (#401)", () => {
 
     it("doesn't retry or drop the cache when the caller sent its own Authorization", async () => {
       apiResponder = (authorization) =>
-        authorization === "Bearer theirs" ? json(401, {}) : json(200, { ok: true });
+        authorization === "Bearer theirs" ? tokenRejected() : json(200, { ok: true });
 
       const result = await get({ returnFullResponse: true, headers: { Authorization: "Bearer theirs" } });
       expect(result.status).toBe(401);
@@ -248,6 +274,17 @@ describe("client-credentials token cache (#401)", () => {
       expect(tokenRequests).toBe(1);
       expect(apiRequests.at(-1)?.authorization).toBe("Bearer t1");
     });
+  });
+
+  it("6b. a 401 without a bearer challenge (the endpoint refused) is not retried and keeps the token", async () => {
+    apiResponder = () => json(401, { title: "Unauthorized" });
+
+    const result = await get();
+    expect(result.status).toBe(401);
+    await expect(get({})).rejects.toThrow("Request failed with status 401: Unauthorized");
+    expect(apiRequests).toHaveLength(2);
+    expect(apiRequests.map((r) => r.authorization)).toEqual(["Bearer t1", "Bearer t1"]);
+    expect(tokenRequests).toBe(1);
   });
 
   it("7. non-401 errors are not retried and keep the same error message", async () => {

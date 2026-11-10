@@ -338,6 +338,16 @@ function sentOurToken(headers: Record<string, string>, token: string): boolean {
 }
 
 /**
+ * True when a 401 is a bearer-token challenge from the token validation
+ * middleware (`WWW-Authenticate: Bearer …`), i.e. the token itself was refused.
+ * An endpoint that returns 401 from its own code (Umbraco does this for some
+ * permission checks) sends no challenge, and a fresh token wouldn't help.
+ */
+function isBearerChallenge(resp: Response): boolean {
+  return /(?:^|,)\s*Bearer\b/i.test(resp.headers.get("www-authenticate") ?? "");
+}
+
+/**
  * Makes a fetch request to the Umbraco API.
  * @internal
  */
@@ -351,10 +361,13 @@ async function doFetch<T>(
     );
   }
 
+  // Read the config before waiting for the token: a re-init meanwhile would
+  // otherwise send the old config's token to the new base URL.
+  const auth = authConfig;
   const generation = tokenGeneration;
   const token = await getToken();
   const queryString = serializeParams(config.params);
-  const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
+  const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
   // Detect FormData payloads. Two shapes are supported:
   //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
@@ -411,13 +424,15 @@ async function doFetch<T>(
 
   let resp = await fetch(fullUrl, fetchOptions);
 
-  // A 401 is rejected at authentication, before the action runs, so resending
-  // once with a fresh token is safe for every method. Done before the
+  // Resend once with a fresh token when the token itself was refused. Only a
+  // bearer challenge counts: it comes from token validation, before the
+  // endpoint runs, so resending is safe for every method. Done before the
   // returnFullResponse branch so tool calls (which return the 401) get it too.
   // Skipped when the caller supplied its own Authorization header, or when the
   // client was re-initialised meanwhile (the new token belongs to another config).
   if (
     resp.status === 401
+    && isBearerChallenge(resp)
     && !options?.signal?.aborted
     && generation === tokenGeneration
     && sentOurToken(headers, token)
