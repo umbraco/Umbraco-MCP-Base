@@ -13,10 +13,11 @@ import { ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResult } from "./tool-result.js";
 import { resolveToolCallParams } from "./tool-call-params.js";
+import { readBooleanEnv } from "./env.js";
 
 /**
- * Module-level dry-run toggle. `null` until configured, in which case
- * UMBRACO_DRY_RUN is read directly (same as config.ts: only "true" enables).
+ * Module-level dry-run toggle. `null` until configured; the first
+ * isDryRunEnabled() call then reads UMBRACO_DRY_RUN once and keeps it.
  */
 let dryRunEnabled: boolean | null = null;
 
@@ -30,16 +31,21 @@ export function configureDryRunMode(enabled: boolean): void {
   dryRunEnabled = enabled;
 }
 
+/** Clears the configured mode so UMBRACO_DRY_RUN is read again. @internal */
+export function resetDryRunMode(): void {
+  dryRunEnabled = null;
+}
+
 /**
- * Returns whether dry-run mode is currently enabled. Falls back to the
- * UMBRACO_DRY_RUN env var for servers that never call getServerConfig().
+ * Returns whether dry-run mode is currently enabled. Servers that never call
+ * getServerConfig() fall back to UMBRACO_DRY_RUN ("true" or "1"), read on first
+ * use so mutation tools don't switch mode mid-session if the env changes.
  */
 export function isDryRunEnabled(): boolean {
-  if (dryRunEnabled !== null) {
-    return dryRunEnabled;
+  if (dryRunEnabled === null) {
+    dryRunEnabled = readBooleanEnv("UMBRACO_DRY_RUN");
   }
-  const envValue = typeof process !== "undefined" ? process.env?.UMBRACO_DRY_RUN : undefined;
-  return envValue?.toLowerCase() === "true";
+  return dryRunEnabled;
 }
 
 /**

@@ -19,6 +19,8 @@
  * @see https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1624
  */
 
+import { readBooleanEnv } from "./env.js";
+
 /**
  * Module-level flag for structured-only mode.
  * Set via configureToolResultMode() during server startup, or falls back to
@@ -37,19 +39,23 @@ export function configureToolResultMode(structuredOnly: boolean): void {
   _structuredOnly = structuredOnly;
 }
 
+/** Clears the configured mode so the env var fallback applies again. @internal */
+export function resetToolResultMode(): void {
+  _structuredOnly = null;
+}
+
 /**
  * Returns true when structured-only mode is enabled.
  * Checks the configured value first, then falls back to env var for
  * environments where getServerConfig() is not used (e.g. Workers).
  */
-function isStructuredOnly(): boolean {
+export function isStructuredOnly(): boolean {
   if (_structuredOnly !== null) {
     return _structuredOnly;
   }
   // Fallback: read env var directly (for cases where configureToolResultMode
   // hasn't been called, e.g. hosted Workers or tests)
-  const envValue = typeof process !== "undefined" ? process.env?.DISABLE_OUTPUT_COMPATIBILITY_MODE : undefined;
-  return envValue === "true" || envValue === "1";
+  return readBooleanEnv("DISABLE_OUTPUT_COMPATIBILITY_MODE");
 }
 
 type ToolResult = {

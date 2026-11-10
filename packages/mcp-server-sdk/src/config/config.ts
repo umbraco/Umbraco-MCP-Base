@@ -1,8 +1,8 @@
 import { config as loadEnv } from "dotenv";
 import { resolve } from "path";
-import { configureToolResultMode } from "../helpers/tool-result.js";
-import { configureDryRunMode } from "../helpers/dry-run.js";
-import { assertTlsNotDisabledForRemote } from "../http/umbraco-fetch-client.js";
+import { configureToolResultMode, isStructuredOnly, resetToolResultMode } from "../helpers/tool-result.js";
+import { configureDryRunMode, isDryRunEnabled, resetDryRunMode } from "../helpers/dry-run.js";
+import { assertTlsNotDisabledForRemote } from "../helpers/url.js";
 
 export interface UmbracoAuthConfig {
   clientId: string;
@@ -340,6 +340,24 @@ export interface GetServerConfigResult {
  */
 let bootstrapped = false;
 
+/**
+ * Set once a server-starting (non-introspection) call has passed required-field
+ * validation. Until then missing config ends the process with a clear message;
+ * after it, a call (e.g. from a tool handler) throws so it can't end the server.
+ */
+let requiredConfigValidated = false;
+
+/**
+ * Forgets the first getServerConfig call, so the next one reloads .env and
+ * re-applies output/dry-run mode. For tests and config-cache resets.
+ */
+export function resetServerConfig(): void {
+  bootstrapped = false;
+  requiredConfigValidated = false;
+  resetToolResultMode();
+  resetDryRunMode();
+}
+
 export async function getServerConfig(
   isStdioMode: boolean,
   options: GetServerConfigOptions = {}
@@ -436,14 +454,17 @@ export async function getServerConfig(
           ? `(via CLI argument --${field.cliFlag} or .env file)`
           : `(via environment variable or .env file)`;
         const message = `${field.envVar} is required ${hint}`;
-        if (bootstrapped) {
-          // A later call (e.g. from a tool handler) must not end the server.
+        if (requiredConfigValidated) {
           throw new Error(message);
         }
         console.error(message);
         process.exit(1);
       }
     }
+  }
+
+  if (!isIntrospectionOnly) {
+    requiredConfigValidated = true;
   }
 
   // .env may have added NODE_TLS_REJECT_UNAUTHORIZED after startup checks ran.
@@ -473,6 +494,10 @@ export async function getServerConfig(
     configureDryRunMode(config.dryRun === true);
 
     bootstrapped = true;
+  } else {
+    // Modes are applied once; report the ones actually in effect, not this call's flags.
+    config.disableOutputCompatibilityMode = isStructuredOnly() || undefined;
+    config.dryRun = isDryRunEnabled() || undefined;
   }
 
   return {

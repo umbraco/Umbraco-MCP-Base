@@ -13,6 +13,12 @@ async function getDryRunModule() {
 }
 
 describe("configureDryRunMode", () => {
+  const original = process.env.UMBRACO_DRY_RUN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UMBRACO_DRY_RUN;
+    else process.env.UMBRACO_DRY_RUN = original;
+  });
+
   it("should default to disabled", async () => {
     delete process.env.UMBRACO_DRY_RUN;
     const { isDryRunEnabled } = await getDryRunModule();
@@ -46,14 +52,35 @@ describe("isDryRunEnabled env fallback", () => {
     expect(isDryRunEnabled()).toBe(true);
   });
 
-  it("only enables for 'true' (case-insensitive), read at call time", async () => {
+  it.each(["true", "TRUE", "1"])("enables for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
     const { isDryRunEnabled } = await getDryRunModule();
-    for (const value of ["false", "1", ""]) {
-      process.env.UMBRACO_DRY_RUN = value;
-      expect(isDryRunEnabled()).toBe(false);
-    }
-    process.env.UMBRACO_DRY_RUN = "TRUE";
     expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it.each(["false", "0", ""])("stays disabled for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(false);
+  });
+
+  it("reads the env var once, so a later change doesn't flip the mode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it("re-reads the env var after resetDryRunMode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled, resetDryRunMode } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    resetDryRunMode();
+    expect(isDryRunEnabled()).toBe(false);
   });
 
   it("intercepts mutation tools through withDryRun when only the env var is set", async () => {

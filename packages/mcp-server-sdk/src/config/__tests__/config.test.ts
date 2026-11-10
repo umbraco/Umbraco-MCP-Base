@@ -604,7 +604,7 @@ describe("getServerConfig", () => {
 
   describe("process-wide side effects", () => {
     let dir: string;
-    const originalCwd = process.cwd();
+    let cwdSpy: ReturnType<typeof jest.spyOn> | undefined;
 
     beforeEach(() => {
       dir = mkdtempSync(join(tmpdir(), "mcp-config-"));
@@ -612,9 +612,15 @@ describe("getServerConfig", () => {
     });
 
     afterEach(() => {
-      process.chdir(originalCwd);
+      cwdSpy?.mockRestore();
+      cwdSpy = undefined;
       rmSync(dir, { recursive: true, force: true });
     });
+
+    /** Points ./.env resolution at the temp dir without process.chdir (unsupported in worker threads). */
+    function useDirAsCwd() {
+      cwdSpy = jest.spyOn(process, "cwd").mockReturnValue(dir);
+    }
 
     function writeEnv(name: string, content: string) {
       const file = join(dir, name);
@@ -629,7 +635,7 @@ describe("getServerConfig", () => {
 
     it("process env beats the default ./.env", async () => {
       writeEnv(".env", "UMBRACO_BASE_URL=http://localhost:1111\nUMBRACO_CLIENT_ID=file-id\nUMBRACO_CLIENT_SECRET=file-secret\n");
-      process.chdir(dir);
+      useDirAsCwd();
       process.env.UMBRACO_BASE_URL = "http://localhost:2222";
       process.argv = ["node", "index.js"];
 
@@ -664,6 +670,24 @@ describe("getServerConfig", () => {
 
       expect(second.config.auth.baseUrl).toBe("http://localhost:3333");
       expect(isDryRunEnabled()).toBe(false);
+      // The returned config reports the mode in effect, not this call's flag
+      expect(second.config.dryRun).toBeUndefined();
+    });
+
+    it("resetServerConfig lets the next call reload .env and re-apply dry-run mode", async () => {
+      const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
+      process.argv = ["node", "index.js", "--env", file];
+      const { getServerConfig, resetServerConfig } = await loadModule();
+      const { isDryRunEnabled } = await import("../../helpers/dry-run.js");
+      await getServerConfig(true);
+
+      writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:4444\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\nUMBRACO_DRY_RUN=true\n");
+      resetServerConfig();
+      const second = await getServerConfig(true);
+
+      expect(second.config.auth.baseUrl).toBe("http://localhost:4444");
+      expect(second.config.dryRun).toBe(true);
+      expect(isDryRunEnabled()).toBe(true);
     });
 
     it("the first call applies dry-run mode from the resolved config", async () => {
@@ -680,7 +704,7 @@ describe("getServerConfig", () => {
     it("an explicit --env file beats the default ./.env", async () => {
       writeEnv(".env", "UMBRACO_BASE_URL=http://localhost:1111\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
       const file = writeEnv("custom.env", "UMBRACO_BASE_URL=http://localhost:3333\nUMBRACO_CLIENT_ID=a\nUMBRACO_CLIENT_SECRET=b\n");
-      process.chdir(dir);
+      useDirAsCwd();
       process.argv = ["node", "index.js", "--env", file];
 
       const { config } = await getServerConfigFresh(true);
@@ -698,6 +722,17 @@ describe("getServerConfig", () => {
 
       await expect(getServerConfig(true)).rejects.toThrow("UMBRACO_CLIENT_SECRET is required");
       expect(exitCode).toBeUndefined();
+    });
+
+    it("missing config after an introspection-only first call still exits with a message", async () => {
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE, "--list-tools"];
+      const { getServerConfig } = await loadModule();
+      await getServerConfig(true);
+
+      process.argv = ["node", "index.js", "--env", NON_EXISTENT_ENV_FILE];
+      await expect(getServerConfig(true)).rejects.toThrow("process.exit(1)");
+      expect(exitCode).toBe(1);
+      expect(consoleErrors.join("\n")).toContain("UMBRACO_CLIENT_ID is required");
     });
 
     it("a second call returns its own additionalFields values", async () => {
