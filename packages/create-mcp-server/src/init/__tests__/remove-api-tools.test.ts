@@ -64,6 +64,7 @@ describe("removeApiTools", () => {
     removeApiTools(PROJECT_DIR);
     const content = readIndexTs();
 
+    expect(content).not.toContain("runStartupVersionCheck");
     expect(content).not.toContain("checkUmbracoVersion");
     expect(content).not.toContain("configureVersionCheckHook");
     expect(content).not.toContain("UmbracoManagementClient");

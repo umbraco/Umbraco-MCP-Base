@@ -21,6 +21,8 @@ import {
   createCollectionConfigLoader,
   expandModesToCollections,
   checkUmbracoVersion,
+  resolveExpectedUmbracoMajor,
+  withVersionCheckDeadline,
   VersionCheckService,
   registerToolCollection,
   setTelemetryAdapter,
@@ -152,7 +154,9 @@ export interface CreateServerOptions {
    * hosted-worker counterpart of the stdio entry point's `expectedUmbracoMajor`
    * (see the SDK's `checkUmbracoVersion`). Pass the generated
    * `UMBRACO_TARGET_MAJOR` constant here; `env.UMBRACO_EXPECTED_MAJOR` overrides
-   * it per-deployment at request time, matching the stdio override precedence.
+   * it per-deployment at request time, matching the stdio override precedence
+   * (a blank value falls back to this one; see the SDK's
+   * `resolveExpectedUmbracoMajor`).
    *
    * When set, `createPerRequestServer` checks the connected Umbraco's version
    * on every request and folds a mismatch warning into that request's
@@ -462,7 +466,7 @@ export async function createPerRequestServer(
       [TelemetryAttributes.SERVER_NAME]: options.name,
       [TelemetryAttributes.SERVER_VERSION]: options.version,
     };
-    const expectedMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+    const expectedMajor = resolveExpectedUmbracoMajor(env.UMBRACO_EXPECTED_MAJOR, options.expectedUmbracoMajor);
     if (expectedMajor) {
       staticAttributes[TelemetryAttributes.UMBRACO_MAJOR] = expectedMajor;
     }
@@ -606,18 +610,28 @@ async function initPerRequestServer(
   // tool calls. Folding the message into this request's own `instructions`
   // gives the same "the model/user sees the warning" outcome without that
   // cross-request leakage — see umbraco/Umbraco-MCP-Base#224.
-  const expectedUmbracoMajor = env.UMBRACO_EXPECTED_MAJOR ?? options.expectedUmbracoMajor;
+  //
+  // A blank `UMBRACO_EXPECTED_MAJOR` falls back to the operator's value rather
+  // than disabling the check — the same rule the stdio entry points use.
+  const expectedUmbracoMajor = resolveExpectedUmbracoMajor(env.UMBRACO_EXPECTED_MAJOR, options.expectedUmbracoMajor);
 
   // One `/server/information` request per server creation, shared by the
   // version check and the version capture below, so the site is never asked
   // twice. Memoised here, in this function's scope — never at module level,
   // which every session (and site) in the isolate shares.
+  //
+  // Bounded by the SDK's default version-check deadline, so a site that never
+  // answers can't hold up server creation. A timeout rejects like any other
+  // failure: the check reports it as "Unable to verify" in `instructions`
+  // (never a block, see #224) and the version capture gets `undefined`.
   let serverInformationRequest: Promise<{ version: string }> | undefined;
   function requestServerInformation(): Promise<{ version: string }> {
-    serverInformationRequest ??= client({
-      url: SERVER_INFORMATION_PATH,
-      method: "GET",
-    }).then((info) => ({ version: (info as { version: string }).version }));
+    serverInformationRequest ??= withVersionCheckDeadline((signal) =>
+      client({
+        url: SERVER_INFORMATION_PATH,
+        method: "GET",
+      }, { signal })
+    ).then((info) => ({ version: (info as { version: string }).version }));
     return serverInformationRequest;
   }
 

@@ -467,6 +467,84 @@ package version has no relationship to the Umbraco major it targets (a scaffolde
 starts at `1.0.0`), so comparing against it falsely flagged every new project as incompatible
 ([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220)).
 
+### Startup guard: `runStartupVersionCheck`
+
+Stdio entry points should use `runStartupVersionCheck`, which runs the whole guard in one call
+and never throws:
+
+```typescript
+import {
+  runStartupVersionCheck,
+  UmbracoManagementClient,
+  CAPTURE_RAW_HTTP_RESPONSE,
+  SERVER_INFORMATION_PATH,
+  type HttpResponse,
+} from '@umbraco-cms/mcp-server-sdk';
+import { UMBRACO_TARGET_MAJOR } from './config/umbraco-target.generated.js';
+
+const versionCheckMessage = await runStartupVersionCheck({
+  // UMBRACO_EXPECTED_MAJOR / --umbraco-expected-major from your config loader.
+  expectedUmbracoMajorOverride: serverConfig.custom.expectedUmbracoMajor,
+  generatedUmbracoMajor: UMBRACO_TARGET_MAJOR,
+  mcpVersion: packageJson.version, // diagnostics only — not compared
+  client: {
+    getServerInformation: async ({ signal } = {}) => {
+      const response = (await UmbracoManagementClient<{ version: string }>(
+        { url: SERVER_INFORMATION_PATH, method: 'GET' },
+        { ...CAPTURE_RAW_HTTP_RESPONSE, signal },
+      )) as unknown as HttpResponse<{ version: string }>;
+      return { version: response.data.version };
+    },
+  },
+  // timeoutMs: 5000, // default
+});
+
+const server = new McpServer(
+  { name, version },
+  versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
+);
+```
+
+It:
+
+- resolves the expected major with `resolveExpectedUmbracoMajor(override, generated)` — a
+  non-blank (trimmed) override wins; `undefined`, `""` or whitespace falls back to the generated
+  major. mcp-hosted uses the same rule for `env.UMBRACO_EXPECTED_MAJOR`;
+- bounds the `server/information` lookup with a deadline (`timeoutMs`, default
+  `DEFAULT_VERSION_CHECK_TIMEOUT_MS` = 5000). It passes an `AbortSignal` to
+  `getServerInformation` — `UmbracoManagementClient` and `createUmbracoFetchClient` also apply
+  it to the token request — and enforces the deadline itself in case a client ignores the
+  signal. A timeout is handled like an unreachable CMS: a warning that says the version was not
+  checked and tools are not blocked;
+- calls `checkUmbracoVersion`, then `configureVersionCheckHook()`, so a mismatch blocks the first
+  decorated tool call once and a retry succeeds;
+- returns `getVersionCheckMessage()` for the server's `instructions`, or `null`;
+- never throws. If the guard itself fails, it logs to stderr and returns a message saying the
+  version was not checked, so the failure reaches `instructions` instead of looking like a pass.
+
+**Chained children: `UMBRACO_MCP_PARENT_CHECKED_MAJOR`.** A **parent** MCP server that runs its
+own guard and chains this server as a child process sets this in the child's spawn env to the
+major it checked against, using `chainedVersionCheckEnv(major)`:
+
+```typescript
+env: {
+  ...chainedVersionCheckEnv(resolveExpectedUmbracoMajor(override, UMBRACO_TARGET_MAJOR)),
+},
+```
+
+The child skips its own check (no request, no block, no message) **only when its resolved
+expected major is the same major**, so a mismatch isn't reported twice. A child built for a
+different major runs its own check, because the parent's check says nothing about it. Children
+inherit the env, so the value can reach grandchildren or be set by hand; neither turns the
+guard off for a server that targets a different major. Only set it for children that connect to
+the same Umbraco instance as the parent.
+
+Every message `checkUmbracoVersion` stores passes instance-supplied text (the reported version,
+a fetch error's message) through a sanitiser — control characters replaced, whitespace
+collapsed, length capped — since it is meant for `instructions`.
+
+### Lower-level building blocks
+
 `checkUmbracoVersion` computes the result and stores it in a singleton — on its own it does
 nothing else observable besides logging to `stderr`. Two more calls are required to make the
 warning actually reach the user: `configureVersionCheckHook()` bridges the singleton to
@@ -478,6 +556,7 @@ model/user sees it, not just the server log.
 ```typescript
 import {
   checkUmbracoVersion,
+  resolveExpectedUmbracoMajor,
   configureVersionCheckHook,
   getVersionCheckMessage,
   clearVersionCheckMessage,
@@ -491,7 +570,7 @@ import { UMBRACO_TARGET_MAJOR } from './config/umbraco-target.generated.js';
 await checkUmbracoVersion({
   mcpVersion: '1.0.0', // diagnostics only — not compared
   // Required. The generated target, with an optional runtime override.
-  expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
+  expectedUmbracoMajor: resolveExpectedUmbracoMajor(process.env.UMBRACO_EXPECTED_MAJOR, UMBRACO_TARGET_MAJOR),
   client: {
     getServerInformation: async () => {
       const response = await api.getServerInformation();
@@ -636,22 +715,21 @@ Notes:
 
 ### Wiring in scaffolded projects
 
-`template/src/index.ts` shows the full wiring: it passes
-`serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` into `checkUmbracoVersion`,
-where `UMBRACO_TARGET_MAJOR` is the generated constant above (re-exported from
+`template/src/index.ts` shows the full wiring: it calls `runStartupVersionCheck` with
+`serverConfig.custom.expectedUmbracoMajor` as the override and `UMBRACO_TARGET_MAJOR` as the
+generated major, where `UMBRACO_TARGET_MAJOR` is the generated constant above (re-exported from
 `template/src/config/index.ts`). `template/src/config/server-config.ts` exposes the override as
 a custom config field so users can retarget without editing code:
 
 | Env var | CLI flag | Effect |
 |---------|----------|--------|
-| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset (default) = use `UMBRACO_TARGET_MAJOR`. |
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset or blank (default) = use `UMBRACO_TARGET_MAJOR`. |
+| `UMBRACO_MCP_PARENT_CHECKED_MAJOR` | — | Set by a parent MCP server (via `chainedVersionCheckEnv`) in a chained child's spawn env to the major it already checked. The child skips its startup version check only if it targets that same major. Not a general opt-out. |
 
-The template then calls `configureVersionCheckHook()` unconditionally — harmless when the
-versions match, since nothing is blocked in that case.
-
-`checkUmbracoVersion` degrades to a no-op (no request, no message, nothing blocked) if the
-resolved major is blank — a runtime guard against a misconfigured `UMBRACO_EXPECTED_MAJOR=""`,
-not a supported way to disable the check.
+`checkUmbracoVersion` still degrades to a no-op (no request, no message, nothing blocked) if the
+major it is given is blank — a runtime guard for direct callers, not a supported way to disable
+the check. Through `runStartupVersionCheck` a blank override never gets that far: it falls back
+to the generated major.
 
 ## Eval Testing
 

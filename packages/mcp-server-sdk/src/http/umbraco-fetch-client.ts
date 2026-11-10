@@ -173,17 +173,21 @@ export const requestClientCredentialsToken = async (config: {
 
 /**
  * Fetches a new access token from Umbraco.
+ *
+ * @param signal - The calling request's abort signal, so a caller's deadline
+ *   also bounds the token exchange that precedes its request.
  */
-const fetchAccessToken = async (): Promise<string> => {
+const fetchAccessToken = async (signal?: AbortSignal): Promise<string> => {
   if (!authConfig) {
     throw new Error(
       "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
     );
   }
 
-  const { accessToken: token, expiresIn } = await requestClientCredentialsToken(
-    authConfig
-  );
+  const { accessToken: token, expiresIn } = await requestClientCredentialsToken({
+    ...authConfig,
+    signal,
+  });
 
   accessToken = token;
   tokenExpiry = Date.now() + expiresIn * 1000;
@@ -192,10 +196,12 @@ const fetchAccessToken = async (): Promise<string> => {
 
 /**
  * Gets a valid access token, refreshing if expired.
+ *
+ * @param signal - Forwarded to the token request (see `fetchAccessToken`).
  */
-const getToken = async (): Promise<string> => {
+const getToken = async (signal?: AbortSignal): Promise<string> => {
   if (!accessToken || (tokenExpiry && Date.now() >= tokenExpiry)) {
-    await fetchAccessToken();
+    await fetchAccessToken(signal);
   }
   return accessToken!;
 };
@@ -308,7 +314,10 @@ async function doFetch<T>(
     );
   }
 
-  const token = await getToken();
+  // Pass the request's signal to the token exchange too: without it a CMS that
+  // accepts the connection but never answers the token request would hang the
+  // caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
+  const token = await getToken(options?.signal);
   const queryString = serializeParams(config.params);
   const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
 
@@ -513,7 +522,7 @@ export function createUmbracoFetchClient(
   let instanceAccessToken: string | null = null;
   let instanceTokenExpiry: number | null = null;
 
-  const fetchToken = async (): Promise<string> => {
+  const fetchToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAuthConfig) {
       throw new Error("Client not initialized. Call initialize() first.");
     }
@@ -521,6 +530,7 @@ export function createUmbracoFetchClient(
     const { accessToken, expiresIn } = await requestClientCredentialsToken({
       ...instanceAuthConfig,
       tokenPath,
+      signal,
     });
 
     instanceAccessToken = accessToken;
@@ -528,9 +538,9 @@ export function createUmbracoFetchClient(
     return accessToken;
   };
 
-  const getInstanceToken = async (): Promise<string> => {
+  const getInstanceToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAccessToken || (instanceTokenExpiry && Date.now() >= instanceTokenExpiry)) {
-      await fetchToken();
+      await fetchToken(signal);
     }
     return instanceAccessToken!;
   };
@@ -543,7 +553,8 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
-    const token = await getInstanceToken();
+    // The request's signal bounds the token exchange as well as the request.
+    const token = await getInstanceToken(opts?.signal);
     const queryString = serializeParams(config.params);
     const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
 
@@ -566,6 +577,7 @@ export function createUmbracoFetchClient(
     const fetchOpts: RequestInit = {
       method: config.method,
       headers,
+      signal: opts?.signal,
     };
 
     if (config.data !== undefined) {

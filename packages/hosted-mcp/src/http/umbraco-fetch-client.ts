@@ -29,6 +29,8 @@ export interface FetchClientOptions {
   returnFullResponse?: boolean;
   /** Custom status validation (defaults to throwing on non-2xx) */
   validateStatus?: ((status: number) => boolean) | null;
+  /** Abort signal for request cancellation (forwarded to `fetch`, retry included) */
+  signal?: AbortSignal;
 }
 
 /**
@@ -332,6 +334,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     const fetchOptions: RequestInit = {
       method: requestConfig.method,
       headers,
+      signal: options?.signal,
     };
 
     if (requestConfig.data !== undefined) {
