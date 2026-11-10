@@ -47,6 +47,10 @@
  *      (configureVersionCheckHook → withPreExecutionCheck), with a deliberate
  *      retry then succeeding
  *   4. explicit override + match → silence, tools work
+ *   5. a parent already checked the same major (`UMBRACO_MCP_PARENT_CHECKED_MAJOR`)
+ *      → this chained child skips its check: no request, no warning, no block
+ *   6. a parent checked a different major → the child still checks, warns and
+ *      blocks, because the parent's check says nothing about the child's target
  */
 
 import { createCliTestClient, type CliTestClient } from "../helpers/cli-client.js";
@@ -191,6 +195,68 @@ describe("Version Check (CLI)", () => {
 
       const result = await client.callTool("list-examples", {});
       expect(result.isError).toBeFalsy();
+    });
+  });
+
+  // A parent MCP server that already ran the guard sets this in a chained
+  // child's spawn env (via `chainedVersionCheckEnv`). The mock reports 16 and
+  // the child targets 17, so the only reason it stays silent is the skip.
+  describe("parent already checked the same major", () => {
+    let mockServer: MockUmbracoServer;
+    let client: CliTestClient;
+
+    beforeAll(async () => {
+      const mock = await startMockUmbracoServer("16.0.0");
+      mockServer = mock;
+      client = await createCliTestClient({
+        captureStderr: true,
+        env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_MCP_PARENT_CHECKED_MAJOR: "17" },
+      });
+    });
+
+    afterAll(async () => {
+      await client?.close();
+      await mockServer.close();
+    });
+
+    it("skips its own check: no request, no warning, first tool call succeeds", async () => {
+      expect(mockServer.serverInformationRequests()).toBe(0);
+      expect(client.getStderr()).not.toContain("Version Mismatch");
+      expect(client.getInstructions() ?? "").not.toContain("Version Mismatch");
+
+      const result = await client.callTool("list-examples", {});
+      expect(result.isError).toBeFalsy();
+    });
+  });
+
+  // The parent checked 16 (and the instance is 16, so it passed), but this
+  // child targets 17: skipping here would hide a real mismatch.
+  describe("parent checked a different major", () => {
+    let mockServer: MockUmbracoServer;
+    let client: CliTestClient;
+
+    beforeAll(async () => {
+      const mock = await startMockUmbracoServer("16.0.0");
+      mockServer = mock;
+      client = await createCliTestClient({
+        captureStderr: true,
+        env: { UMBRACO_BASE_URL: mock.baseUrl, UMBRACO_MCP_PARENT_CHECKED_MAJOR: "16" },
+      });
+    });
+
+    afterAll(async () => {
+      await client?.close();
+      await mockServer.close();
+    });
+
+    it("still checks, warns and blocks the first tool call", async () => {
+      expect(mockServer.serverInformationRequests()).toBe(1);
+      expect(client.getStderr()).toContain("⚠️ Version Mismatch");
+      expect(client.getInstructions()).toContain("⚠️ Version Mismatch");
+
+      const blocked = await client.callTool("list-examples", {});
+      expect(blocked.isError).toBe(true);
+      expect(JSON.stringify(blocked.content)).toContain("⚠️ Version Mismatch");
     });
   });
 });
