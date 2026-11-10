@@ -90,10 +90,12 @@ export function removeApiTools(projectDir: string): number {
     // Remove the version check block. It calls the Umbraco Management API via
     // the fetch client removed above and is gated on `clientId`, so leaving it
     // behind would reference deleted variables and fail to compile.
-    // `getVersionCheckMessage()` and the `versionCheckMessage` const are kept
-    // deliberately: they stay valid (always null here) so the McpServer
-    // construction needs no rewriting, and still work if a container-mode
+    // It is replaced with `const versionCheckMessage = getVersionCheckMessage();`
+    // deliberately: that stays valid (always null here) so the McpServer
+    // construction needs no rewriting, and still works if a container-mode
     // project later wires up its own check.
+    content = content.replace(/(\s*)runStartupVersionCheck,/g, "$1getVersionCheckMessage,");
+    // Older templates imported the hand-wired pieces instead.
     content = content.replace(/\s*checkUmbracoVersion,/g, "");
     content = content.replace(/\s*configureVersionCheckHook,/g, "");
     content = content.replace(/\s*UmbracoManagementClient,/g, "");
@@ -103,6 +105,12 @@ export function removeApiTools(projectDir: string): number {
     // removed below, so drop the import too rather than leaving it unused.
     // (Container mode also deletes orval.config.ts, so nothing regenerates it.)
     content = content.replace(/\s*UMBRACO_TARGET_MAJOR,/g, "");
+    content = content.replace(
+      /\/\/ ={20,}\n\/\/ Version Check\n\/\/ ={20,}\n[\s\S]*?\n {2}: null;\n/m,
+      "const versionCheckMessage = getVersionCheckMessage();\n",
+    );
+    // Older templates: a hand-wired `if (clientId) { ... }` block followed by
+    // the `getVersionCheckMessage()` const.
     content = content.replace(
       /\/\/ ={20,}\n\/\/ Version Check\n\/\/ ={20,}\n[\s\S]*?\n\}\n\n(?=const versionCheckMessage)/m,
       "",

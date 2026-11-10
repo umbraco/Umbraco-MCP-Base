@@ -94,6 +94,7 @@ export { useDraft202012ToolSchemas } from "./strict-json-schema-tools.js";
 // Elicitation helpers
 export {
   confirmAction,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./elicitation.js";

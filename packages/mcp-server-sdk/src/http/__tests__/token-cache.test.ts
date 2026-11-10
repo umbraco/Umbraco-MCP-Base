@@ -228,6 +228,8 @@ describe("client-credentials token cache (#401)", () => {
 
   describe("6. retry limits", () => {
     it("doesn't retry when the signal is aborted", async () => {
+      await get(); // cache a token, so the aborted call reaches the API request
+      apiRequests = [];
       apiResponder = () => tokenRejected();
       const controller = new AbortController();
       controller.abort();

@@ -100,6 +100,7 @@ export { toolCallExtraIndex } from "./helpers/tool-call-params.js";
 // Elicitation Helpers
 export {
   confirmAction,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
@@ -309,6 +310,16 @@ export {
   type VersionCheckClient,
   type CheckVersionOptions,
 } from "./version-check/check-umbraco-version.js";
+
+export {
+  runStartupVersionCheck,
+  resolveExpectedUmbracoMajor,
+  withVersionCheckDeadline,
+  DEFAULT_VERSION_CHECK_TIMEOUT_MS,
+  PARENT_CHECKED_MAJOR_ENV,
+  chainedVersionCheckEnv,
+  type StartupVersionCheckOptions,
+} from "./version-check/startup-version-check.js";
 
 // ============================================================================
 // Server Configuration

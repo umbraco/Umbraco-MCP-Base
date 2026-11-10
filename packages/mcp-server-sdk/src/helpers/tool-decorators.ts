@@ -11,6 +11,7 @@ import { ToolDefinition, ToolAnnotations } from "../types/tool-definition.js";
 import { createToolResultError } from "./tool-result.js";
 import { UmbracoApiError } from "./api-call-helpers.js";
 import { ToolValidationError } from "./tool-validation-error.js";
+import { ConfirmationTimeoutError } from "./elicitation.js";
 import { withInputSanitization } from "./input-sanitizer.js";
 import { withDryRun } from "./dry-run.js";
 import { withCursorPagination, type CursorPaginatedArgs } from "./cursor-pagination.js";
@@ -82,6 +83,15 @@ export function withErrorHandling<Args extends undefined | ZodRawShape, OutputAr
         // UmbracoApiError - thrown by helpers with ProblemDetails
         else if (error instanceof UmbracoApiError) {
           errorResult = createToolResultError(error.problemDetails);
+        }
+        // Unanswered confirmation prompt - not a server fault, nothing was changed
+        else if (error instanceof ConfirmationTimeoutError) {
+          errorResult = createToolResultError({
+            type: "Error",
+            title: error.name,
+            detail: error.message,
+            status: 408
+          });
         }
         // HTTP error with response data attached (network succeeded but got error response)
         else if (error instanceof Error && (error as any).response?.data) {

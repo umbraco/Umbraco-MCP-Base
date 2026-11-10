@@ -160,3 +160,27 @@ describe("withErrorHandling with a status-less error body", () => {
     expect(text).not.toContain("undefined");
   });
 });
+
+describe("withErrorHandling with an unanswered confirmation", () => {
+  it("returns a 408 error result saying nothing was changed", async () => {
+    const { withErrorHandling } = await import("../tool-decorators.js");
+    const { ConfirmationTimeoutError } = await import("../elicitation.js");
+
+    const tool = {
+      name: "t",
+      description: "",
+      handler: async () => {
+        throw new ConfirmationTimeoutError();
+      },
+    } as any;
+
+    const result = await (withErrorHandling(tool).handler as (...args: any[]) => any)({}, {});
+
+    expect(result.isError).toBe(true);
+    const problem = JSON.parse(result.content[0].text);
+    expect(problem.status).toBe(408);
+    expect(problem.detail).toBe(
+      "No response to the confirmation prompt, so nothing was changed. Ask the user and call the tool again to retry.",
+    );
+  });
+});

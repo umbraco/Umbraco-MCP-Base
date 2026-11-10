@@ -89,7 +89,13 @@ let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
 // Shared by concurrent callers so a cold start or expiry sends one token request.
-let inFlightToken: Promise<string> | null = null;
+interface TokenFlight {
+  promise: Promise<string>;
+  /** Aborts the shared request; fired once every waiting caller has given up. */
+  controller: AbortController;
+  waiters: number;
+}
+let inFlightToken: TokenFlight | null = null;
 // Bumped by clearUmbracoFetchToken, so a token request started before a
 // re-init or clear doesn't store its late response.
 let tokenGeneration = 0;
@@ -184,8 +190,10 @@ export const requestClientCredentialsToken = async (config: {
  *
  * The stored expiry is brought forward by min(30 s, 10% of expires_in), so a
  * token isn't sent just before it expires.
+ *
+ * @param signal - Aborts the token exchange (see `getToken` for whose signal).
  */
-const fetchAccessToken = async (): Promise<string> => {
+const fetchAccessToken = async (signal?: AbortSignal): Promise<string> => {
   if (!authConfig) {
     throw new Error(
       "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
@@ -193,9 +201,10 @@ const fetchAccessToken = async (): Promise<string> => {
   }
 
   const generation = tokenGeneration;
-  const { accessToken: token, expiresIn } = await requestClientCredentialsToken(
-    authConfig
-  );
+  const { accessToken: token, expiresIn } = await requestClientCredentialsToken({
+    ...authConfig,
+    signal,
+  });
 
   // Re-initialized or cleared while in flight: the response is for the old config.
   if (generation === tokenGeneration) {
@@ -209,18 +218,42 @@ const fetchAccessToken = async (): Promise<string> => {
 /**
  * Gets a valid access token, refreshing if expired. Concurrent callers share
  * one token request; a failed request isn't cached.
+ *
+ * @param signal - The calling request's abort signal, so a caller's deadline
+ *   also bounds its wait for the token (umbraco/Umbraco-MCP-Base#428). The
+ *   shared request has its own signal: one caller giving up rejects only that
+ *   caller, and the request is aborted once every waiting caller has given up.
  */
-const getToken = async (): Promise<string> => {
+const getToken = async (signal?: AbortSignal): Promise<string> => {
   if (accessToken && !(tokenExpiry && Date.now() >= tokenExpiry)) {
     return accessToken;
   }
+  signal?.throwIfAborted();
   if (!inFlightToken) {
-    const request = fetchAccessToken().finally(() => {
-      if (inFlightToken === request) inFlightToken = null;
-    });
-    inFlightToken = request;
+    const controller = new AbortController();
+    const flight: TokenFlight = {
+      controller,
+      waiters: 0,
+      promise: fetchAccessToken(controller.signal).finally(() => {
+        if (inFlightToken === flight) inFlightToken = null;
+      }),
+    };
+    inFlightToken = flight;
   }
-  return inFlightToken;
+
+  const flight = inFlightToken;
+  flight.waiters++;
+  if (!signal) return flight.promise;
+  return new Promise<string>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason);
+      if (--flight.waiters === 0) flight.controller.abort(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    flight.promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
 };
 
 /**
@@ -365,7 +398,10 @@ async function doFetch<T>(
   // otherwise send the old config's token to the new base URL.
   const auth = authConfig;
   const generation = tokenGeneration;
-  const token = await getToken();
+  // The request's signal bounds the wait for the token too: without it a CMS
+  // that accepts the connection but never answers the token request would hang
+  // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
+  const token = await getToken(options?.signal);
   const queryString = serializeParams(config.params);
   const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
@@ -439,7 +475,7 @@ async function doFetch<T>(
   ) {
     void resp.body?.cancel().catch(() => {});
     invalidateToken(token);
-    headers.Authorization = `Bearer ${await getToken()}`;
+    headers.Authorization = `Bearer ${await getToken(options?.signal)}`;
     resp = await fetch(fullUrl, fetchOptions);
   }
 
@@ -589,7 +625,7 @@ export function createUmbracoFetchClient(
   let instanceAccessToken: string | null = null;
   let instanceTokenExpiry: number | null = null;
 
-  const fetchToken = async (): Promise<string> => {
+  const fetchToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAuthConfig) {
       throw new Error("Client not initialized. Call initialize() first.");
     }
@@ -597,6 +633,7 @@ export function createUmbracoFetchClient(
     const { accessToken, expiresIn } = await requestClientCredentialsToken({
       ...instanceAuthConfig,
       tokenPath,
+      signal,
     });
 
     instanceAccessToken = accessToken;
@@ -604,9 +641,9 @@ export function createUmbracoFetchClient(
     return accessToken;
   };
 
-  const getInstanceToken = async (): Promise<string> => {
+  const getInstanceToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAccessToken || (instanceTokenExpiry && Date.now() >= instanceTokenExpiry)) {
-      await fetchToken();
+      await fetchToken(signal);
     }
     return instanceAccessToken!;
   };
@@ -619,7 +656,8 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
-    const token = await getInstanceToken();
+    // The request's signal bounds the token exchange as well as the request.
+    const token = await getInstanceToken(opts?.signal);
     const queryString = serializeParams(config.params);
     const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
 
@@ -642,6 +680,7 @@ export function createUmbracoFetchClient(
     const fetchOpts: RequestInit = {
       method: config.method,
       headers,
+      signal: opts?.signal,
     };
 
     if (config.data !== undefined) {
