@@ -84,11 +84,16 @@ describe("resolveAliasFromUrl", () => {
     const resolve = jest
       .fn<(s: string, e: HostedMcpEnv) => Promise<SiteConfig | null>>()
       .mockRejectedValue(new Error("upstream"));
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     const result = await resolveAliasFromUrl(
-      new URL("https://worker.example.com/at/demo/authorize"),
+      new URL("https://worker.example.com/at/zzz-secret-alias/authorize"),
       makeRouting(resolve),
-      env
+      { TENANT_HASH_KEY: "k".repeat(32) } as HostedMcpEnv
     );
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    errSpy.mockRestore();
     expect("rejected" in result && result.rejected.status).toBe(502);
+    expect(logged).toMatch(/site=[0-9a-f]{12}/);
+    expect(logged).not.toContain("zzz-secret-alias");
   });
 });

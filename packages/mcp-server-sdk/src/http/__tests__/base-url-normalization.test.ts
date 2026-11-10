@@ -27,9 +27,9 @@ afterEach(() => {
 describe("base URL trailing slash normalization", () => {
   describe("initializeUmbracoFetch (singleton)", () => {
     it.each([
-      ["no trailing slash", "https://example.com"],
-      ["one trailing slash", "https://example.com/"],
-      ["multiple trailing slashes", "https://example.com///"],
+      ["no trailing slash", "https://localhost:44391"],
+      ["one trailing slash", "https://localhost:44391/"],
+      ["multiple trailing slashes", "https://localhost:44391///"],
     ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
       mockFetch
         .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
@@ -49,17 +49,17 @@ describe("base URL trailing slash normalization", () => {
       const [tokenUrl] = mockFetch.mock.calls[0];
       const [apiUrl] = mockFetch.mock.calls[1];
       expect(tokenUrl).toBe(
-        "https://example.com/umbraco/management/api/v1/security/back-office/token"
+        "https://localhost:44391/umbraco/management/api/v1/security/back-office/token"
       );
-      expect(apiUrl).toBe("https://example.com/umbraco/management/api/v1/item");
+      expect(apiUrl).toBe("https://localhost:44391/umbraco/management/api/v1/item");
     });
   });
 
   describe("createUmbracoFetchClient (instance)", () => {
     it.each([
-      ["no trailing slash", "https://example.com"],
-      ["one trailing slash", "https://example.com/"],
-      ["multiple trailing slashes", "https://example.com///"],
+      ["no trailing slash", "https://localhost:44391"],
+      ["one trailing slash", "https://localhost:44391/"],
+      ["multiple trailing slashes", "https://localhost:44391///"],
     ])("normalizes baseUrl with %s", async (_label, baseUrl) => {
       mockFetch
         .mockResolvedValueOnce(jsonResponse(200, { access_token: "t", expires_in: 3600 }))
@@ -74,7 +74,7 @@ describe("base URL trailing slash normalization", () => {
       );
 
       const [apiUrl] = mockFetch.mock.calls[1];
-      expect(apiUrl).toBe("https://example.com/umbraco/management/api/v1/item");
+      expect(apiUrl).toBe("https://localhost:44391/umbraco/management/api/v1/item");
     });
   });
 });

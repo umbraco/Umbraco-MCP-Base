@@ -78,28 +78,14 @@ export function removeApiTools(projectDir: string): number {
 
     // Remove initializeUmbracoFetch import and call (container doesn't make direct API calls)
     content = content.replace(/\s*initializeUmbracoFetch,/g, "");
+    // From the comment to the end of the `if (clientId) { ... }` block (the
+    // first top-level `}`), then the deferred rethrows around the CLI commands.
     content = content.replace(
-      /\/\/ Initialize the SDK's fetch client.*\n(.*\n)*?.*initializeUmbracoFetch\(.*\);\s*\n\}\s*\n/m,
+      /\/\/ Initialize the SDK's fetch client[\s\S]*?\n\}\n\s*\n/,
       "",
     );
-
-    // Remove the baseUrl/clientId/clientSecret variables (only used by initializeUmbracoFetch)
-    content = content.replace(
-      /^const baseUrl = process\.env\.UMBRACO_BASE_URL.*\n/m,
-      "",
-    );
-    content = content.replace(
-      /^const clientId = process\.env\.UMBRACO_CLIENT_ID.*\n/m,
-      "",
-    );
-    content = content.replace(
-      /^const clientSecret = process\.env\.UMBRACO_CLIENT_SECRET.*\n/m,
-      "",
-    );
-    content = content.replace(
-      /^if \(clientId\) \{\n\s*initializeUmbracoFetch.*\n\}\n/m,
-      "",
-    );
+    content = content.replace(/^\/\/ --call talks to Umbraco.*\n/m, "");
+    content = content.replace(/^if \(fetchInitError\b.*\n\n?/gm, "");
 
     // Remove the version check block. It calls the Umbraco Management API via
     // the fetch client removed above and is gated on `clientId`, so leaving it

@@ -14,7 +14,7 @@ import type { AuthProps } from "../types/auth.js";
 import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
 import { getStoredUmbracoToken } from "../auth/token-storage.js";
 import { resourceMetadataUrlFor } from "../server/resource-metadata.js";
-import { hashWithKey } from "../telemetry/request-telemetry.js";
+import { hashWithKey, siteRef } from "../telemetry/request-telemetry.js";
 
 export interface SiteRouterOptions {
   /**
@@ -63,7 +63,7 @@ export function createSiteRouter(
     try {
       site = await config.resolveSite(siteId, env);
     } catch (err) {
-      console.error(`siteRouting.resolveSite threw for "${siteId}":`, err);
+      console.error(`siteRouting.resolveSite threw for site=${await siteRef(siteId, env)}:`, err);
       return jsonResponse(
         { error: "Bad gateway", siteId, message: "Failed to resolve site" },
         502

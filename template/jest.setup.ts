@@ -1,19 +1,23 @@
-// Must be set before any TLS connections
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 import "./src/load-env.js";
 import https from "node:https";
-import { initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
+import { initializeUmbracoFetch, isLoopbackUrl } from "@umbraco-cms/mcp-server-sdk";
 
-// Directly configure the global HTTPS agent to accept self-signed certs
-// (process.env alone isn't sufficient in Jest's VM module context)
-https.globalAgent.options.rejectUnauthorized = false;
+const baseUrl = process.env.UMBRACO_BASE_URL || "http://localhost:9999";
+
+// Accept the local instance's self-signed certificate. Local only: the SDK
+// refuses to start with NODE_TLS_REJECT_UNAUTHORIZED=0 and a remote base URL.
+const isLocal = isLoopbackUrl(baseUrl);
+if (isLocal) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  // process.env alone isn't sufficient in Jest's VM module context
+  https.globalAgent.options.rejectUnauthorized = false;
+}
 
 // Only override globalThis.fetch with undici when running against a real Umbraco instance.
 // MSW intercepts via node:http — replacing fetch with undici bypasses MSW interception.
 if (process.env.UMBRACO_BASE_URL && !process.env.USE_MOCK_API) {
   const { Agent, setGlobalDispatcher, fetch: undiciFetch } = await import("undici");
-  const agent = new Agent({ connect: { rejectUnauthorized: false } });
+  const agent = new Agent({ connect: { rejectUnauthorized: !isLocal } });
   setGlobalDispatcher(agent);
   globalThis.fetch = undiciFetch as typeof globalThis.fetch;
 }
@@ -22,7 +26,7 @@ if (process.env.UMBRACO_BASE_URL && !process.env.USE_MOCK_API) {
 // MSW intercepts all HTTP requests in unit tests, so these don't need to be real.
 // Without this, UmbracoManagementClient throws "not initialized" before MSW can intercept.
 initializeUmbracoFetch({
-  baseUrl: process.env.UMBRACO_BASE_URL || "http://localhost:9999",
+  baseUrl,
   clientId: process.env.UMBRACO_CLIENT_ID || "test-client",
   clientSecret: process.env.UMBRACO_CLIENT_SECRET || "test-secret",
 });

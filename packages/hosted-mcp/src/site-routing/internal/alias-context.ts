@@ -3,6 +3,7 @@
  * Not part of the public package surface.
  */
 
+import { siteRef } from "../../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { SiteConfig, SiteRoutingConfig } from "../../types/multi-site.js";
 import { buildPrefixRegex } from "../path-prefix.js";
@@ -54,7 +55,7 @@ export async function resolveAliasFromUrl(
   try {
     site = await siteRouting.resolveSite(alias, env);
   } catch (err) {
-    console.error(`siteRouting.resolveSite threw for "${alias}":`, err);
+    console.error(`siteRouting.resolveSite threw for site=${await siteRef(alias, env)}:`, err);
     return {
       rejected: jsonResponse(
         { error: "bad_gateway", message: "Failed to resolve site" },

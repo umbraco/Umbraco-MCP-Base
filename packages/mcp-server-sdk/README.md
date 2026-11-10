@@ -620,7 +620,8 @@ Notes:
   unverified major. In practice `init`/`discover` provisions the API user and writes `.env`
   before `generate` ever runs.
 - Against a local Umbraco over HTTPS with a self-signed cert, the lookup needs
-  `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env` — the same variable the server itself uses.
+  `NODE_TLS_REJECT_UNAUTHORIZED=0` in `.env`, the same variable the server uses. Local only
+  (see "TLS certificates" below).
 - Each lookup failure warns with its own reason — which of the two requests failed and why —
   before the throw, so a broken `.env` is diagnosable from the generate output.
 - The generated file records whether the value was read from an instance or is a scaffold
@@ -883,9 +884,25 @@ The SDK provides several subpath exports for tree-shaking:
 
 ## Requirements
 
-- Node.js >= 22.3.0
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (see [Node.js version](#nodejs-version))
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
+
+## Node.js version
+
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (high: out-of-bounds write in the Brotli decoder bundled with Node.js), which Node's built-in `fetch` can reach when it decompresses a Brotli response. Upgrading Node.js is the only fix. Check your version with `node --version`.
+
+## TLS certificates
+
+TLS certificate verification is **on** by default. Importing the SDK does not change it.
+
+For a **local** Umbraco (`localhost`, `127.0.0.1` or `[::1]`) with a self-signed certificate, set this in `.env`:
+
+```
+NODE_TLS_REJECT_UNAUTHORIZED=0
+```
+
+**Only use it locally.** It turns verification off for every HTTPS request the process makes, not just requests to Umbraco. Never set it for a remote site: if it is set and `UMBRACO_BASE_URL` is not local, the server prints an error to stderr and refuses to start (`npm run generate` fails the same way, before orval downloads the spec; the check is on `UMBRACO_BASE_URL`, not on orval's input URL), so the client secret is never sent over an unverified connection. To keep verification on locally, trust the development certificate instead with `NODE_EXTRA_CA_CERTS=/path/to/dev-cert.pem`, set in the MCP client's server `env` (Node reads it at startup).
 
 ## License
 

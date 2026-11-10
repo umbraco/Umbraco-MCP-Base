@@ -17,6 +17,7 @@ import {
   getVerbosity
 } from "./config.js";
 import type { AgentTestResult, AgentTestOptions, ToolCall } from "./types.js";
+import { isLoopbackUrl } from "../helpers/url.js";
 
 /**
  * Runs an eval test with the Agent SDK.
@@ -48,8 +49,12 @@ export async function runAgentTest(
   const env: Record<string, string> = {
     ...serverEnv,
     ...options?.serverEnv,
-    NODE_TLS_REJECT_UNAUTHORIZED: "0"
   };
+  // Accept a local instance's self-signed certificate. Local only: the server
+  // refuses to start with NODE_TLS_REJECT_UNAUTHORIZED=0 and a remote base URL.
+  if (isLoopbackUrl(env.UMBRACO_BASE_URL ?? process.env.UMBRACO_BASE_URL ?? "")) {
+    env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  }
 
   // useServerFiltering is an agent runner setting (not a server config).
   // When false (default): sets UMBRACO_INCLUDE_TOOLS to limit tools to the test's `tools` array.
@@ -77,6 +82,8 @@ export async function runAgentTest(
           env
         }
       },
+      // Only the target server above: don't also load the project's ambient .mcp.json
+      strictMcpConfig: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: [],

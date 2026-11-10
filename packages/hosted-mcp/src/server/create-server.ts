@@ -13,7 +13,6 @@ import {
   type CloudflareTracing,
 } from "../telemetry/cloudflare-tracing.js";
 import { SERVER_INIT_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
-import { sanitizeForLog } from "../util/log-sanitize.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { z } from "zod";
 import {
@@ -49,7 +48,7 @@ import {
   type CarriedRequestContext,
   type RequestTransport,
 } from "@umbraco-cms/mcp-server-sdk";
-import { resolveRequestTelemetry } from "../telemetry/request-telemetry.js";
+import { resolveRequestTelemetry, siteRef } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../types/env.js";
 import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
@@ -532,12 +531,13 @@ async function initPerRequestServer(
   // of when that actually happens — particularly across hibernation wakes.
   // See umbraco/Umbraco-MCP-Base#132 for the failure mode this guards against.
   //
-  // `siteId` may come from a user-submitted consent form in static
-  // multi-site mode; strip control characters before logging so it can't
-  // forge log lines on `wrangler tail`.
+  // Never log the plaintext site alias: console output is exported through the
+  // same OTLP destination as spans. Log the keyed-hash prefix instead (same
+  // key as `umbraco.mcp.tenant`), which is also safe against log forging.
   const initStartedAt = Date.now();
   const traceId = Math.random().toString(36).slice(2, 8);
-  const safeSiteId = sanitizeForLog(props.consentChoices?.siteId);
+  const consentSiteId = props.consentChoices?.siteId;
+  const safeSiteId = consentSiteId ? await siteRef(consentSiteId, env) : "<single>";
   console.log(
     `[mcp-hosted] createPerRequestServer:start id=${traceId} server=${options.name}@${options.version} siteId=${safeSiteId}`
   );
@@ -811,13 +811,14 @@ async function initPerRequestServer(
   useDraft202012ToolSchemas(server);
 
   console.log(
-    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${site?.id ?? "<single>"} elapsedMs=${Date.now() - initStartedAt}`
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=full tools=${registeredCount} site=${safeSiteId} elapsedMs=${Date.now() - initStartedAt}`
   );
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "full");
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, registeredCount);
   // Whether a site was resolved, not which one — the alias is a customer
-  // identifier and the log line above is Worker-local, whereas spans are
-  // exported to a third party.
+  // identifier. Spans AND console logs are both exported (Workers
+  // Observability sends console output through the same OTLP destination), so
+  // log lines must use `siteRef()` too; never log the raw alias.
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_SITE_RESOLVED, site !== null);
   return server;
 }

@@ -51,7 +51,7 @@ describe("content-type response parsing", () => {
           response(404, problemBody, "application/problem+json; charset=utf-8")
         );
 
-      initializeUmbracoFetch({ baseUrl: "https://example.com", clientId: "cid", clientSecret: "sec" });
+      initializeUmbracoFetch({ baseUrl: "https://localhost:44391", clientId: "cid", clientSecret: "sec" });
 
       const result: any = await UmbracoManagementClient(
         { method: "delete", url: "/umbraco/management/api/v1/data-type/folder/x" },
@@ -72,7 +72,7 @@ describe("content-type response parsing", () => {
         );
 
       const { initialize, mutator } = createUmbracoFetchClient();
-      initialize({ baseUrl: "https://example.com", clientId: "cid", clientSecret: "sec" });
+      initialize({ baseUrl: "https://localhost:44391", clientId: "cid", clientSecret: "sec" });
 
       const result: any = await mutator(
         { method: "delete", url: "/umbraco/management/api/v1/data-type/folder/x" },
@@ -89,7 +89,7 @@ describe("content-type response parsing", () => {
         .mockResolvedValueOnce(response(200, "OK", "text/plain"));
 
       const { initialize, mutator } = createUmbracoFetchClient();
-      initialize({ baseUrl: "https://example.com", clientId: "cid", clientSecret: "sec" });
+      initialize({ baseUrl: "https://localhost:44391", clientId: "cid", clientSecret: "sec" });
 
       const result: any = await mutator(
         { method: "get", url: "/umbraco/management/api/v1/item" },

@@ -1,13 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import { isLoopbackUrl } from "../loopback.js";
 
 export interface GenerateResult {
   success: boolean;
   error?: string;
 }
 
-export function generateClient(projectDir: string): GenerateResult {
+export function generateClient(projectDir: string, baseUrl?: string): GenerateResult {
   try {
     // Ensure dependencies are installed (Orval needs to be available)
     // Always run install — node_modules may exist but be incomplete
@@ -23,7 +24,9 @@ export function generateClient(projectDir: string): GenerateResult {
       timeout: 180_000,
       env: {
         ...process.env,
-        NODE_TLS_REJECT_UNAUTHORIZED: "0",
+        // Orval fetches the OpenAPI document outside the SDK, so a local
+        // self-signed site needs the process-wide switch. Never for a remote URL.
+        ...(baseUrl && isLoopbackUrl(baseUrl) ? { NODE_TLS_REJECT_UNAUTHORIZED: "0" } : {}),
       },
     });
 

@@ -159,3 +159,49 @@ describe("CLI Debug Config", () => {
     expect(parsed.auth.clientSecret.value).not.toBe("test-secret");
   });
 });
+
+describe("CLI with TLS verification disabled for a remote site", () => {
+  const remoteTlsOff = {
+    UMBRACO_BASE_URL: "https://example.umbraco.io",
+    NODE_TLS_REJECT_UNAUTHORIZED: "0",
+  };
+
+  it("still runs offline commands such as --list-tools", () => {
+    const output = runCli(["--list-tools"], remoteTlsOff);
+    expect(output).toContain("Name");
+  });
+
+  it("reports the refusal for --call instead of running the tool", () => {
+    let stderr = "";
+    try {
+      execFileSync("node", [entryPoint, "--call", "get-example"], {
+        env: { ...baseEnv, ...remoteTlsOff },
+        timeout: 15000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      stderr = (error as { stderr: string }).stderr;
+    }
+    expect(stderr).toContain("Refusing to start");
+  });
+
+  it("refuses to start the server", () => {
+    let stderr = "";
+    let status: number | null = 0;
+    try {
+      execFileSync("node", [entryPoint], {
+        env: { ...baseEnv, ...remoteTlsOff },
+        timeout: 15000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      const failure = error as { status: number | null; stderr: string };
+      status = failure.status;
+      stderr = failure.stderr;
+    }
+    expect(status).not.toBe(0);
+    expect(stderr).toContain("Refusing to start");
+  });
+});

@@ -100,6 +100,7 @@ export { toolCallExtraIndex } from "./helpers/tool-call-params.js";
 // Elicitation Helpers
 export {
   confirmAction,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
@@ -131,7 +132,7 @@ export {
 } from "./helpers/cursor-pagination.js";
 
 // URL helpers
-export { normalizeBaseUrl } from "./helpers/url.js";
+export { normalizeBaseUrl, isLoopbackUrl } from "./helpers/url.js";
 
 // ============================================================================
 // Telemetry

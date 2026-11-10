@@ -26,6 +26,7 @@ import {
   promptConnectionString,
   promptInstallPsw,
 } from "./prompts.js";
+import { isLoopbackUrl } from "../loopback.js";
 
 export async function runInit(dir?: string): Promise<void> {
   const projectDir = path.resolve(dir || process.cwd());
@@ -185,9 +186,7 @@ export async function runInit(dir?: string): Promise<void> {
   if (existingInstance && !isContainerMode) {
     const { baseUrl, adminEmail, adminPassword } = existingInstance;
 
-    const isLocalhost =
-      baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
-    if (isLocalhost) {
+    if (isLoopbackUrl(baseUrl)) {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
     }
 
