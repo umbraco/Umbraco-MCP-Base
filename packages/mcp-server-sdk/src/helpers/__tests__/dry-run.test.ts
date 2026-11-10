@@ -193,8 +193,8 @@ describe("dry-run over MCP with an outputSchema", () => {
         handler: async () => createToolResult({ id: "real-id", message: "real" }),
       }) as any;
 
-    // Registers like a product does: config is loaded (dry-run set) first,
-    // then registerTool reads tool.outputSchema.
+    // Registers like the template and hosted server do: config is loaded
+    // (dry-run set) first, then the schema comes from getRegisteredOutputSchema.
     async function connect(tools: any[]) {
       const server = new McpServer({ name: "test-server", version: "1.0.0" });
       for (const tool of tools) {
@@ -203,7 +203,7 @@ describe("dry-run over MCP with an outputSchema", () => {
           {
             description: tool.description,
             inputSchema: tool.inputSchema,
-            outputSchema: tool.outputSchema,
+            outputSchema: dryRun.getRegisteredOutputSchema(tool),
             annotations: tool.annotations,
           },
           tool.handler,
@@ -313,5 +313,42 @@ describe("dry-run over MCP with an outputSchema", () => {
     } finally {
       await close();
     }
+  });
+  // Cases that broke when the schema was hidden by a getter on withErrorHandling.
+  async function expectPreview(setupResult: Awaited<ReturnType<typeof setup>>, tool: any) {
+    const { configureDryRunMode, connect } = setupResult;
+    configureDryRunMode(true);
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: tool.name, arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+    } finally {
+      await close();
+    }
+  }
+
+  it("returns the preview for a tool copied with a spread before dry-run is configured", async () => {
+    const s = await setup();
+    const tool = { ...s.withStandardDecorators(s.makeTool("create-copy")), slices: ["create"] };
+    await expectPreview(s, tool);
+  });
+
+  it("returns the preview when withDryRun wraps outside withErrorHandling", async () => {
+    const s = await setup();
+    await expectPreview(s, s.withDryRun(s.withErrorHandling(s.makeTool("create-inverted"))));
+  });
+
+  it("returns the preview for withDryRun without withErrorHandling", async () => {
+    const s = await setup();
+    await expectPreview(s, s.withDryRun(s.makeTool("create-bare")));
+  });
+
+  it("leaves outputSchema a plain, writable property on decorated tools", async () => {
+    const { withStandardDecorators, makeTool } = await setup();
+    const tool: any = withStandardDecorators(makeTool("create-thing"));
+    const descriptor = Object.getOwnPropertyDescriptor(tool, "outputSchema")!;
+    expect(descriptor.get).toBeUndefined();
+    expect(descriptor.writable).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import {
   configureApiClient,
   initializeUmbracoFetch,
   createToolAnnotations,
+  getRegisteredOutputSchema,
   discoverProxiedTools,
   parseProxiedToolName,
   createCollectionConfigLoader,
@@ -225,7 +226,7 @@ for (const collection of collections) {
     server.registerTool(tool.name, {
       description: tool.description,
       inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
+      outputSchema: getRegisteredOutputSchema(tool),
       annotations,
     }, tool.handler as ToolCallback<typeof tool.inputSchema>);
 
