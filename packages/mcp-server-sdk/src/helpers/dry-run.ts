@@ -13,11 +13,13 @@ import { ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResult } from "./tool-result.js";
 import { resolveToolCallParams } from "./tool-call-params.js";
+import { readBooleanEnv } from "./env.js";
 
 /**
- * Module-level dry-run toggle.
+ * Module-level dry-run toggle. `null` until configured; the first
+ * isDryRunEnabled() call then reads UMBRACO_DRY_RUN once and keeps it.
  */
-let dryRunEnabled = false;
+let dryRunEnabled: boolean | null = null;
 
 /**
  * Marker set on a tool that `withDryRun` can intercept (mutation tools only).
@@ -36,10 +38,20 @@ export function configureDryRunMode(enabled: boolean): void {
   dryRunEnabled = enabled;
 }
 
+/** Clears the configured mode so UMBRACO_DRY_RUN is read again. @internal */
+export function resetDryRunMode(): void {
+  dryRunEnabled = null;
+}
+
 /**
- * Returns whether dry-run mode is currently enabled.
+ * Returns whether dry-run mode is currently enabled. Servers that never call
+ * getServerConfig() fall back to UMBRACO_DRY_RUN ("true" or "1"), read on first
+ * use so mutation tools don't switch mode mid-session if the env changes.
  */
 export function isDryRunEnabled(): boolean {
+  if (dryRunEnabled === null) {
+    dryRunEnabled = readBooleanEnv("UMBRACO_DRY_RUN");
+  }
   return dryRunEnabled;
 }
 
@@ -64,7 +76,7 @@ export function withDryRun<
   const wrapped: ToolDefinition<Args, OutputArgs> = {
     ...tool,
     handler: ((...params: any[]) => {
-      if (!dryRunEnabled || !intercepts) {
+      if (!isDryRunEnabled() || !intercepts) {
         return originalHandler(...(params as [any, any]));
       }
 
@@ -111,7 +123,7 @@ export function withDryRun<
 export function getRegisteredOutputSchema<OutputArgs>(
   tool: { outputSchema?: OutputArgs }
 ): OutputArgs | undefined {
-  if (dryRunEnabled && (tool as Record<symbol, unknown>)[DRY_RUN_INTERCEPTS] === true) {
+  if (isDryRunEnabled() && (tool as Record<symbol, unknown>)[DRY_RUN_INTERCEPTS] === true) {
     return undefined;
   }
   return tool.outputSchema;

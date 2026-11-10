@@ -329,6 +329,7 @@ export {
 
 export {
   getServerConfig,
+  resetServerConfig,
   type UmbracoAuthConfig,
   type UmbracoServerConfig,
   type ConfigFieldDefinition,

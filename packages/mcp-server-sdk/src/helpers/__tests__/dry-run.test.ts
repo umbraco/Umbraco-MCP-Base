@@ -4,7 +4,7 @@
  * Tests for the dry-run mode that intercepts mutation tools.
  */
 
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 
 // Use dynamic imports to get fresh module state
 async function getDryRunModule() {
@@ -13,7 +13,14 @@ async function getDryRunModule() {
 }
 
 describe("configureDryRunMode", () => {
+  const original = process.env.UMBRACO_DRY_RUN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UMBRACO_DRY_RUN;
+    else process.env.UMBRACO_DRY_RUN = original;
+  });
+
   it("should default to disabled", async () => {
+    delete process.env.UMBRACO_DRY_RUN;
     const { isDryRunEnabled } = await getDryRunModule();
     expect(isDryRunEnabled()).toBe(false);
   });
@@ -27,6 +34,76 @@ describe("configureDryRunMode", () => {
   it("should disable dry-run mode", async () => {
     const { configureDryRunMode, isDryRunEnabled } = await getDryRunModule();
     configureDryRunMode(true);
+    configureDryRunMode(false);
+    expect(isDryRunEnabled()).toBe(false);
+  });
+});
+
+describe("isDryRunEnabled env fallback", () => {
+  const original = process.env.UMBRACO_DRY_RUN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UMBRACO_DRY_RUN;
+    else process.env.UMBRACO_DRY_RUN = original;
+  });
+
+  it("honours UMBRACO_DRY_RUN when configureDryRunMode was never called", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it.each(["true", "TRUE", "1"])("enables for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it.each(["false", "0", ""])("stays disabled for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(false);
+  });
+
+  it("reads the env var once, so a later change doesn't flip the mode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it("re-reads the env var after resetDryRunMode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled, resetDryRunMode } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    resetDryRunMode();
+    expect(isDryRunEnabled()).toBe(false);
+  });
+
+  it("intercepts mutation tools through withDryRun when only the env var is set", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { withDryRun } = await getDryRunModule();
+    const handler = jest.fn();
+    const tool = {
+      name: "test-mutation",
+      description: "test",
+      handler,
+      slices: ["create"],
+      annotations: { destructiveHint: true },
+    } as any;
+
+    const result: any = await withDryRun(tool).handler({ input: "x" } as any, {} as any);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.structuredContent.dryRun).toBe(true);
+  });
+
+  it("lets an explicit configureDryRunMode(false) beat the env var", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { configureDryRunMode, isDryRunEnabled } = await getDryRunModule();
     configureDryRunMode(false);
     expect(isDryRunEnabled()).toBe(false);
   });

@@ -26,7 +26,10 @@
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { resolveStatusText } from "../helpers/status-text.js";
-import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
+import { assertTlsNotDisabledForRemote, normalizeBaseUrl } from "../helpers/url.js";
+
+// Re-exported so existing imports from the fetch client keep working.
+export { assertTlsNotDisabledForRemote };
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
@@ -63,25 +66,6 @@ export interface UmbracoManagementClientOptions {
 // ============================================================================
 // Module State
 // ============================================================================
-
-/**
- * TLS certificate verification is left to Node.js (on by default). A local
- * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
- * refuse to talk to a non-local site with it set, so the client secret is never
- * sent over an unverified connection. The message also goes to stderr, because
- * stdout carries the MCP stdio protocol.
- */
-export function assertTlsNotDisabledForRemote(baseUrl: string): void {
-  if (typeof process === "undefined" || process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
-  if (isLoopbackUrl(baseUrl)) return;
-  const message =
-    "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
-    "so its TLS certificate would not be verified. Refusing to start. Remove NODE_TLS_REJECT_UNAUTHORIZED " +
-    "(it is only for a local Umbraco on localhost, 127.0.0.1 or [::1]), or trust the certificate " +
-    "with NODE_EXTRA_CA_CERTS instead.";
-  console.error(message);
-  throw new Error(message);
-}
 
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
 
@@ -431,6 +415,8 @@ async function doFetch<T>(
   // otherwise send the old config's token to the new base URL.
   const auth = authConfig;
   const generation = tokenGeneration;
+  // Checked per request too: the env can change after initializeUmbracoFetch.
+  assertTlsNotDisabledForRemote(auth.baseUrl);
   // The request's signal bounds the wait for the token too: without it a CMS
   // that accepts the connection but never answers the token request would hang
   // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
@@ -689,6 +675,7 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
+    assertTlsNotDisabledForRemote(instanceAuthConfig.baseUrl);
     // The request's signal bounds the token exchange as well as the request.
     const token = await getInstanceToken(opts?.signal);
     const queryString = serializeParams(config.params);

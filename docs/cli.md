@@ -26,7 +26,7 @@ Auth credentials are created in the Umbraco backoffice under **Settings > Users*
 
 CLI arguments > environment variables > `.env` file values.
 
-A `.env` file in the current working directory is loaded automatically. Use `--env /path/to/.env` to specify a custom location.
+A `.env` file in the current working directory is loaded automatically, but only fills in variables the process environment hasn't set. Use `--env /path/to/.env` to specify a custom location; an explicit `--env` file overrides both the process environment and the default `./.env`.
 
 ## Starting the Server
 
