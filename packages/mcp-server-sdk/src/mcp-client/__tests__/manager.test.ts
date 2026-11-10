@@ -75,6 +75,33 @@ describe("McpClientManager Integration", () => {
     expect(manager.hasServer("test")).toBe(true);
     expect(manager.hasServer("unknown")).toBe(false);
   });
+
+  it("should refuse a filter config change once a server is connected", async () => {
+    await manager.connect("test");
+
+    // A stdio server received its filters when it was spawned, so a later
+    // change would silently not apply.
+    expect(() => manager.setFilterConfig({ readOnly: true })).toThrow(
+      /before connecting.*test/,
+    );
+    expect(manager.getFilterConfig()).toBeUndefined();
+  });
+});
+
+describe("McpClientManager filter config", () => {
+  it("should expose the filter config it was created with", () => {
+    const manager = createMcpClientManager({ filterConfig: { readOnly: true } });
+
+    expect(manager.getFilterConfig()).toEqual({ readOnly: true });
+  });
+
+  it("should accept a filter config before any connection", () => {
+    const manager = createMcpClientManager();
+
+    manager.setFilterConfig({ readOnly: true, excludeSlices: ["delete"] });
+
+    expect(manager.getFilterConfig()).toEqual({ readOnly: true, excludeSlices: ["delete"] });
+  });
 });
 
 describe("McpClientManager with a server on an older SDK", () => {

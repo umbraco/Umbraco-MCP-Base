@@ -42,10 +42,10 @@
 import { createMcpClientManager } from "@umbraco-cms/mcp-server-sdk";
 import { mcpServers } from "../config/mcp-servers.js";
 
-export const mcpClientManager = createMcpClientManager({
-  // Pass through any filter configuration to chained servers
-  // filterConfig: { tools: [], slices: [], modes: [] },
-});
+// The filter configuration for chained servers (readonly mode, slices) is set
+// in index.ts with mcpClientManager.setFilterConfig(), once the server config
+// is resolved, so it reflects CLI flags as well as environment variables.
+export const mcpClientManager = createMcpClientManager();
 
 // Register all configured MCP servers from mcp-servers.ts
 // These become available via mcpClientManager.callTool(serverName, ...)

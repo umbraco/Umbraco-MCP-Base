@@ -11,7 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConnection, McpStdioServerConfig, FilterConfig } from "./types.js";
+import type { McpConnection, McpStdioServerConfig, FilterConfig, ChainedToolListing } from "./types.js";
 
 export class StdioConnection implements McpConnection {
   private client: Client;
@@ -39,20 +39,10 @@ export class StdioConnection implements McpConnection {
   // `context` is accepted for interface symmetry and ignored: nothing
   // request-scoped crosses the process boundary.
   async listTools(_context?: unknown): Promise<{
-    tools: Array<{
-      name: string;
-      description?: string;
-      inputSchema?: Record<string, unknown>;
-    }>;
+    tools: ChainedToolListing[];
   }> {
     const result = await this.client.listTools();
-    return result as {
-      tools: Array<{
-        name: string;
-        description?: string;
-        inputSchema?: Record<string, unknown>;
-      }>;
-    };
+    return result as { tools: ChainedToolListing[] };
   }
 
   async callTool(
@@ -91,22 +81,32 @@ export class StdioConnection implements McpConnection {
 
   /**
    * Build command arguments with filter passthrough.
-   * Appends --tools, --slices, etc. to pass filters to the chained server.
+   *
+   * The flags are the SDK's own config flags (`CONFIG_FIELDS` in
+   * `config/config.ts`), so a chained server built on this SDK applies them
+   * the same way it applies its own command line. A flag given here wins over
+   * the matching environment variable the child inherits.
    */
   private buildArgs(): string[] {
     const args = [...(this.config.args || [])];
 
     if (this.filterConfig?.tools?.length) {
-      args.push("--tools", this.filterConfig.tools.join(","));
+      args.push("--umbraco-include-tools", this.filterConfig.tools.join(","));
     }
     if (this.filterConfig?.toolCollections?.length) {
-      args.push("--tool-collections", this.filterConfig.toolCollections.join(","));
+      args.push("--umbraco-include-tool-collections", this.filterConfig.toolCollections.join(","));
     }
     if (this.filterConfig?.slices?.length) {
-      args.push("--slices", this.filterConfig.slices.join(","));
+      args.push("--umbraco-include-slices", this.filterConfig.slices.join(","));
+    }
+    if (this.filterConfig?.excludeSlices?.length) {
+      args.push("--umbraco-exclude-slices", this.filterConfig.excludeSlices.join(","));
     }
     if (this.filterConfig?.modes?.length) {
-      args.push("--modes", this.filterConfig.modes.join(","));
+      args.push("--umbraco-tool-modes", this.filterConfig.modes.join(","));
+    }
+    if (this.filterConfig?.readOnly) {
+      args.push("--umbraco-readonly");
     }
 
     return args;

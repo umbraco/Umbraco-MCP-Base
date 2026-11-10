@@ -51,6 +51,7 @@ export type {
   McpClientOptions,
   FilterConfig,
   McpConnection,
+  ChainedToolListing,
 } from "./types.js";
 
 // Manager
@@ -70,6 +71,7 @@ export {
   createProxyHandler,
   proxiedToolsToDefinitions,
   type ProxiedTool,
+  type DiscoverProxiedToolsOptions,
 } from "./proxy.js";
 
 // JSON Schema -> Zod conversion (for registering proxied tools with their

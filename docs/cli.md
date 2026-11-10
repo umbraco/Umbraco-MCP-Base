@@ -118,6 +118,8 @@ node dist/index.js --umbraco-readonly
 
 Mutation tools are completely removed from the server — the agent cannot see or call them. Only tools with `readOnlyHint: true` are registered. Use this when you want zero risk of data modification.
 
+Readonly mode also covers tools proxied from a chained MCP server, whether it is set as the flag or the environment variable. A chained tool is proxied only if the chained server annotates it with `readOnlyHint: true`; a tool with no annotation is treated as a write tool. `--list-tools` shows this server's own tools only, not the proxied ones.
+
 ### Dry-Run Mode
 
 ```bash

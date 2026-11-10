@@ -11,6 +11,27 @@ import type { ToolModeDefinition } from "../types/tool-mode.js";
  * Abstract connection to an MCP server.
  * Implemented by StdioConnection (child process) and InProcessConnection (direct handler calls).
  */
+/**
+ * A tool as listed by a chained MCP server.
+ */
+export interface ChainedToolListing {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  /**
+   * The chained server's MCP tool annotations. `readOnlyHint` decides whether
+   * the tool is proxied when the parent runs in readonly mode.
+   */
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+    title?: string;
+  };
+}
+
 export interface McpConnection {
   /**
    * @param context - Optional caller tool-call `context`/`extra`. In-process
@@ -18,11 +39,7 @@ export interface McpConnection {
    *   tools to list; stdio connections ignore it.
    */
   listTools(context?: unknown): Promise<{
-    tools: Array<{
-      name: string;
-      description?: string;
-      inputSchema?: Record<string, unknown>;
-    }>;
+    tools: ChainedToolListing[];
   }>;
 
   /**
@@ -170,7 +187,8 @@ export interface McpClientOptions {
   /**
    * Tool/slice/mode filters to pass through to chained servers.
    * These filters are appended as CLI arguments when spawning stdio servers,
-   * or applied directly for in-process connections.
+   * or applied directly for in-process connections. `readOnly` is also
+   * enforced on this side by `discoverProxiedTools`.
    */
   filterConfig?: FilterConfig;
 }

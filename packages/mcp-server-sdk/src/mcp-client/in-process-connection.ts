@@ -28,7 +28,7 @@ import type { CollectionConfiguration } from "../types/collection-configuration.
 import { DEFAULT_COLLECTION_CONFIG } from "../types/collection-configuration.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 import { createCollectionConfigLoader } from "../tool-filtering/collection-config-loader.js";
-import type { McpConnection, McpInProcessServerConfig, FilterConfig } from "./types.js";
+import type { McpConnection, McpInProcessServerConfig, FilterConfig, ChainedToolListing } from "./types.js";
 import { getUmbracoVersion } from "../umbraco-version/request-context.js";
 import {
   getActiveRequestContext,
@@ -52,11 +52,7 @@ export class InProcessConnection implements McpConnection {
   }
 
   async listTools(context?: unknown): Promise<{
-    tools: Array<{
-      name: string;
-      description?: string;
-      inputSchema?: Record<string, unknown>;
-    }>;
+    tools: ChainedToolListing[];
   }> {
     const carried = resolveCarriedRequestContext(context);
     const tools = this.getFilteredTools(getUmbracoVersion(carried));
@@ -68,6 +64,12 @@ export class InProcessConnection implements McpConnection {
         inputSchema: tool.inputSchema
           ? (z.toJSONSchema(z.object(tool.inputSchema as ZodRawShape)) as Record<string, unknown>)
           : { type: "object", properties: {} },
+        // Same test as shouldIncludeTool's readonly rule, so a tool that
+        // passed the readonly filter above is also listed as read-only.
+        annotations: {
+          ...tool.annotations,
+          readOnlyHint: Boolean(tool.annotations?.readOnlyHint || tool.isReadOnly),
+        },
       })),
     };
   }

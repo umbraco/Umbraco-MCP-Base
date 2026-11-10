@@ -96,6 +96,18 @@ const configLoader = createCollectionConfigLoader({
 // Load filtering configuration from server config
 const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(serverConfig.umbraco);
 
+// Give chained MCP servers the same readonly mode and slice filters, taken from
+// the resolved config so that CLI flags count as well as environment variables
+// (a chained server inherits this process's environment, but not its command
+// line). Readonly is also enforced here: discoverProxiedTools only returns
+// tools the chained server marks read-only. Tool, collection and mode names
+// belong to this server, so they are not passed on.
+mcpClientManager.setFilterConfig({
+  readOnly: serverConfig.umbraco.readonly,
+  slices: serverConfig.umbraco.includeSlices,
+  excludeSlices: serverConfig.umbraco.excludeSlices,
+});
+
 // ============================================================================
 // CLI Introspection (runs before server start, exits immediately)
 // ============================================================================
@@ -235,6 +247,7 @@ async function main() {
           pt.prefixedName,
           {
             description: `[Proxied from ${pt.serverName}] ${pt.originalTool.description || "No description"}`,
+            annotations: pt.originalTool.annotations,
           },
           async (args: Record<string, unknown>): Promise<CallToolResult> => {
             const { serverName, toolName } = parseProxiedToolName(pt.prefixedName);

@@ -88,6 +88,39 @@ describe("InProcessConnection", () => {
     expect(tools.map((t) => t.name)).toContain("add");
   });
 
+  it("should list each tool's read-only annotation", async () => {
+    const collection: ToolCollectionExport = {
+      metadata: { name: "mixed", displayName: "Mixed", description: "Read and write tools" },
+      tools: () => [
+        createToolDef({
+          name: "annotated-read",
+          description: "Read-only by annotation",
+          inputSchema: {},
+          slices: ["read"],
+          annotations: { readOnlyHint: true },
+          handler: async () => ({ content: [] }),
+        }),
+        createToolDef({
+          name: "write",
+          description: "No annotation",
+          inputSchema: {},
+          slices: ["create"],
+          handler: async () => ({ content: [] }),
+        }),
+      ],
+    };
+    const connection = new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [collection],
+    });
+
+    const { tools } = await connection.listTools();
+    const hints = Object.fromEntries(tools.map((t) => [t.name, t.annotations?.readOnlyHint]));
+
+    expect(hints).toEqual({ "annotated-read": true, write: false });
+  });
+
   it("should return JSON Schema for inputSchema", async () => {
     const connection = new InProcessConnection({
       transport: "in-process",

@@ -10,6 +10,7 @@ import type {
   McpClientOptions,
   FilterConfig,
   McpConnection,
+  ChainedToolListing,
 } from "./types.js";
 
 /**
@@ -116,14 +117,37 @@ export class McpClientManager {
    *   servers use its carried Umbraco version to decide which tools to list
    */
   async listTools(serverName: string, context?: unknown): Promise<{
-    tools: Array<{
-      name: string;
-      description?: string;
-      inputSchema?: Record<string, unknown>;
-    }>;
+    tools: ChainedToolListing[];
   }> {
     const connection = await this.connect(serverName);
     return connection.listTools(context);
+  }
+
+  /**
+   * The filter configuration passed through to chained servers.
+   */
+  getFilterConfig(): FilterConfig | undefined {
+    return this.filterConfig;
+  }
+
+  /**
+   * Set the filter configuration passed through to chained servers.
+   *
+   * For a manager created before the server's configuration is resolved (a
+   * module-level singleton): call this once the config is loaded, so filters
+   * given as CLI flags reach chained servers too. It must run before the first
+   * connection, because a stdio server receives its filters when it is spawned.
+   *
+   * @throws If a chained server is already connected
+   */
+  setFilterConfig(filterConfig: FilterConfig | undefined): void {
+    if (this.connections.size > 0) {
+      throw new Error(
+        "setFilterConfig must be called before connecting to a chained MCP server: " +
+          `already connected to ${[...this.connections.keys()].join(", ")}.`,
+      );
+    }
+    this.filterConfig = filterConfig;
   }
 
   /**

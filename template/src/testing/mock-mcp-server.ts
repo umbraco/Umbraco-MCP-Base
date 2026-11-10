@@ -24,6 +24,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get-server-info",
       description: "Gets mock server information",
+      annotations: { readOnlyHint: true },
       inputSchema: {
         type: "object" as const,
         properties: {},
@@ -33,10 +34,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "echo-message",
       description: "Echoes the input message",
+      annotations: { readOnlyHint: true },
       inputSchema: {
         type: "object" as const,
         properties: {
           message: { type: "string", description: "The message to echo" },
+        },
+        required: ["message"],
+      },
+    },
+    {
+      // A write tool: no readOnlyHint, so a parent in readonly mode must not
+      // proxy it.
+      name: "update-message",
+      description: "Pretends to store a message",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          message: { type: "string", description: "The message to store" },
         },
         required: ["message"],
       },
@@ -64,6 +79,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name === "echo-message") {
     const message = args?.message as string;
     const data = { echo: `Mock CMS Echo: ${message}` };
+    return {
+      content: [],
+      structuredContent: data,
+    };
+  }
+
+  if (name === "update-message") {
+    const data = { stored: args?.message as string };
     return {
       content: [],
       structuredContent: data,
