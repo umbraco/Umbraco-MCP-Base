@@ -106,6 +106,9 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
     let text = "";
     const tools: string[] = [];
+    // Turns (assistant messages) that used each tool — a turn with 5 parallel Reads counts once.
+    const turnsByTool = new Map<string, number>();
+    let toolTurns = 0;
     const abortController = new AbortController();
 
     try {
@@ -125,10 +128,16 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
           },
         })) {
           if (message.type === "assistant" && message.message.content) {
+            const turnTools = new Set<string>();
             for (const block of message.message.content) {
               if (block.type === "text") text += block.text + "\n";
-              if (block.type === "tool_use") tools.push(block.name);
+              if (block.type === "tool_use") {
+                tools.push(block.name);
+                turnTools.add(block.name);
+              }
             }
+            if (turnTools.size > 0) toolTurns++;
+            for (const name of turnTools) turnsByTool.set(name, (turnsByTool.get(name) ?? 0) + 1);
           }
           if (message.type === "result") {
             const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
@@ -150,15 +159,15 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
       }
     } finally {
       abortController.abort();
-      // Per-tool breakdown of tool_use calls, so turn-count drift shows where the turns went.
+      // Per-tool breakdown of turns, so turn-count drift shows where the turns went.
       // Logged in finally so it is printed even when the run is cut off at the turn cap.
-      const counts = new Map<string, number>();
-      for (const name of tools) counts.set(name, (counts.get(name) ?? 0) + 1);
-      const breakdown = [...counts.entries()]
+      const breakdown = [...turnsByTool.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => `${name}=${count}`)
         .join(", ");
-      console.log(`[Skill E2E] Tool calls: ${tools.length} (${breakdown || "none"})`);
+      console.log(
+        `[Skill E2E] Tool turns: ${toolTurns}, tool calls: ${tools.length} (turns per tool: ${breakdown || "none"})`,
+      );
     }
 
     return { text, tools };
@@ -170,11 +179,7 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
 
     await runSkill(`/build-tools
 
-Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.${
-      fs.existsSync(path.join(projectDir, "tsconfig.e2e.json"))
-        ? " In this project, compile with `npx tsc --noEmit -p tsconfig.e2e.json` instead of npm run compile — it is the check this test runs, and it excludes worker files whose errors are not yours to fix."
-        : ""
-    }`, {
+Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`, {
       maxTurns: 50,
       maxBudget: 3.0,
     });

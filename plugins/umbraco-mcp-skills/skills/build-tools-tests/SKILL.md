@@ -32,7 +32,10 @@ tools for `culture`"), test exactly those. The rules below still apply, with the
   client or Zod files — `setup.ts` needs only the client getter, which the tool files already import
   (`import type { getXxxAPI } from ...`); copy that name and path, but import it as a value in `setup.ts`
   (drop `type`), since `setup.ts` calls it.
-- **Read-only collections skip Steps 4-6** (builder, helper, builder tests) as described in Step 3.
+- **Skip Steps 4-6** (builder, helper, builder tests) when the request is limited to read tools
+  (GET by id, list, search) — even if the collection itself has create/delete operations. Nothing
+  needs creating: for GET-by-id, take an id from the list response (or a well-known item such as the
+  default `en-US` language).
 - **Skip Step 8 (validation) and Step 10's full `npm test` and `/count-mcp-tools`.** Run only this
   collection's tests (`node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --testPathPatterns=src/umbraco-api/tools/{collection}/__tests__`) and report.
 - **Only read `instance-management.md` if you actually hit an instance roadblock.**
