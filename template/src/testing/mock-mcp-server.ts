@@ -13,6 +13,9 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+const readOnly =
+  process.argv.includes("--umbraco-readonly") || process.env.UMBRACO_READONLY === "true";
+
 const server = new Server(
   { name: "mock-cms-server", version: "1.0.0" },
   { capabilities: { tools: {} } }
@@ -24,7 +27,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get-server-info",
       description: "Gets mock server information",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         type: "object" as const,
         properties: {},
@@ -34,7 +36,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "echo-message",
       description: "Echoes the input message",
-      annotations: { readOnlyHint: true },
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -43,9 +44,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["message"],
       },
     },
-    {
-      // A write tool: no readOnlyHint, so a parent in readonly mode must not
-      // proxy it.
+    // A write tool, hidden in readonly mode the way an SDK-based server
+    // applies --umbraco-readonly / UMBRACO_READONLY.
+    ...(readOnly ? [] : [{
       name: "update-message",
       description: "Pretends to store a message",
       inputSchema: {
@@ -55,7 +56,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: ["message"],
       },
-    },
+    }]),
   ],
 }));
 
@@ -85,7 +86,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  if (name === "update-message") {
+  if (name === "update-message" && !readOnly) {
     const data = { stored: args?.message as string };
     return {
       content: [],

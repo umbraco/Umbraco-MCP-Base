@@ -84,23 +84,6 @@ describe("McpClientManager Integration", () => {
     expect(() => manager.setFilterConfig({ readOnly: true })).toThrow(
       /before connecting.*test/,
     );
-    expect(manager.getFilterConfig()).toBeUndefined();
-  });
-});
-
-describe("McpClientManager filter config", () => {
-  it("should expose the filter config it was created with", () => {
-    const manager = createMcpClientManager({ filterConfig: { readOnly: true } });
-
-    expect(manager.getFilterConfig()).toEqual({ readOnly: true });
-  });
-
-  it("should accept a filter config before any connection", () => {
-    const manager = createMcpClientManager();
-
-    manager.setFilterConfig({ readOnly: true, excludeSlices: ["delete"] });
-
-    expect(manager.getFilterConfig()).toEqual({ readOnly: true, excludeSlices: ["delete"] });
   });
 });
 

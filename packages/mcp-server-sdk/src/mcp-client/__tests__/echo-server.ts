@@ -24,8 +24,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "echo",
       description: "Echoes the input message",
-      // Read-only; "add" below deliberately has no annotations.
-      annotations: { readOnlyHint: true },
       inputSchema: {
         type: "object" as const,
         properties: {

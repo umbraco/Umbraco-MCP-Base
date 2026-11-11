@@ -44,15 +44,6 @@ describe("MCP Tool Proxy", () => {
       expect(proxiedTools.map((t) => t.prefixedName)).toContain("test--add");
     });
 
-    it("should carry the chained server's annotations", async () => {
-      const proxiedTools = await discoverProxiedTools(manager);
-      const byName = new Map(proxiedTools.map((t) => [t.prefixedName, t]));
-
-      expect(byName.get("test--echo")?.originalTool.annotations?.readOnlyHint).toBe(true);
-      expect(byName.get("test--add")?.originalTool.annotations).toBeUndefined();
-    });
-
-
     it("should include server name in proxied tools", async () => {
       const proxiedTools = await discoverProxiedTools(manager);
 
@@ -87,32 +78,6 @@ describe("MCP Tool Proxy", () => {
 
       expect(proxiedTools.length).toBe(0);
       await manager.disconnectAll();
-    });
-  });
-
-  describe("discoverProxiedTools in readonly mode", () => {
-    // The echo server is not built on the SDK and ignores --umbraco-readonly,
-    // so this covers a chained server that does not filter for itself.
-    const manager = createMcpClientManager({ filterConfig: { readOnly: true } });
-
-    beforeAll(() => {
-      manager.registerServer({
-        name: "test",
-        command: "npx",
-        args: ["tsx", path.resolve(__dirname, "echo-server.ts")],
-        proxyTools: true,
-      });
-    });
-
-    afterAll(async () => {
-      await manager.disconnectAll();
-    });
-
-    it("should return only tools annotated read-only", async () => {
-      const proxiedTools = await discoverProxiedTools(manager);
-
-      // "add" has no annotations, so it is treated as a write tool.
-      expect(proxiedTools.map((t) => t.prefixedName)).toEqual(["test--echo"]);
     });
   });
 

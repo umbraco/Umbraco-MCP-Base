@@ -414,12 +414,9 @@ import {
   proxiedToolsToDefinitions,
 } from '@umbraco-cms/mcp-server-sdk';
 
-// Create manager with filter passthrough. A stdio server receives these as
-// the SDK's --umbraco-* flags (--umbraco-include-slices, --umbraco-readonly, ...).
-// If the filters come from config that is resolved later, create the manager
-// without them and call manager.setFilterConfig(...) before the first connection.
+// Create manager with filter passthrough
 const manager = createMcpClientManager({
-  filterConfig: { slices: ['read', 'list'], readOnly: true }
+  filterConfig: { slices: ['read', 'list'] }
 });
 
 // Register a chained MCP server
@@ -445,7 +442,7 @@ const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
 
 ### Proxy Utilities
 
-- `discoverProxiedTools(manager)` - Discover all tools from registered servers. In readonly mode (the manager's `filterConfig.readOnly`) only tools annotated `readOnlyHint: true` are returned
+- `discoverProxiedTools(manager)` - Discover all tools from registered servers
 - `isProxiedToolName(name)` - Check if a tool name is a proxied tool
 - `parseProxiedToolName(name)` - Parse server and tool name from proxied name
 - `createProxyHandler(manager)` - Create a handler for proxied tool calls

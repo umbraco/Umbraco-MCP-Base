@@ -7,9 +7,8 @@
  * command line.
  *
  * Uses the template's mock chained server (USE_MOCK_MCP_CHAIN), which lists
- * two tools annotated read-only and one write tool (`update-message`). It is
- * not built on the SDK and ignores `--umbraco-readonly`, so these tests cover
- * a chained server that does not filter for itself.
+ * two read tools and one write tool (`update-message`), and hides the write
+ * tool when it receives readonly mode, as an SDK-based server does.
  */
 
 import { createCliTestClient, type CliTestClient } from "../helpers/cli-client.js";
@@ -39,7 +38,7 @@ describe("Chained tools in readonly mode (CLI)", () => {
     ]);
   });
 
-  it("proxies only read-only chained tools with --umbraco-readonly", async () => {
+  it("hides chained write tools with --umbraco-readonly", async () => {
     client = await createCliTestClient({ env: MOCK_CHAIN, args: ["--umbraco-readonly"] });
 
     expect(await proxiedToolNames(client)).toEqual([
@@ -48,7 +47,7 @@ describe("Chained tools in readonly mode (CLI)", () => {
     ]);
   });
 
-  it("proxies only read-only chained tools with UMBRACO_READONLY=true", async () => {
+  it("hides chained write tools with UMBRACO_READONLY=true", async () => {
     client = await createCliTestClient({ env: { ...MOCK_CHAIN, UMBRACO_READONLY: "true" } });
 
     expect(await proxiedToolNames(client)).toEqual([
@@ -72,15 +71,4 @@ describe("Chained tools in readonly mode (CLI)", () => {
     expect(failed).toBe(true);
   });
 
-  it("passes the chained server's annotations to the client", async () => {
-    client = await createCliTestClient({ env: MOCK_CHAIN });
-
-    const { tools } = await client.listTools();
-    const byName = new Map(
-      (tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>).map((t) => [t.name, t]),
-    );
-
-    expect(byName.get("cms--get-server-info")?.annotations?.readOnlyHint).toBe(true);
-    expect(byName.get("cms--update-message")?.annotations?.readOnlyHint).not.toBe(true);
-  });
 });

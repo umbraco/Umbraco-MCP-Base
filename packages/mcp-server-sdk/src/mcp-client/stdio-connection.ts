@@ -11,7 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConnection, McpStdioServerConfig, FilterConfig, ChainedToolListing } from "./types.js";
+import type { McpConnection, McpStdioServerConfig, FilterConfig } from "./types.js";
 
 /** List filters and the SDK CLI flag each is passed to a chained server as. */
 const LIST_FILTER_FLAGS = [
@@ -48,10 +48,20 @@ export class StdioConnection implements McpConnection {
   // `context` is accepted for interface symmetry and ignored: nothing
   // request-scoped crosses the process boundary.
   async listTools(_context?: unknown): Promise<{
-    tools: ChainedToolListing[];
+    tools: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: Record<string, unknown>;
+    }>;
   }> {
     const result = await this.client.listTools();
-    return result as { tools: ChainedToolListing[] };
+    return result as {
+      tools: Array<{
+        name: string;
+        description?: string;
+        inputSchema?: Record<string, unknown>;
+      }>;
+    };
   }
 
   async callTool(
@@ -89,12 +99,9 @@ export class StdioConnection implements McpConnection {
   }
 
   /**
-   * Build command arguments with filter passthrough.
-   *
-   * The flags are the SDK's own config flags (`CONFIG_FIELDS` in
-   * `config/config.ts`), so a chained server built on this SDK applies them
-   * the same way it applies its own command line. A flag given here wins over
-   * the matching environment variable the child inherits.
+   * Build command arguments with filter passthrough, using the SDK's own
+   * `--umbraco-*` config flags so a chained server built on the SDK applies
+   * them as it would its own command line.
    */
   private buildArgs(): string[] {
     const args = [...(this.config.args || [])];

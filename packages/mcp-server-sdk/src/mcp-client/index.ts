@@ -51,7 +51,6 @@ export type {
   McpClientOptions,
   FilterConfig,
   McpConnection,
-  ChainedToolListing,
 } from "./types.js";
 
 // Manager
