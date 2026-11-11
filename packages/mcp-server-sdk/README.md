@@ -445,7 +445,7 @@ const toolDefinitions = proxiedToolsToDefinitions(proxiedTools, manager);
 
 ### Proxy Utilities
 
-- `discoverProxiedTools(manager, options?)` - Discover all tools from registered servers. In readonly mode (`options.readOnly`, defaulting to the manager's `filterConfig.readOnly`) only tools annotated `readOnlyHint: true` are returned
+- `discoverProxiedTools(manager)` - Discover all tools from registered servers. In readonly mode (the manager's `filterConfig.readOnly`) only tools annotated `readOnlyHint: true` are returned
 - `isProxiedToolName(name)` - Check if a tool name is a proxied tool
 - `parseProxiedToolName(name)` - Parse server and tool name from proxied name
 - `createProxyHandler(manager)` - Create a handler for proxied tool calls

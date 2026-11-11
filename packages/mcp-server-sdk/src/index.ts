@@ -295,7 +295,6 @@ export {
   type FilterConfig,
   type ChainedToolListing,
   type ProxiedTool,
-  type DiscoverProxiedToolsOptions,
   type JsonSchema,
 } from "./mcp-client/index.js";
 

@@ -52,12 +52,6 @@ describe("MCP Tool Proxy", () => {
       expect(byName.get("test--add")?.originalTool.annotations).toBeUndefined();
     });
 
-    it("should return only tools annotated read-only when readOnly is set", async () => {
-      const proxiedTools = await discoverProxiedTools(manager, { readOnly: true });
-
-      // "add" has no annotations, so it is treated as a write tool.
-      expect(proxiedTools.map((t) => t.prefixedName)).toEqual(["test--echo"]);
-    });
 
     it("should include server name in proxied tools", async () => {
       const proxiedTools = await discoverProxiedTools(manager);
@@ -114,16 +108,11 @@ describe("MCP Tool Proxy", () => {
       await manager.disconnectAll();
     });
 
-    it("should default to the manager's readOnly filter", async () => {
+    it("should return only tools annotated read-only", async () => {
       const proxiedTools = await discoverProxiedTools(manager);
 
+      // "add" has no annotations, so it is treated as a write tool.
       expect(proxiedTools.map((t) => t.prefixedName)).toEqual(["test--echo"]);
-    });
-
-    it("should let an explicit readOnly option override the manager", async () => {
-      const proxiedTools = await discoverProxiedTools(manager, { readOnly: false });
-
-      expect(proxiedTools).toHaveLength(2);
     });
   });
 

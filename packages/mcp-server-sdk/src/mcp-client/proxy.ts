@@ -30,29 +30,16 @@ export interface ProxiedTool {
 }
 
 /**
- * Options for {@link discoverProxiedTools}.
- */
-export interface DiscoverProxiedToolsOptions {
-  /**
-   * When true, only tools the chained server annotates with
-   * `readOnlyHint: true` are returned. Defaults to the manager's
-   * `filterConfig.readOnly`.
-   */
-  readOnly?: boolean;
-}
-
-/**
  * Discovers tools from all registered MCP servers that have proxyTools enabled.
  * Returns an array of ProxiedTool definitions ready to be registered.
  *
- * In readonly mode a tool is returned only if the chained server annotates it
+ * In readonly mode (the manager's `filterConfig.readOnly`) a tool is returned only if the chained server annotates it
  * with `readOnlyHint: true`. The chained server is asked to filter too, but it
  * may not honour the request (it is not built on this SDK, or it is an older
  * release), so the parent does not rely on it: a tool with no annotation is
  * treated as a write tool.
  *
  * @param manager - The MCP client manager with registered servers
- * @param options - Discovery options
  * @returns Array of discovered tools with prefixed names
  *
  * @example
@@ -62,11 +49,10 @@ export interface DiscoverProxiedToolsOptions {
  * ```
  */
 export async function discoverProxiedTools(
-  manager: McpClientManager,
-  options?: DiscoverProxiedToolsOptions
+  manager: McpClientManager
 ): Promise<ProxiedTool[]> {
   const proxiedTools: ProxiedTool[] = [];
-  const readOnly = options?.readOnly ?? manager.getFilterConfig()?.readOnly ?? false;
+  const readOnly = manager.getFilterConfig()?.readOnly ?? false;
 
   for (const [serverName, config] of manager.getConfigs()) {
     // Skip servers that don't want their tools proxied

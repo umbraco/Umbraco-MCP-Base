@@ -6,11 +6,8 @@
 
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { ToolModeDefinition } from "../types/tool-mode.js";
+import type { ToolAnnotations } from "../types/tool-definition.js";
 
-/**
- * Abstract connection to an MCP server.
- * Implemented by StdioConnection (child process) and InProcessConnection (direct handler calls).
- */
 /**
  * A tool as listed by a chained MCP server.
  */
@@ -23,15 +20,13 @@ export interface ChainedToolListing {
    * The chained server's MCP tool annotations. `readOnlyHint` decides whether
    * the tool is proxied when the parent runs in readonly mode.
    */
-  annotations?: {
-    readOnlyHint?: boolean;
-    destructiveHint?: boolean;
-    idempotentHint?: boolean;
-    openWorldHint?: boolean;
-    title?: string;
-  };
+  annotations?: Partial<ToolAnnotations>;
 }
 
+/**
+ * Abstract connection to an MCP server.
+ * Implemented by StdioConnection (child process) and InProcessConnection (direct handler calls).
+ */
 export interface McpConnection {
   /**
    * @param context - Optional caller tool-call `context`/`extra`. In-process
