@@ -47,7 +47,8 @@ export {
   mergeConsentChoices,
   resolveRequestSite,
   runInSessionContext,
-  isAuthExpiredServer,
+  UmbracoSignInUnavailableError,
+  type SignInUnavailableReason,
   type CreateServerOptions,
   type InstructionsResolver,
   type SiteResolver,
@@ -99,6 +100,8 @@ export {
   createCallbackHandler,
   createLogoutCallbackHandler,
 } from "./auth/umbraco-handler.js";
+
+export { FlowBindingError } from "./auth/flow-cookies.js";
 
 export {
   getStoredUmbracoToken,

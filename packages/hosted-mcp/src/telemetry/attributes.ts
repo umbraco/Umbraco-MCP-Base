@@ -31,12 +31,25 @@ export const AUTH_REFRESH_SPAN = "mcp.auth.refresh";
 
 export const HostedTelemetryAttributes = {
   /**
-   * `full` when tools were registered, `degraded-auth-expired` when the KV token
-   * was gone or its refresh token was definitively rejected by Umbraco.
+   * `full` when tools were registered. When no server was built
+   * (`createPerRequestServer` throws `UmbracoSignInUnavailableError`):
+   * `auth-expired` when the user's session ended (KV token gone, or Umbraco
+   * rejected the refresh token), `auth-misconfigured` when Umbraco rejected the
+   * OAuth client or the refresh request — a fault an administrator must fix.
    */
   INIT_MODE: "umbraco.mcp.init.mode",
-  /** Number of tools registered on the server this request will use. */
+  /**
+   * Number of tools registered on the server this request will use. `0` when
+   * no server was built (`INIT_MODE` other than `full`).
+   */
   INIT_TOOL_COUNT: "umbraco.mcp.init.tool_count",
+  /**
+   * Why no server was built, set only when `INIT_MODE` isn't `full`: one
+   * of the `SignInUnavailableReason` values (`no-token-in-kv`,
+   * `refresh-rejected-expired`, `refresh-rejected-misconfigured`,
+   * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`.
+   */
+  INIT_CAUSE: "umbraco.mcp.init.cause",
   /** Whether a site was resolved (multi-site / cloud routing) — the alias itself is never recorded. */
   INIT_SITE_RESOLVED: "umbraco.mcp.init.site_resolved",
 
@@ -70,7 +83,7 @@ export const HostedTelemetryAttributes = {
 } as const;
 
 /** `umbraco.mcp.init.mode` values. */
-export type ServerInitMode = "full" | "degraded-auth-expired";
+export type ServerInitMode = "full" | "auth-expired" | "auth-misconfigured";
 
 /** `umbraco.mcp.auth.outcome` values. */
 export type AuthRefreshOutcome = "refreshed" | "failed";

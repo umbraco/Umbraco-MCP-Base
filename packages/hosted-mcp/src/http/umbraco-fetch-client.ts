@@ -7,7 +7,7 @@
  * compatible with api-call-helpers' validation logic.
  */
 
-import { normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
+import { buildFetchBody, normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import {
   getRejectedRefreshToken,
@@ -139,9 +139,11 @@ export interface UmbracoFetchClient {
   /**
    * The last refresh failure this client observed, or `undefined` if it has
    * never failed to refresh. `createPerRequestServer` reads this after its
-   * opening round-trips so a definitively dead session (`reason: "expired"`)
-   * can be surfaced as the degraded `authentication-expired` server rather
-   * than as a toolset that 401s on every call.
+   * opening round-trips so a definitively failed refresh (`reason` of
+   * `expired`, `misconfigured` or `request_rejected` — see
+   * `UNUSABLE_REFRESH_REASONS`) fails server creation
+   * (`UmbracoSignInUnavailableError`) rather than surfacing as a toolset that
+   * 401s on every call.
    */
   getRefreshFailure(): RefreshFailure | undefined;
   /**
@@ -318,15 +320,16 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     const queryString = serializeParams(requestConfig.params);
     const fullUrl = `${normalizedBaseUrl}${requestConfig.url}${queryString}`;
 
-    // Detect Web FormData (Cloudflare Workers + Node 18+). When present,
-    // pass straight to fetch — it sets multipart Content-Type with boundary.
-    const isWebFormData = requestConfig.data != null
-      && typeof (globalThis as any).FormData !== "undefined"
-      && requestConfig.data instanceof (globalThis as any).FormData;
+    // Same body rules as the SDK's fetch clients (FormData passes through and
+    // fetch sets the multipart Content-Type; anything else is JSON).
+    const { body, skipDefaultContentType } = await buildFetchBody(
+      requestConfig.data,
+      options?.signal
+    );
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${currentToken}`,
-      ...(isWebFormData ? {} : { "Content-Type": "application/json" }),
+      ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...requestConfig.headers,
     };
@@ -337,10 +340,8 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
       signal: options?.signal,
     };
 
-    if (requestConfig.data !== undefined) {
-      fetchOptions.body = isWebFormData
-        ? (requestConfig.data as FormData)
-        : JSON.stringify(requestConfig.data);
+    if (body !== undefined) {
+      fetchOptions.body = body;
     }
 
     let resp = await fetch(fullUrl, fetchOptions);

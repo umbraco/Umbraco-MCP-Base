@@ -32,6 +32,15 @@ import {
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
 import { getClientTenant } from "../tenant-oauth/binding-store.js";
+import {
+  FlowBindingError,
+  clearFlowCookieHeader,
+  hasMatchingFlowCookie,
+  isCrossSiteSubmission,
+  redirectResponse,
+  setFlowCookieHeader,
+  withSetCookies,
+} from "./flow-cookies.js";
 import { toHex } from "../crypto/hex.js";
 import {
   getBackofficeEndpoints,
@@ -320,15 +329,55 @@ export function createAuthorizeHandler(
   ): Promise<Response> => {
     const url = new URL(request.url);
 
+    // OAuthProvider only validates redirect_uri against the client's
+    // registration when both values are present, so require both here.
+    if (!authRequest.clientId || !authRequest.redirectUri) {
+      return invalidRequest("client_id and redirect_uri are required");
+    }
+
+    // PKCE with S256 is mandatory (OAuth 2.1; MCP authorization spec).
+    // OAuthProvider accepts requests without PKCE, or with "plain", unless
+    // configured otherwise, so enforce it here for every deployment.
+    if (!authRequest.codeChallenge || authRequest.codeChallengeMethod !== "S256") {
+      return invalidRequest("PKCE with code_challenge_method=S256 is required");
+    }
+
     // Handle POST (consent form submission)
     if (request.method === "POST") {
+      // The consent form only ever posts to its own origin.
+      if (isCrossSiteSubmission(request, url.origin)) {
+        return new Response("Consent must be submitted from the consent screen", { status: 403 });
+      }
+
       const formData = await request.formData();
 
-      // Validate CSRF state token (generated on GET, embedded as hidden field)
+      // Validate the consent state (generated on GET, embedded as a hidden
+      // field) and require that it was issued to this browser.
       const submittedState = formData.get("state")?.toString();
       if (!submittedState) {
         return new Response("Missing consent state", { status: 400 });
       }
+      const clearConsentCookie = clearFlowCookieHeader("consent", submittedState);
+      if (!hasMatchingFlowCookie(request, "consent", submittedState)) {
+        return withSetCookies(
+          new Response(
+            "This consent screen was not opened in this browser. Start the connection again from your AI client.",
+            { status: 403 }
+          ),
+          [clearConsentCookie]
+        );
+      }
+
+      const response = await handleConsentSubmission(formData, submittedState);
+      return withSetCookies(response, [clearConsentCookie]);
+    }
+
+    return renderConsent();
+
+    async function handleConsentSubmission(
+      formData: FormData,
+      submittedState: string
+    ): Promise<Response> {
       const consentStateData = await consumeOAuthState(env.OAUTH_KV, `consent:${submittedState}`);
       if (!consentStateData || consentStateData.clientId !== authRequest.clientId) {
         return new Response("Invalid or expired consent state", { status: 403 });
@@ -457,89 +506,128 @@ export function createAuthorizeHandler(
         );
         signoutUrl.searchParams.set("state", umbracoState);
         signoutUrl.searchParams.set("client_id", siteClientId);
-        return Response.redirect(signoutUrl.toString(), 302);
+        return redirectResponse(signoutUrl.toString(), [
+          setFlowCookieHeader("state", umbracoState),
+        ]);
       }
 
-      // Approve: redirect directly to Umbraco authorize
-      return Response.redirect(authUrl.toString(), 302);
+      // Approve: redirect directly to Umbraco authorize. The state cookie is
+      // set immediately before leaving for Umbraco and checked at /callback.
+      return redirectResponse(authUrl.toString(), [setFlowCookieHeader("state", umbracoState)]);
     }
 
-    // GET - show consent screen
-    const consentState = generateSecureRandom();
-    await storeOAuthState(env.OAUTH_KV, `consent:${consentState}`, {
-      clientId: authRequest.clientId,
-    });
+    async function renderConsent(): Promise<Response> {
+      // GET - show consent screen
+      const consentState = generateSecureRandom();
+      await storeOAuthState(env.OAUTH_KV, `consent:${consentState}`, {
+        clientId: authRequest.clientId,
+      });
 
-    // Resolve the site at consent-render time when URL-based site routing is on.
-    // This both validates the resource parameter early and lets us show the
-    // resolved site's display name + base URL on the consent screen.
-    let routedSite: SiteConfig | undefined;
-    if (siteRouting) {
-      const result = await resolveSiteFromResource(authRequest.resource);
-      if (!result.ok) return result.response;
-      routedSite = result.site;
+      // Resolve the site at consent-render time when URL-based site routing is on.
+      // This both validates the resource parameter early and lets us show the
+      // resolved site's display name + base URL on the consent screen.
+      let routedSite: SiteConfig | undefined;
+      if (siteRouting) {
+        const result = await resolveSiteFromResource(authRequest.resource);
+        if (!result.ok) return result.response;
+        routedSite = result.site;
 
-      // Confused-deputy defence (issue #100). Same check as the POST branch
-      // — also enforced on consent-screen render so the user never sees a
-      // consent prompt for a tenant the client isn't registered against.
-      // Defence-in-depth: every extractable resource alias must match.
-      if (
-        !checkAllResourceAliasesMatchClient(
-          authRequest.resource,
-          sitePrefixRegex!,
-          await getClientTenant(env.OAUTH_KV, authRequest.clientId),
-          routedSite.id
-        )
-      ) {
-        return new Response(
-          JSON.stringify({
-            error: "invalid_client",
-            error_description: "Client not registered for this site",
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
+        // Confused-deputy defence (issue #100). Same check as the POST branch
+        // — also enforced on consent-screen render so the user never sees a
+        // consent prompt for a tenant the client isn't registered against.
+        // Defence-in-depth: every extractable resource alias must match.
+        if (
+          !checkAllResourceAliasesMatchClient(
+            authRequest.resource,
+            sitePrefixRegex!,
+            await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+            routedSite.id
+          )
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: "invalid_client",
+              error_description: "Client not registered for this site",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
       }
+
+      // Build sites list for consent screen.
+      // - URL-based routing: single resolved site (renders as a hidden input, no picker).
+      // - Static multi-site: the configured list (renders as a radio picker).
+      const consentSites = routedSite
+        ? [
+            {
+              id: routedSite.id,
+              displayName: routedSite.displayName,
+              baseUrl: routedSite.baseUrl,
+            },
+          ]
+        : options?.sites?.map((s) => ({
+            id: s.id,
+            displayName: s.displayName,
+            baseUrl: s.baseUrl,
+          }));
+
+      // Show reauth button only when the operator enabled it AND this client
+      // has completed at least one auth flow before (KV marker exists)
+      let showReauthButton = false;
+      if (options?.showReauthButton) {
+        showReauthButton = await isClientAuthed(env.OAUTH_KV, authRequest.clientId);
+      }
+
+      // The consent cookie binds this consent state to the browser shown the screen.
+      return withSetCookies(
+        consentResponse({
+          clientName: await lookupClientName(env, authRequest.clientId),
+          clientId: authRequest.clientId,
+          umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
+          scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
+          redirectUri: authRequest.redirectUri,
+          actionUrl: url.toString(),
+          state: consentState,
+          toolConfig: options?.consentToolConfig,
+          serverName: options?.serverName,
+          customCss: options?.customCss,
+          renderConsent: options?.renderConsent,
+          sites: consentSites,
+          showReauthButton,
+        }),
+        [setFlowCookieHeader("consent", consentState)]
+      );
     }
-
-    // Build sites list for consent screen.
-    // - URL-based routing: single resolved site (renders as a hidden input, no picker).
-    // - Static multi-site: the configured list (renders as a radio picker).
-    const consentSites = routedSite
-      ? [
-          {
-            id: routedSite.id,
-            displayName: routedSite.displayName,
-            baseUrl: routedSite.baseUrl,
-          },
-        ]
-      : options?.sites?.map((s) => ({
-          id: s.id,
-          displayName: s.displayName,
-          baseUrl: s.baseUrl,
-        }));
-
-    // Show reauth button only when the operator enabled it AND this client
-    // has completed at least one auth flow before (KV marker exists)
-    let showReauthButton = false;
-    if (options?.showReauthButton) {
-      showReauthButton = await isClientAuthed(env.OAUTH_KV, authRequest.clientId);
-    }
-
-    return consentResponse({
-      clientName: authRequest.clientId,
-      umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
-      scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
-      redirectUri: authRequest.redirectUri,
-      actionUrl: url.toString(),
-      state: consentState,
-      toolConfig: options?.consentToolConfig,
-      serverName: options?.serverName,
-      customCss: options?.customCss,
-      renderConsent: options?.renderConsent,
-      sites: consentSites,
-      showReauthButton,
-    });
   };
+}
+
+function invalidRequest(description: string): Response {
+  return new Response(
+    JSON.stringify({ error: "invalid_request", error_description: description }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
+
+/**
+ * Returns the client's registered `client_name`, or `undefined` when the
+ * client registered without one (or can't be looked up).
+ */
+async function lookupClientName(
+  env: HostedMcpEnv,
+  clientId: string
+): Promise<string | undefined> {
+  if (typeof env.OAUTH_PROVIDER?.lookupClient !== "function") return undefined;
+  try {
+    const client = (await env.OAUTH_PROVIDER.lookupClient(clientId)) as
+      | { clientName?: unknown }
+      | null
+      | undefined;
+    return typeof client?.clientName === "string" && client.clientName.trim()
+      ? client.clientName.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ============================================================================
@@ -575,6 +663,13 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     if (!code || !state) {
       throw new Error("Missing code or state parameter in callback");
+    }
+
+    // The state must come back to the browser that approved the consent
+    // screen. Checked before consuming state or exchanging the code, so a
+    // rejected callback never touches Umbraco tokens.
+    if (!hasMatchingFlowCookie(request, "state", state)) {
+      throw new FlowBindingError();
     }
 
     // Consume state (single-use)

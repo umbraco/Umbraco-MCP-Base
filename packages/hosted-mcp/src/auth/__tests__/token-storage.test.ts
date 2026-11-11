@@ -461,11 +461,24 @@ describe("getRejectedRefreshToken", () => {
     expect(getRejectedRefreshToken(result as RefreshFailure)).toBe("rotated");
   });
 
-  it("reports nothing for a non-expired failure", async () => {
-    respondWith(json({ error: "invalid_client" }, 401));
+  it.each([
+    ["misconfigured", "invalid_client", 401],
+    ["request_rejected", "invalid_scope", 400],
+  ] as const)("reports the posted token for a %s failure", async (reason, error, status) => {
+    respondWith(json({ error }, status));
 
-    const result = await refreshUmbracoToken(createEnv(createKv()), "key-rejected-client", "rt");
+    const result = await refreshUmbracoToken(createEnv(createKv()), `key-rejected-${reason}`, "rt");
 
+    expect((result as RefreshFailure).reason).toBe(reason);
+    expect(getRejectedRefreshToken(result as RefreshFailure)).toBe("rt");
+  });
+
+  it("reports nothing for a transient failure", async () => {
+    respondWith(json({ error: "server_error" }, 503));
+
+    const result = await refreshUmbracoToken(createEnv(createKv()), "key-rejected-transient", "rt");
+
+    expect((result as RefreshFailure).reason).toBe("server_error");
     expect(getRejectedRefreshToken(result as RefreshFailure)).toBeUndefined();
   });
 });

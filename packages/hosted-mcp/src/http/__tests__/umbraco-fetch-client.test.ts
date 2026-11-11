@@ -100,6 +100,22 @@ describe("createUmbracoFetchClient", () => {
       );
     });
 
+    it("passes Web FormData through without the default JSON Content-Type", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(201, null));
+      const fd = new FormData();
+      fd.append("file", new Blob(["hello"]), "hello.txt");
+
+      const client = createUmbracoFetchClient(baseConfig);
+      await client(
+        { method: "post", url: "/umbraco/api/v1/temporary-file", data: fd },
+        CAPTURE_RAW_HTTP_RESPONSE
+      );
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).body).toBe(fd);
+      expect((options as RequestInit).headers).not.toHaveProperty("Content-Type");
+    });
+
     it("does not include body for GET requests", async () => {
       mockFetch.mockResolvedValue(createJsonResponse(200, []));
 

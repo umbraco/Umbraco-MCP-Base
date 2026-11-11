@@ -924,19 +924,32 @@ describe("createPerRequestServer with instructions", () => {
   const getInstructions = (server: { server: unknown }): string | undefined =>
     (server.server as { _instructions?: string })._instructions;
 
-  // Stub OAUTH_KV.get to return null so createFetchClientFromKV returns null
-  // and we get the early "degraded server" path. The McpServer is constructed
-  // before that early-return, so its _instructions field is observable.
+  // A stored, unexpired token drives the full path; every Umbraco round-trip
+  // (current user, server information) is answered by the `fetch` stub below.
   const mockEnv = {
     UMBRACO_BASE_URL: "https://example.com",
     UMBRACO_OAUTH_CLIENT_ID: "test-client",
     COOKIE_ENCRYPTION_KEY: "0".repeat(64),
     OAUTH_KV: {
-      get: async () => null,
+      get: async () =>
+        JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } }),
       put: async () => undefined,
       delete: async () => undefined,
     },
   } as unknown as HostedMcpEnv;
+
+  let originalFetch: typeof fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ version: "17.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   const mockProps: AuthProps = {
     userId: "user-1",
