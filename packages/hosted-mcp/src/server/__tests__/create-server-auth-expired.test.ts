@@ -458,7 +458,9 @@ describe("createPerRequestServer with a rejected refresh token", () => {
 
       expect(server).toBeUndefined();
       expect((await expectSignInUnavailable(error)).reason).toBe(cause);
-      expect(kvDelete).toHaveBeenCalledTimes(1);
+      // Both the encrypted entry and any legacy plaintext entry are removed.
+      expect(kvDelete).toHaveBeenCalledTimes(2);
+      expect(kvDelete).toHaveBeenCalledWith(await umbracoTokenKvKey(props.umbracoTokenKey));
       expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
     }
   );

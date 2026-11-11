@@ -931,8 +931,11 @@ describe("createPerRequestServer with instructions", () => {
     UMBRACO_OAUTH_CLIENT_ID: "test-client",
     COOKIE_ENCRYPTION_KEY: "0".repeat(64),
     OAUTH_KV: {
-      get: async () =>
-        JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } }),
+      // A plaintext entry from before encryption at rest (legacy key only).
+      get: async (key: string) =>
+        key.startsWith("umbraco_token:")
+          ? JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } })
+          : null,
       put: async () => undefined,
       delete: async () => undefined,
     },
