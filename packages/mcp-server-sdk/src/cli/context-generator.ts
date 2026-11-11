@@ -11,18 +11,52 @@ import { CollectionConfiguration } from "../types/collection-configuration.js";
 import { toolToJsonSchema } from "./introspection.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 
+type JsonSchemaNode = Record<string, unknown>;
+
 /**
- * Render a JSON Schema node as a short type label for the context file.
+ * Render a JSON Schema node as a short type label for the context file,
+ * e.g. `string`, `string | null`, `string[]`, `Node`, `A & B`.
  */
-function describeType(schema: Record<string, unknown>): string {
+function describeType(schema: JsonSchemaNode): string {
   const t = schema.type;
+  if (t === "array") {
+    const items = schema.items as JsonSchemaNode | undefined;
+    if (!items) return "array";
+    const inner = describeType(items);
+    return /[|&]/.test(inner) ? `(${inner})[]` : `${inner}[]`;
+  }
   if (typeof t === "string") return t;
   if (Array.isArray(t) && t.length > 0) return t.join(" | ");
   const union = schema.anyOf ?? schema.oneOf;
   if (Array.isArray(union) && union.length > 0) {
-    return union.map((b) => describeType(b as Record<string, unknown>)).join(" | ");
+    return union.map((b) => describeType(b as JsonSchemaNode)).join(" | ");
   }
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    return schema.allOf.map((b) => describeType(b as JsonSchemaNode)).join(" & ");
+  }
+  if (typeof schema.$ref === "string") {
+    // "#/$defs/TreeNode" -> "TreeNode"; a bare "#" is a recursive self-reference
+    const name = schema.$ref.split("/").pop();
+    return name && name !== "#" ? name : "object";
+  }
+  if ("const" in schema) return JSON.stringify(schema.const);
   return "any";
+}
+
+/**
+ * Find a node's description. For `.describe(...).nullable()` Zod puts the
+ * description on the non-null `anyOf` branch, not on the property itself.
+ */
+function findDescription(schema: JsonSchemaNode): string | undefined {
+  if (typeof schema.description === "string") return schema.description;
+  const union = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(union)) {
+    for (const branch of union) {
+      const d = findDescription(branch as JsonSchemaNode);
+      if (d) return d;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -101,15 +135,25 @@ export function generateContextFile(
       lines.push("");
 
       // Parameters
-      const jsonSchema = toolToJsonSchema(tool);
+      // One tool whose schema can't be converted shouldn't break the whole file
+      let jsonSchema: JsonSchemaNode;
+      try {
+        jsonSchema = toolToJsonSchema(tool);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        lines.push(`_Parameters unavailable: ${reason}_`);
+        lines.push("");
+        jsonSchema = {};
+      }
       const properties = jsonSchema.properties as Record<string, unknown> | undefined;
       if (properties && Object.keys(properties).length > 0) {
         lines.push("**Parameters:**");
         lines.push("");
         for (const [key, schema] of Object.entries(properties)) {
-          const s = schema as Record<string, unknown>;
+          const s = schema as JsonSchemaNode;
           const type = describeType(s);
-          const desc = s.description ? ` — ${s.description}` : "";
+          const description = findDescription(s);
+          const desc = description ? ` — ${description}` : "";
           const required = (jsonSchema.required as string[] | undefined)?.includes(key);
           lines.push(`- \`${key}\` (${type}${required ? ", required" : ""})${desc}`);
         }

@@ -6,8 +6,8 @@
  * for command-line use (--list-tools, --describe-tool).
  */
 
-import { z, ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
+import { toJsonSchema } from "../helpers/strict-json-schema-tools.js";
 
 /**
  * Summary of a single tool for table display.
@@ -27,18 +27,11 @@ export interface ToolSummary {
  * become `{}` instead of throwing.
  */
 export function toolToJsonSchema(tool: ToolDefinition<any, any>): Record<string, unknown> {
-  const schema = tool.inputSchema;
-  if (!schema) {
-    return { type: "object", properties: {} };
-  }
-
-  // Accept a full ZodType as well as a raw shape, as --call-tool does
-  const wrapped = schema instanceof ZodType ? schema : z.object(schema as ZodRawShape);
-  return z.toJSONSchema(wrapped, {
-    target: "draft-2020-12",
-    io: "input",
-    unrepresentable: "any",
-  }) as Record<string, unknown>;
+  // Same conversion as ListTools (accepts raw shapes and classic or Mini Zod
+  // schemas), but unrepresentable types become {} instead of throwing.
+  return (
+    toJsonSchema(tool.inputSchema, "input", { unrepresentable: "any" }) ?? { type: "object", properties: {} }
+  );
 }
 
 /**

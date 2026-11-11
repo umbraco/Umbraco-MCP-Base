@@ -162,7 +162,15 @@ export async function handleCliCommands(
         if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
           break; // Tool exists but is filtered out — fall through to "not found"
         }
-        const schema = toolToJsonSchema(tool);
+        let schema: Record<string, unknown>;
+        try {
+          schema = toolToJsonSchema(tool);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          console.error(`Could not convert the input schema for '${toolName}' to JSON Schema: ${reason}`);
+          await exitAfterFlush(1);
+          return;
+        }
         console.log(
           JSON.stringify(
             {
