@@ -17,10 +17,10 @@
  * `17/umbraco-in-ai/mcp/base-mcp/sdk/tool-types.md` (UmbracoDocs) for
  * full usage, options, and consumer wiring.
  */
-import { z } from "zod";
 import { compile } from "json-schema-to-typescript";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { ToolDefinition } from "../types/tool-definition.js";
+import { toJsonSchema } from "../helpers/strict-json-schema-tools.js";
 import { createPermissiveCodegenUser } from "./permissive-user.js";
 
 /**
@@ -58,19 +58,15 @@ function pascal(name: string): string {
     .join("");
 }
 
-function toJsonSchema(schemaOrShape: unknown): unknown {
+function schemaToJson(schemaOrShape: unknown, io: "input" | "output"): unknown {
   if (schemaOrShape === undefined || schemaOrShape === null) return null;
   if (typeof schemaOrShape !== "object") {
     throw new Error(
       `Invalid schema: expected a ZodType or plain-object ZodRawShape, got ${typeof schemaOrShape}`,
     );
   }
-  // ZodType has a `_def`; ZodRawShape is a plain object whose values are ZodTypes.
-  const wrapped =
-    "_def" in (schemaOrShape as Record<string, unknown>)
-      ? (schemaOrShape as z.ZodType)
-      : z.object(schemaOrShape as z.ZodRawShape);
-  return z.toJSONSchema(wrapped, { target: "draft-2020-12" });
+  // Shared with tools/list and --describe-tool so required/defaulted fields agree.
+  return toJsonSchema(schemaOrShape, io);
 }
 
 export async function runCodegen(
@@ -143,8 +139,9 @@ export async function runCodegen(
 
     try {
       // `schema` is a deprecated alias for `inputSchema`.
-      const inputSchema = toJsonSchema(
+      const inputSchema = schemaToJson(
         tool.inputSchema ?? (tool as { schema?: unknown }).schema,
+        "input",
       );
       if (inputSchema) {
         const compiled = await compile(inputSchema as object, inputTypeName, {
@@ -164,7 +161,7 @@ export async function runCodegen(
     }
 
     try {
-      const outputSchema = toJsonSchema(tool.outputSchema);
+      const outputSchema = schemaToJson(tool.outputSchema, "output");
       if (outputSchema) {
         const compiled = await compile(outputSchema as object, outputTypeName, {
           bannerComment: "",

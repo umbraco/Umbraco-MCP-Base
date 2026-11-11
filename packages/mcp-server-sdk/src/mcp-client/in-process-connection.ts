@@ -22,10 +22,10 @@
  * otherwise the handler inherits the caller's store (and so its client).
  */
 
-import { z, type ZodRawShape } from "zod";
 import type { ToolDefinition } from "../types/tool-definition.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
 import { DEFAULT_COLLECTION_CONFIG } from "../types/collection-configuration.js";
+import { toJsonSchema } from "../helpers/strict-json-schema-tools.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 import { createCollectionConfigLoader } from "../tool-filtering/collection-config-loader.js";
 import type { McpConnection, McpInProcessServerConfig, FilterConfig } from "./types.js";
@@ -65,9 +65,7 @@ export class InProcessConnection implements McpConnection {
       tools: tools.map(({ tool }) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema
-          ? (z.toJSONSchema(z.object(tool.inputSchema as ZodRawShape)) as Record<string, unknown>)
-          : { type: "object", properties: {} },
+        inputSchema: toJsonSchema(tool.inputSchema, "input") ?? { type: "object", properties: {} },
       })),
     };
   }

@@ -224,6 +224,41 @@ describe("runCodegen", () => {
       expect(versions).toEqual([undefined, CODEGEN_NEWEST_UMBRACO_VERSION]);
     });
   });
+
+  describe("input/output schema conversion", () => {
+    const run = (inputSchema: unknown) =>
+      runCodegen({
+        collections: [
+          {
+            metadata: { name: "c", displayName: "C", description: "" },
+            tools: () => [
+              {
+                name: "list-things",
+                description: "d",
+                inputSchema,
+                outputSchema: z.object({ limit: z.number().default(10) }),
+                slices: ["read"],
+                handler: async () => ({ content: [] }),
+              } as any,
+            ],
+          },
+        ],
+        registryName: "T",
+      });
+
+    it("makes defaulted input fields optional, but keeps them required in output", async () => {
+      const { output, skipped } = await run({ q: z.string(), limit: z.number().default(10) });
+      expect(skipped).toEqual([]);
+      expect(output).toMatch(/interface ListThingsInput \{[^}]*q: string;[^}]*limit\?: number;/s);
+      expect(output).toMatch(/interface ListThingsOutput \{[^}]*limit: number;/s);
+    });
+
+    it("treats a full ZodObject inputSchema as a schema, not a raw shape", async () => {
+      const { output, skipped } = await run(z.object({ q: z.string(), limit: z.number().default(10) }));
+      expect(skipped).toEqual([]);
+      expect(output).toMatch(/interface ListThingsInput \{[^}]*q: string;[^}]*limit\?: number;/s);
+    });
+  });
 });
 
 import { execFileSync } from "node:child_process";
