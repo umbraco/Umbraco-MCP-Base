@@ -144,6 +144,124 @@ export async function consumeOAuthState(
 // ============================================================================
 
 /**
+ * Umbraco token entries are encrypted at rest.
+ *
+ * `tokenKey` is a 256-bit random value that only ever lives inside the MCP
+ * grant's props, which the OAuth provider library encrypts. From it we derive
+ * both the KV key name (a SHA-256 hash, so the name doesn't reveal tokenKey)
+ * and an AES-256-GCM key (HKDF). Someone who can read the KV namespace sees
+ * only ciphertext under hashed names and can't recover Umbraco tokens or site
+ * client secrets without also holding a live MCP grant.
+ *
+ * Entries written before encryption (`umbraco_token:<tokenKey>`, plain JSON)
+ * are still read, and are replaced by an encrypted entry the next time the
+ * tokens are stored (login or refresh). They are not rewritten on read: a
+ * read-time migration could race a concurrent refresh and put back a refresh
+ * token Umbraco has already rotated.
+ */
+const ENTRY_PREFIX = "umbraco_token_v2:";
+const LEGACY_ENTRY_PREFIX = "umbraco_token:";
+const ENTRY_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const ENTRY_HKDF_INFO = "umbraco-mcp-hosted/umbraco-token-entry/v2";
+
+const textEncoder = new TextEncoder();
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** KV key of the encrypted entry for `tokenKey`. Exported for tests. */
+export async function umbracoTokenKvKey(tokenKey: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    textEncoder.encode(`umbraco-token-kv-name:${tokenKey}`)
+  );
+  return ENTRY_PREFIX + toBase64Url(new Uint8Array(digest));
+}
+
+async function entryCryptoKey(tokenKey: string): Promise<CryptoKey> {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(tokenKey),
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: textEncoder.encode(ENTRY_HKDF_INFO) },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+interface SealedEntry {
+  v: 2;
+  iv: string;
+  ct: string;
+}
+
+async function sealEntry(tokenKey: string, kvKey: string, entry: StoredTokenEntry): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    // The KV key is bound as additional data, so a ciphertext can't be moved
+    // to another entry's slot.
+    { name: "AES-GCM", iv, additionalData: textEncoder.encode(kvKey) },
+    await entryCryptoKey(tokenKey),
+    textEncoder.encode(JSON.stringify(entry))
+  );
+  const sealed: SealedEntry = { v: 2, iv: toBase64Url(iv), ct: toBase64Url(new Uint8Array(ciphertext)) };
+  return JSON.stringify(sealed);
+}
+
+/**
+ * Encrypts `entry` the way `storeUmbracoToken` stores it, without writing it
+ * or touching the rotation cache.
+ * @internal Exported for tests that simulate another writer.
+ */
+export async function sealUmbracoTokenEntry(
+  tokenKey: string,
+  entry: StoredTokenEntry
+): Promise<{ kvKey: string; value: string }> {
+  const kvKey = await umbracoTokenKvKey(tokenKey);
+  return { kvKey, value: await sealEntry(tokenKey, kvKey, entry) };
+}
+
+async function openEntry(tokenKey: string, kvKey: string, data: string): Promise<StoredTokenEntry | null> {
+  try {
+    const sealed = JSON.parse(data) as SealedEntry;
+    if (sealed?.v !== 2 || typeof sealed.iv !== "string" || typeof sealed.ct !== "string") {
+      throw new TypeError("unrecognised entry format");
+    }
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64Url(sealed.iv), additionalData: textEncoder.encode(kvKey) },
+      await entryCryptoKey(tokenKey),
+      fromBase64Url(sealed.ct)
+    );
+    return JSON.parse(new TextDecoder().decode(plaintext)) as StoredTokenEntry;
+  } catch (error) {
+    // Error name only — never the stored value or the key.
+    console.warn(
+      `[mcp-hosted] stored Umbraco token entry could not be decrypted; treating it as missing (error=${sanitizeForLog(
+        error instanceof Error ? error.name : "unknown"
+      )})`
+    );
+    return null;
+  }
+}
+
+/**
  * Stores Umbraco tokens in KV.
  *
  * Uses a long TTL (30 days) rather than matching the access token lifetime.
@@ -165,11 +283,12 @@ export async function storeUmbracoToken(
   );
   const stamped = withExpiresAt(tokens);
   const entry: StoredTokenEntry = site ? { tokens: stamped, site } : { tokens: stamped };
-  await kv.put(
-    `umbraco_token:${tokenKey}`,
-    JSON.stringify(entry),
-    { expirationTtl: 30 * 24 * 60 * 60 } // 30 days
-  );
+  const kvKey = await umbracoTokenKvKey(tokenKey);
+  await kv.put(kvKey, await sealEntry(tokenKey, kvKey, entry), {
+    expirationTtl: ENTRY_TTL_SECONDS,
+  });
+  // Replace any plaintext entry from before encryption at rest.
+  await kv.delete(`${LEGACY_ENTRY_PREFIX}${tokenKey}`);
   // This write is now the source of truth for `tokenKey` — whether it's a
   // refresh's rotation or a fresh login. Drop any cached rotated token so a
   // stale one from an earlier failed write can never outrank it.
@@ -205,7 +324,8 @@ export async function deleteStoredUmbracoToken(
   if (current && current.tokens?.refresh_token !== rejectedRefreshToken) {
     return false;
   }
-  await kv.delete(`umbraco_token:${tokenKey}`);
+  await kv.delete(await umbracoTokenKvKey(tokenKey));
+  await kv.delete(`${LEGACY_ENTRY_PREFIX}${tokenKey}`);
   // A cached rotation for a dead session must not outlive its KV entry.
   lastRotatedTokens.delete(tokenKey);
   return true;
@@ -214,15 +334,20 @@ export async function deleteStoredUmbracoToken(
 /**
  * Retrieves a stored Umbraco token entry from KV.
  *
- * Reads both the current `{ tokens, site? }` envelope and the legacy
- * top-level TokenResponse format (so entries written before the envelope
- * landed still authenticate; they just won't have site context for refresh).
+ * Reads the encrypted entry first. Falls back to a plaintext entry written
+ * before encryption at rest, in either the `{ tokens, site? }` envelope or
+ * the older top-level TokenResponse format (those authenticate but have no
+ * site context for refresh).
  */
 export async function getStoredUmbracoToken(
   kv: KVNamespace,
   tokenKey: string
 ): Promise<StoredTokenEntry | null> {
-  const data = await kv.get(`umbraco_token:${tokenKey}`);
+  const kvKey = await umbracoTokenKvKey(tokenKey);
+  const sealed = await kv.get(kvKey);
+  if (sealed) return openEntry(tokenKey, kvKey, sealed);
+
+  const data = await kv.get(`${LEGACY_ENTRY_PREFIX}${tokenKey}`);
   if (!data) return null;
 
   try {

@@ -5,6 +5,7 @@ import {
   CAPTURE_RAW_HTTP_RESPONSE,
 } from "../umbraco-fetch-client.js";
 import type { HostedMcpEnv } from "../../types/env.js";
+import { getStoredUmbracoToken } from "../../auth/token-storage.js";
 
 // Mock global fetch
 const mockFetch = jest.fn<typeof fetch>();
@@ -633,10 +634,13 @@ describe("createUmbracoFetchClient", () => {
 
     it("prefers the refresh token persisted in KV over the caller's snapshot", async () => {
       const mockKV = {
-        get: jest.fn<(...args: unknown[]) => Promise<string | null>>().mockResolvedValue(
-          JSON.stringify({
-            tokens: { access_token: "kv-access", refresh_token: "kv-rotated-refresh" },
-          })
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: jest.fn<(key: string) => Promise<string | null>>(async (key) =>
+          key.startsWith("umbraco_token:")
+            ? JSON.stringify({
+                tokens: { access_token: "kv-access", refresh_token: "kv-rotated-refresh" },
+              })
+            : null
         ),
         put: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
         delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
@@ -745,7 +749,7 @@ describe("getSessionAuth", () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(isTokenEndpoint(mockFetch.mock.calls[0])).toBe(true);
-    const stored = JSON.parse(kv.store.get("umbraco_token:session-key")!);
+    const stored = (await getStoredUmbracoToken(kv as unknown as KVNamespace, "session-key"))!;
     expect(stored.tokens.expires_at).toBeGreaterThanOrEqual(before + 300_000);
 
     // The new expiry is adopted, so the next call needs no request at all.

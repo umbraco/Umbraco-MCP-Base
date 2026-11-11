@@ -102,6 +102,7 @@ export {
 } from "./auth/umbraco-handler.js";
 
 export { FlowBindingError } from "./auth/flow-cookies.js";
+export { UpstreamAuthorizationError } from "./auth/umbraco-handler.js";
 
 export {
   getStoredUmbracoToken,

@@ -80,3 +80,70 @@ describe("/callback browser binding", () => {
     expect(response.headers.get("Content-Type")).toBe("application/json");
   });
 });
+
+describe("/callback when Umbraco returns an error", () => {
+  const CLIENT_REDIRECT = "https://client.example.com/oauth/callback";
+
+  function envWithState() {
+    const data = new Map<string, string>([
+      [
+        `oauth_state:${STATE}`,
+        JSON.stringify({
+          authRequest: { clientId: "client-1", redirectUri: CLIENT_REDIRECT, state: "client-state" },
+          codeVerifier: "v",
+          callbackPath: "/callback",
+        }),
+      ],
+    ]);
+    const env = {
+      ...makeEnv(),
+      OAUTH_KV: {
+        get: async (key: string) => data.get(key) ?? null,
+        put: async () => undefined,
+        delete: async (key: string) => {
+          data.delete(key);
+        },
+      } as unknown as KVNamespace,
+    };
+    return { env, data };
+  }
+
+  function errorCallback(error: string, withCookie: boolean) {
+    return new Request(
+      `https://worker.example.com/callback?error=${error}&error_description=attacker+text&state=${STATE}`,
+      withCookie ? { headers: { Cookie: `${flowCookieName("state", STATE)}=${STATE}` } } : {}
+    );
+  }
+
+  it("ends the flow and sends access_denied to the MCP client in the browser that started it", async () => {
+    const { env, data } = envWithState();
+    const response = await handler.fetch(errorCallback("access_denied", true), env);
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("Location")!);
+    expect(`${location.origin}${location.pathname}`).toBe(CLIENT_REDIRECT);
+    expect(location.searchParams.get("error")).toBe("access_denied");
+    expect(location.searchParams.get("state")).toBe("client-state");
+    // Umbraco's own description is never forwarded.
+    expect(location.searchParams.get("error_description")).not.toContain("attacker");
+    expect(data.has(`oauth_state:${STATE}`)).toBe(false);
+    expect(response.headers.getSetCookie()).toEqual([
+      `${flowCookieName("state", STATE)}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`,
+    ]);
+  });
+
+  it("maps an unexpected upstream error code to server_error", async () => {
+    const { env } = envWithState();
+    const response = await handler.fetch(errorCallback("invalid_scope", true), env);
+    expect(new URL(response.headers.get("Location")!).searchParams.get("error")).toBe("server_error");
+  });
+
+  it("does not redirect, or consume the state, without the browser's state cookie", async () => {
+    const { env, data } = envWithState();
+    const response = await handler.fetch(errorCallback("access_denied", false), env);
+
+    expect(response.headers.get("Location")).toBeNull();
+    expect(response.status).toBe(400);
+    expect(data.has(`oauth_state:${STATE}`)).toBe(true);
+  });
+});

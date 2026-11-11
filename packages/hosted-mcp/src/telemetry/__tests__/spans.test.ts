@@ -281,7 +281,9 @@ describe("mcp.auth.refresh span", () => {
     const rotatedEnv = {
       ...refreshEnv,
       OAUTH_KV: {
-        get: async () => {
+        // Plaintext entries from before encryption at rest (legacy key only).
+        get: async (key: string) => {
+          if (!key.startsWith("umbraco_token:")) return null;
           const entry = entries[Math.min(reads, entries.length - 1)];
           reads += 1;
           return entry;

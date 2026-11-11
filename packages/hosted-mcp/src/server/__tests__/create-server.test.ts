@@ -1030,7 +1030,9 @@ describe("createPerRequestServer — version check", () => {
       UMBRACO_OAUTH_CLIENT_ID: "test-client",
       COOKIE_ENCRYPTION_KEY: "0".repeat(64),
       OAUTH_KV: {
-        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: async (key: string) =>
+          key.startsWith("umbraco_token:") ? JSON.stringify({ tokens: { access_token: "test-access-token" } }) : null,
         put: async () => undefined,
         delete: async () => undefined,
       },
@@ -1159,13 +1161,17 @@ describe("createPerRequestServer — version check", () => {
       return jsonResponse({}, 404);
     }) as typeof fetch);
 
-    jest.useFakeTimers();
+    // setImmediate stays real so the test can wait for the request to start:
+    // reading the stored token involves Web Crypto, which resolves outside
+    // the fake clock, so the deadline timer doesn't exist until then.
+    jest.useFakeTimers({ doNotFake: ["setImmediate"] });
     try {
       const pending = createPerRequestServer(
         { ...baseOptions, expectedUmbracoMajor: "17" },
         makeMockEnv(),
         mockProps,
       );
+      while (!serverInfoSignal) await new Promise((resolve) => setImmediate(resolve));
       await jest.advanceTimersByTimeAsync(DEFAULT_VERSION_CHECK_TIMEOUT_MS);
       const server = await pending;
 
@@ -1249,7 +1255,9 @@ describe("createPerRequestServer — connected Umbraco version", () => {
       UMBRACO_OAUTH_CLIENT_ID: "test-client",
       COOKIE_ENCRYPTION_KEY: "0".repeat(64),
       OAUTH_KV: {
-        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: async (key: string) =>
+          key.startsWith("umbraco_token:") ? JSON.stringify({ tokens: { access_token: "test-access-token" } }) : null,
         put: async () => undefined,
         delete: async () => undefined,
       },
