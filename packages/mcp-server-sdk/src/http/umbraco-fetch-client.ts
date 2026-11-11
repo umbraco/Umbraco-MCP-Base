@@ -464,6 +464,9 @@ function collectStreamFormData(fd: StreamFormData, signal?: AbortSignal): Promis
  *   - anything else: JSON.stringify.
  *
  * @param signal - The request's abort signal; bounds collecting a stream body.
+ *   Without one, a stream that never ends (e.g. one already drained) still hangs.
+ * @internal Exported for `@umbraco-cms/mcp-hosted` (released in lockstep); not a
+ *   supported public API, so its shape may change in any release.
  */
 export async function buildFetchBody(
   data: unknown,
