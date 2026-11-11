@@ -23,6 +23,8 @@
  * each other.
  */
 
+import { constantTimeEqual } from "../crypto/constant-time.js";
+
 export type FlowCookieKind = "consent" | "state";
 
 /** Cookie lifetime in seconds — matches the 10-minute KV state TTL. */
@@ -143,13 +145,4 @@ function readCookie(request: Request, name: string): string | null {
     }
   }
   return null;
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }

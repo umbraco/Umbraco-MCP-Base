@@ -4,16 +4,12 @@
  * The config loader reads an empty mode or slice list as "no restriction", so
  * a consent selection that shares nothing with the admin's list must end up
  * with no tools, never with the admin's restriction lifted. These tests run
- * the merged config through the real loader and tool filter.
+ * `resolveToolFilter` (merge, load, admin boundary) and the real tool filter.
  */
 
 import { describe, it, expect } from "@jest/globals";
-import {
-  createCollectionConfigLoader,
-  shouldIncludeTool,
-  type ServerConfigForCollections,
-} from "@umbraco-cms/mcp-server-sdk";
-import { mergeConsentChoices } from "../create-server.js";
+import { shouldIncludeTool, type ServerConfigForCollections } from "@umbraco-cms/mcp-server-sdk";
+import { resolveToolFilter } from "../create-server.js";
 import type { ConsentChoices } from "../../types/auth.js";
 
 const modeRegistry = [
@@ -21,11 +17,11 @@ const modeRegistry = [
   { name: "media", displayName: "Media", description: "", collections: ["media"] },
   { name: "users", displayName: "Users", description: "", collections: ["user"] },
 ];
-const loader = createCollectionConfigLoader({
+const registries = {
   modeRegistry,
   allModeNames: ["content", "media", "users"],
   allSliceNames: ["read", "list", "delete"],
-});
+};
 
 const tools = [
   { collection: "document", name: "get-document", slices: ["read"] },
@@ -37,7 +33,7 @@ const tools = [
 
 /** Names of the tools left after merging `choices` into `admin`. */
 function allowedTools(admin: ServerConfigForCollections, choices?: ConsentChoices): string[] {
-  const filter = loader.loadFromConfig(mergeConsentChoices(admin, choices, modeRegistry));
+  const filter = resolveToolFilter(admin, choices, registries);
   return tools
     .filter((t) => shouldIncludeTool({ name: t.name, slices: t.slices }, { collectionName: t.collection, config: filter }))
     .map((t) => t.name);
@@ -87,6 +83,24 @@ describe("consent choices never widen the admin config", () => {
     for (const tool of allowedTools(admin, choices)) {
       expect(adminAllows).toContain(tool);
     }
+  });
+
+  it("an admin slice the server doesn't know isn't a way to lift the restriction", () => {
+    // "publish" isn't one of this server's slices, so the loader drops it.
+    const withUnknown = { toolModes: ["content", "media"], includeSlices: ["read", "publish"] };
+    expect(allowedTools(withUnknown)).toEqual(["get-document"]);
+    expect(allowedTools(withUnknown, { selectedSlices: ["publish"] })).toEqual([]);
+  });
+
+  it("an admin mode the server doesn't know isn't a way to lift the restriction", () => {
+    const withUnknown = { toolModes: ["content", "chained-only"] };
+    expect(allowedTools(withUnknown, { selectedModes: ["chained-only"] })).toEqual([]);
+  });
+
+  it("keeps the admin's read-only and excluded slices whatever is selected", () => {
+    const filter = resolveToolFilter({ readonly: true, excludeSlices: ["delete"] }, { selectedSlices: ["delete"] }, registries);
+    expect(filter.readOnly).toBe(true);
+    expect(filter.disabledSlices).toContain("delete");
   });
 
   it("still narrows normally when the admin set no restriction", () => {

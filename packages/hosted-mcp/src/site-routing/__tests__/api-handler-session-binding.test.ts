@@ -131,15 +131,29 @@ describe("createSiteRoutingApiHandler — session binding", () => {
     expect(await handler.fetch(mcpRequest(), env, ALICE)).toBe(original);
   });
 
-  it("passes through unchanged when the request has no sign-in to bind to", async () => {
+  it("refuses a session request that carries no sign-in to check it against", async () => {
     const agent = makeAgent();
     const handler = createSiteRoutingApiHandler(agent);
+    const sealed = await startSession(handler, ALICE);
     const noSignIn = { props: {} } as unknown as ExecutionContext;
 
-    const started = await handler.fetch(mcpRequest(), env, noSignIn);
-    expect(started.headers.get("mcp-session-id")).toBe(SESSION_ID);
+    for (const presented of [sealed, SESSION_ID]) {
+      const response = await handler.fetch(mcpRequest(presented), env, noSignIn);
+      expect(response.status).toBe(404);
+    }
+    expect(agent.fetch).toHaveBeenCalledTimes(1);
+  });
 
-    await handler.fetch(mcpRequest(SESSION_ID), env, noSignIn);
-    expect(agent.seenSessionIds).toEqual([null, SESSION_ID]);
+  it("returns the id the client already holds on later responses", async () => {
+    // McpAgent echoes the session id on every response.
+    const fetch = jest.fn<FetchHandler>(
+      async () => new Response("ok", { status: 200, headers: { "mcp-session-id": SESSION_ID } })
+    );
+    const handler = createSiteRoutingApiHandler({ fetch });
+    const sealed = await startSession(handler, ALICE);
+
+    const response = await handler.fetch(mcpRequest(sealed), env, ALICE);
+
+    expect(response.headers.get("mcp-session-id")).toBe(sealed);
   });
 });

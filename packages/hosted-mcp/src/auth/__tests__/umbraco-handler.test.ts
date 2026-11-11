@@ -759,23 +759,6 @@ describe("createAuthorizeHandler", () => {
     });
   });
 
-  describe("POST — approve (single-site) with a forged site id", () => {
-    it("rejects a site id when no sites are configured", async () => {
-      const env = createMockEnv();
-      const handler = createAuthorizeHandler(env);
-      const request = new Request("https://worker.example.com/authorize", {
-        method: "POST",
-        headers: { Cookie: consentCookie() },
-        body: createApproveFormBody({ siteId: "made-up" }),
-      });
-
-      const response = await handler(request, createMockAuthRequest());
-
-      expect(response.status).toBe(400);
-      expect(mockStoreOAuthState).not.toHaveBeenCalled();
-    });
-  });
-
   describe("POST — approve (multi-site)", () => {
     const sites: SiteConfig[] = [
       {

@@ -13,7 +13,7 @@ import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { AuthProps } from "../types/auth.js";
 import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
 import { getStoredUmbracoToken } from "../auth/token-storage.js";
-import { toBase64Url } from "../crypto/base64url.js";
+import { constantTimeEqual } from "../crypto/constant-time.js";
 import { resourceMetadataUrlFor } from "../server/resource-metadata.js";
 import { hashWithKey, siteRef } from "../telemetry/request-telemetry.js";
 
@@ -152,7 +152,11 @@ export function createSiteRoutingApiHandler(
         url.pathname = internalPath;
         request = new Request(url.toString(), request);
       }
-      return sealSessionForSignIn(await baseHandler.fetch(request, env, ctx), session.tokenKey);
+      return sealSessionForSignIn(
+        await baseHandler.fetch(request, env, ctx),
+        session.tokenKey,
+        session.sealed
+      );
     },
   };
 }
@@ -176,27 +180,8 @@ export function createSiteRoutingApiHandler(
 const SESSION_HEADER = "mcp-session-id";
 const SESSION_TAG_SEPARATOR = ".";
 
-async function sessionTag(tokenKey: string, sessionId: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(tokenKey),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`mcp-session:${sessionId}`)
-  );
-  return toBase64Url(new Uint8Array(mac));
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+function sessionTag(tokenKey: string, sessionId: string): Promise<string> {
+  return hashWithKey(`mcp-session:${sessionId}`, tokenKey);
 }
 
 function sessionNotFound(): Response {
@@ -210,19 +195,23 @@ function sessionNotFound(): Response {
 /**
  * Checks the request's session id against the caller's sign-in and swaps it
  * for the bare id the Durable Object knows. A request with no session id
- * (initialize) passes through. Without a token key in `ctx.props` there is
- * no sign-in to bind to, so the request passes through unchanged.
+ * (initialize) passes through. A request that names a session but carries no
+ * sign-in to check it against is refused: a session is never reachable
+ * without the sign-in that started it.
  */
 async function openSessionForSignIn(
   request: Request,
   ctx: ExecutionContext
-): Promise<{ request: Request; tokenKey?: string; rejected?: Response }> {
+): Promise<{ request: Request; tokenKey?: string; sealed?: SealedSession; rejected?: Response }> {
   const props = (ctx as { props?: unknown }).props as Partial<AuthProps> | undefined;
-  const tokenKey = props?.umbracoTokenKey;
-  if (typeof tokenKey !== "string" || tokenKey.length === 0) return { request };
+  const tokenKey =
+    typeof props?.umbracoTokenKey === "string" && props.umbracoTokenKey.length > 0
+      ? props.umbracoTokenKey
+      : undefined;
 
   const presented = request.headers.get(SESSION_HEADER);
   if (presented === null) return { request, tokenKey };
+  if (!tokenKey) return { request, rejected: sessionNotFound() };
 
   const split = presented.lastIndexOf(SESSION_TAG_SEPARATOR);
   const sessionId = split > 0 ? presented.slice(0, split) : "";
@@ -233,18 +222,38 @@ async function openSessionForSignIn(
 
   const headers = new Headers(request.headers);
   headers.set(SESSION_HEADER, sessionId);
-  return { request: new Request(request, { headers }), tokenKey };
+  return {
+    request: new Request(request, { headers }),
+    tokenKey,
+    sealed: { sessionId, value: presented },
+  };
 }
 
-/** Replaces the bare session id on a response with the one bound to this sign-in. */
-async function sealSessionForSignIn(response: Response, tokenKey: string | undefined): Promise<Response> {
+/** A session id that was verified for this sign-in, and the value the client holds for it. */
+interface SealedSession {
+  sessionId: string;
+  value: string;
+}
+
+/**
+ * Replaces the bare session id on a response with the one bound to this
+ * sign-in. `verified` is the id this request already proved, so its value is
+ * reused; only a newly started session needs a tag computed.
+ */
+async function sealSessionForSignIn(
+  response: Response,
+  tokenKey: string | undefined,
+  verified?: SealedSession
+): Promise<Response> {
   const sessionId = response.headers.get(SESSION_HEADER);
   if (!tokenKey || !sessionId) return response;
 
   const headers = new Headers(response.headers);
   headers.set(
     SESSION_HEADER,
-    `${sessionId}${SESSION_TAG_SEPARATOR}${await sessionTag(tokenKey, sessionId)}`
+    verified?.sessionId === sessionId
+      ? verified.value
+      : `${sessionId}${SESSION_TAG_SEPARATOR}${await sessionTag(tokenKey, sessionId)}`
   );
   return new Response(response.body, {
     status: response.status,
