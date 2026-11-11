@@ -500,18 +500,19 @@ const inFlightRefreshes = new Map<string, Promise<RefreshTokenResult>>();
 const lastRotatedTokens = new Map<string, string>();
 
 /**
- * The refresh token Umbraco rejected, for each `expired` failure this module
- * returned. Kept off the `RefreshFailure` object itself so the token can't
+ * The refresh token Umbraco rejected, for each definitive failure (`expired`,
+ * `misconfigured`, `request_rejected`) this module returned. Kept off the `RefreshFailure` object itself so the token can't
  * leak through anything that logs, serialises or spreads a failure; read it
  * back with `getRejectedRefreshToken`.
  */
 const rejectedRefreshTokens = new WeakMap<RefreshFailure, string>();
 
 /**
- * The refresh token Umbraco rejected for an `expired` failure returned by
- * `refreshUmbracoToken` — the token actually posted, which can be newer than
- * the caller's snapshot (KV re-read, rotation cache, bounded retry). `undefined`
- * for any other failure. Used to make `deleteStoredUmbracoToken` conditional.
+ * The refresh token Umbraco rejected for a definitive failure (`expired`,
+ * `misconfigured`, `request_rejected`) returned by `refreshUmbracoToken` — the
+ * token actually posted, which can be newer than the caller's snapshot (KV
+ * re-read, rotation cache, bounded retry). `undefined` for `network` /
+ * `server_error`. Used to make `deleteStoredUmbracoToken` conditional.
  */
 export function getRejectedRefreshToken(failure: RefreshFailure): string | undefined {
   return rejectedRefreshTokens.get(failure);
@@ -645,7 +646,11 @@ async function performRefresh(
         console.warn(
           `[mcp-hosted] umbraco token refresh FAILED reason=${failure.reason} status=${failure.status ?? "n/a"} error=${failure.error ?? "n/a"}`
         );
-        if (failure.reason === "expired") {
+        if (
+          failure.reason === "expired" ||
+          failure.reason === "misconfigured" ||
+          failure.reason === "request_rejected"
+        ) {
           rejectedRefreshTokens.set(failure, postedRefreshToken);
         }
         return failure;

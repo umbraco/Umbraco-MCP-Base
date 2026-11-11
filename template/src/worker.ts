@@ -179,8 +179,8 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
   server!: McpServer;
 
   async init() {
-    // Recorded as `mcp.session.id` on the init span, so a degraded start can
-    // be traced back to the session that hit it. Telemetry only: `getSessionId()`
+    // Recorded as `mcp.session.id` on the init span, so a failed sign-in start
+    // can be traced back to the session that hit it. Telemetry only: `getSessionId()`
     // throws when the Durable Object name carries no session id, and that must
     // not stop the server from starting.
     let sessionId: string | undefined;
