@@ -1,23 +1,8 @@
 import { describe, it, expect } from "@jest/globals";
-import { EventEmitter } from "node:events";
 import { buildFetchBody } from "../umbraco-fetch-client.js";
+import { streamFormData } from "./stream-form-data.js";
 
 // Shared by the singleton and factory fetch clients (#446).
-
-// Minimal stand-in for the `form-data` package: getHeaders()/pipe() mark it as
-// stream FormData, and resume() emits the body the helper collects.
-function streamFormData() {
-  const fd = Object.assign(new EventEmitter(), {
-    getHeaders: () => ({ "content-type": "multipart/form-data; boundary=x" }),
-    pipe: () => fd,
-    resume: () => {
-      fd.emit("data", "--x\r\n");
-      fd.emit("data", Buffer.from("body\r\n--x--\r\n"));
-      fd.emit("end");
-    },
-  });
-  return fd;
-}
 
 describe("buildFetchBody", () => {
   it("stringifies a JSON object and keeps the default Content-Type", async () => {
@@ -51,6 +36,39 @@ describe("buildFetchBody", () => {
     const fd = streamFormData();
     fd.resume = () => { fd.emit("error", new Error("boom")); };
     await expect(buildFetchBody(fd)).rejects.toThrow("boom");
+  });
+
+  it("collects stream FormData without the Node Buffer global (Workers)", async () => {
+    const fd = streamFormData();
+    fd.resume = () => {
+      fd.emit("data", "--x\r\n");
+      fd.emit("data", new TextEncoder().encode("body\r\n--x--\r\n"));
+      fd.emit("end");
+    };
+    const { Buffer: originalBuffer } = globalThis;
+    (globalThis as any).Buffer = undefined;
+    try {
+      const result = await buildFetchBody(fd);
+      expect(new TextDecoder().decode(result.body as unknown as Uint8Array))
+        .toBe("--x\r\nbody\r\n--x--\r\n");
+    } finally {
+      globalThis.Buffer = originalBuffer;
+    }
+  });
+
+  it("rejects with the signal's reason when aborted while a stream never ends", async () => {
+    const fd = streamFormData();
+    fd.resume = () => {}; // e.g. already drained by an earlier attempt
+    const controller = new AbortController();
+    const pending = buildFetchBody(fd, controller.signal);
+    controller.abort(new Error("deadline"));
+    await expect(pending).rejects.toThrow("deadline");
+  });
+
+  it("rejects at once when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("gone"));
+    await expect(buildFetchBody(streamFormData(), controller.signal)).rejects.toThrow("gone");
   });
 
   it("returns no body for undefined data", async () => {
