@@ -14,34 +14,54 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection, McpStdioServerConfig, FilterConfig } from "./types.js";
 import { isLoopbackUrl } from "../helpers/url.js";
 
-/** How much of the child's stderr to keep for error messages. */
+/** How much of the child's stderr to keep for the operator log on exit. */
 const STDERR_TAIL_BYTES = 4096;
+
+const BASE_URL_FLAG = "--umbraco-base-url";
+
+/** The last `--umbraco-base-url` value in `args` (`--flag value` or `--flag=value`). */
+function baseUrlFromArgs(args: readonly string[]): string | undefined {
+  let value: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === BASE_URL_FLAG && i + 1 < args.length) value = args[++i];
+    else if (args[i].startsWith(`${BASE_URL_FLAG}=`)) value = args[i].slice(BASE_URL_FLAG.length + 1);
+  }
+  return value;
+}
 
 /**
  * Build the env for a chained stdio child.
  *
  * The package's `configEnv` wins over the parent's env, except that a
  * `NODE_TLS_REJECT_UNAUTHORIZED=0` it sets is dropped (with a warning) when
- * the child's effective UMBRACO_BASE_URL is not a loopback URL. The child's
- * own SDK refuses to start in that combination, so passing it on would only
- * break every chained call (umbraco/Umbraco-MCP-Base#449).
+ * the child's base URL is known and is not a loopback URL. The child's own SDK
+ * refuses to start in that combination, so passing it on would only break
+ * every chained call (umbraco/Umbraco-MCP-Base#449).
+ *
+ * The base URL is resolved the way the child's SDK config does: the
+ * `--umbraco-base-url` CLI flag in `args` first, then UMBRACO_BASE_URL. When
+ * neither is known here (the child may load it from its own `.env`, or not be
+ * an Umbraco server at all) the flag is passed on: the child's own guard is
+ * the authority, and dropping it could break a local self-signed setup.
  *
  * Only the config's override is dropped: a value the operator set on the
- * parent's own env is theirs to own, and the child's refusal (with its stderr
- * surfaced by StdioConnection) names the cause.
+ * parent's own env is theirs to own, and the child's refusal names the cause
+ * in its stderr.
  */
 export function buildChildEnv(
   serverName: string,
   configEnv: Record<string, string> | undefined,
   parentEnv: NodeJS.ProcessEnv = process.env,
+  args: readonly string[] = [],
 ): Record<string, string> {
   const overrides = { ...configEnv };
-  const baseUrl = overrides.UMBRACO_BASE_URL ?? parentEnv.UMBRACO_BASE_URL ?? "";
-  if (overrides.NODE_TLS_REJECT_UNAUTHORIZED === "0" && !isLoopbackUrl(baseUrl)) {
+  const baseUrl =
+    baseUrlFromArgs(args) || overrides.UMBRACO_BASE_URL || parentEnv.UMBRACO_BASE_URL;
+  if (overrides.NODE_TLS_REJECT_UNAUTHORIZED === "0" && baseUrl && !isLoopbackUrl(baseUrl)) {
     delete overrides.NODE_TLS_REJECT_UNAUTHORIZED;
     console.error(
       `[mcp-client] Chained server "${serverName}" sets NODE_TLS_REJECT_UNAUTHORIZED=0 ` +
-        `but its UMBRACO_BASE_URL (${baseUrl || "unset"}) is not a local URL. ` +
+        `but its base URL (${baseUrl}) is not a local URL. ` +
         `Dropping it: TLS verification may only be disabled for a local instance.`,
     );
   }
@@ -61,6 +81,7 @@ export class StdioConnection implements McpConnection {
   private client: Client;
   private stderrTail = "";
   private closed = false;
+  private exitLogged = false;
 
   constructor(
     private config: McpStdioServerConfig,
@@ -76,9 +97,9 @@ export class StdioConnection implements McpConnection {
     const transport = new StdioClientTransport({
       command: this.config.command,
       args: this.buildArgs(),
-      env: buildChildEnv(this.config.name, this.config.env),
-      // Pipe stderr so a startup failure's reason can be surfaced in the
-      // thrown error; it is still forwarded to the parent's stderr below.
+      env: buildChildEnv(this.config.name, this.config.env, process.env, this.config.args),
+      // Pipe stderr so its tail can be logged when the child exits; it is
+      // still forwarded to the parent's stderr below.
       stderr: "pipe",
     });
 
@@ -90,7 +111,7 @@ export class StdioConnection implements McpConnection {
       this.closed = true;
     };
 
-    await this.withStderr(() => this.client.connect(transport));
+    await this.withExitNotice(() => this.client.connect(transport));
   }
 
   // `context` is accepted for interface symmetry and ignored: nothing
@@ -102,7 +123,7 @@ export class StdioConnection implements McpConnection {
       inputSchema?: Record<string, unknown>;
     }>;
   }> {
-    const result = await this.withStderr(() => this.client.listTools());
+    const result = await this.withExitNotice(() => this.client.listTools());
     return result as {
       tools: Array<{
         name: string;
@@ -131,7 +152,7 @@ export class StdioConnection implements McpConnection {
     // v2: the v2 Client (@modelcontextprotocol/client) skips output
     // validation on isError results, so when we migrate to it this can
     // revert to `this.client.callTool({ name, arguments: args })`.
-    const result = await this.withStderr(() =>
+    const result = await this.withExitNotice(() =>
       this.client.request(
         { method: "tools/call", params: { name, arguments: args } },
         CallToolResultSchema,
@@ -149,23 +170,33 @@ export class StdioConnection implements McpConnection {
   }
 
   /**
-   * Run a client operation; if it fails after the child has exited, append the
-   * child's stderr tail so the caller sees why (e.g. a startup refusal) rather
-   * than only "Connection closed". The error object is kept (so McpError codes
-   * survive); only its message is extended.
+   * Run a client operation; if it fails after the child has exited, say so.
+   *
+   * The child's stderr tail goes to the operator log (the parent's stderr)
+   * only, once, under a line naming the server. The thrown error gets a fixed
+   * pointer and never the child's output: errors from callTool (and from a
+   * connect it retries) reach the MCP client as tool results, so stderr there
+   * would hand the agent untrusted text that may hold URLs, paths or secrets.
+   * The error object is kept (so McpError codes survive); only its message is
+   * extended.
    */
-  private async withStderr<T>(op: () => Promise<T>): Promise<T> {
+  private async withExitNotice<T>(op: () => Promise<T>): Promise<T> {
     try {
       return await op();
     } catch (error) {
       if (this.closed && error instanceof Error) {
-        // Let any stderr still in flight through the pipe land first.
-        await new Promise((resolve) => setImmediate(resolve));
-        const tail = this.stderrTail.trim();
-        if (tail && !error.message.includes(tail)) {
-          error.message +=
-            `\nChained server "${this.config.name}" exited. Its stderr (tail):\n${tail}`;
+        if (!this.exitLogged) {
+          this.exitLogged = true;
+          // Best effort: let stderr still in flight through the pipe land first.
+          await new Promise((resolve) => setImmediate(resolve));
+          const tail = this.stderrTail.trim();
+          console.error(
+            `[mcp-client] Chained server "${this.config.name}" exited.` +
+              (tail ? ` Its stderr (tail):\n${tail}` : " It wrote nothing to stderr."),
+          );
         }
+        error.message +=
+          `\nChained server "${this.config.name}" exited. See the MCP server's logs for its stderr.`;
       }
       throw error;
     }
