@@ -21,7 +21,27 @@ Before running, ensure:
 - No arguments: build all collections from `.discover.json`
 - Single collection name: build only that collection (e.g. `/build-tools form`)
 
+## Scoped Requests (fast path)
+
+When the request names one collection **and** limits it to specific operations (e.g. "only the GET-by-id
+and list tools for `culture`"), build exactly that and nothing else. Every step below still applies,
+with these changes:
+
+- **Build only the named operations.** If one doesn't exist in the spec (some collections have no
+  GET-by-id, for example), say so in the report and move on — don't search for a substitute.
+- **Look things up with the commands given, never by reading whole files.** The generated client and
+  Zod files for a full Management API run to tens of thousands of lines; the swagger spec to megabytes.
+  Steps 1 and 2 give a single command for each.
+- **Write all the tool files and the collection `index.ts`, then compile once** (Step 3e), instead of
+  compiling after each file. With two or three read-only tools there is nothing to cascade.
+- **Skip Step 4 (review) and the `/count-mcp-tools` call in Step 6.** Report the tools you created.
+- **Don't ask for confirmation.** The request is the confirmation.
+
 ## Agents
+
+If the agents below aren't available in this session (no Agent/Task tool, or the plugin's `agents/`
+directory isn't installed), do the step yourself from the instructions in this file — don't search
+the filesystem for the agent definitions.
 
 This skill orchestrates the following agents — use them for the relevant steps:
 
@@ -58,20 +78,47 @@ Check if `src/umbraco-api/api/generated/` exists and contains `.ts` files. If no
 npm run generate
 ```
 
-Then read the generated files to understand:
+Then find, in the generated files:
 - The API client function name (e.g. `getFormsManagementAPI`)
 - The available Zod schemas (in `*.zod.ts` files)
 - The available client methods and their signatures
 
-### Step 2: Read Swagger Spec
-
-Fetch the swagger spec from the `swaggerUrl` in `.discover.json` using curl:
+**Grep the generated files — don't read them whole.** One file of each kind exists per API
+(`{apiName}.ts` and `{apiName}.zod.ts`); against the Umbraco Management API they are tens of
+thousands of lines. Orval names everything after the camelCased `operationId` from Step 2 —
+`GetCulture` becomes the client method `getCulture` and the Zod exports `getCultureQueryParams`,
+`getCultureParams`, `getCultureBody` and `getCultureResponse` (whichever apply). So:
 
 ```bash
-curl -sk {swaggerUrl}
+ls src/umbraco-api/api/generated/
+grep -n "export const get.*API = " src/umbraco-api/api/generated/*.ts           # client getter
+grep -n "export const getCulture[A-Z]" src/umbraco-api/api/generated/*.zod.ts   # Zod schemas for one operation
 ```
 
-For each collection, find operations where `tags[0]` matches the collection's original tag name (the tag before kebab-case conversion). Collect:
+The template's `example/` tools (`src/umbraco-api/tools/example/get/*.ts`) are complete, compiling
+examples of each pattern — read one of those rather than the generated client when you need a model.
+
+### Step 2: Read Swagger Spec
+
+Fetch the swagger spec from the `swaggerUrl` in `.discover.json` and list only the collection's
+operations. Don't dump the raw spec — the Management API spec is several megabytes and gets
+truncated. This prints one line per operation whose `tags[0]`, kebab-cased the same way `discover`
+does it, equals the collection name:
+
+```bash
+curl -sk "{swaggerUrl}" | node -e '
+const spec = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const kebab = (t) => t.replace(/([a-z])([A-Z])/g, "$1-$2").replace(/[\s_]+/g, "-").toLowerCase();
+for (const [p, ops] of Object.entries(spec.paths))
+  for (const [m, op] of Object.entries(ops))
+    if (op?.tags && kebab(op.tags[0]) === process.argv[1])
+      console.log(m.toUpperCase(), p, op.operationId, "-", op.summary ?? "");
+' {collection}
+```
+
+The method, path and `operationId` are usually all you need — the generated Zod schemas (Step 1)
+carry the parameter and response shapes. Only look deeper into the spec for an operation whose
+schema isn't clear from those. For each collection, collect:
 - HTTP method
 - Path
 - operationId
@@ -97,7 +144,7 @@ Not every directory is needed — only create subdirectories for HTTP methods th
 
 #### 3b. Create tool files (one at a time, compile after each)
 
-**CRITICAL: Create ONE tool file, then immediately compile. Fix any errors before creating the next tool. This prevents errors from cascading across files.**
+**CRITICAL: Create ONE tool file, then immediately compile. Fix any errors before creating the next tool. This prevents errors from cascading across files.** (Exception: a scoped request — see "Scoped Requests" above — writes its few tools and the index, then compiles once.)
 
 Create one file per operation. Map operations to files:
 
@@ -185,9 +232,10 @@ export default collection;
 
 Add the collection import and registration to `src/index.ts`:
 
-1. Add an import at the top with the other collection imports:
+1. Add an import at the top with the other collection imports (tool collections live under
+   `src/umbraco-api/tools/`, so the path from `src/` includes `umbraco-api/`):
    ```typescript
-   import {collection}Collection from "./tools/{collection}/index.js";
+   import {collection}Collection from "./umbraco-api/tools/{collection}/index.js";
    ```
 
 2. Add it to the `collections` array:
@@ -197,7 +245,8 @@ Add the collection import and registration to `src/index.ts`:
 
 3. If `configureApiClient` still references the example/template API client, update it to use the correct generated client getter (e.g. `getUmbracoEngageManagementAPI`). Check the import from `./umbraco-api/api/generated/` and ensure it matches.
 
-4. Do the same for `src/collections.ts` — add the collection import and add it to the exported array.
+4. Do the same for `src/collections.ts` — add the collection import (same
+   `./umbraco-api/tools/{collection}/index.js` path) and add it to the exported `collections` array.
 
 #### 3e. Compile
 
@@ -205,7 +254,9 @@ Add the collection import and registration to `src/index.ts`:
 npm run compile
 ```
 
-Fix any TypeScript errors before proceeding. Common issues:
+Fix any TypeScript errors in the files you created or edited before proceeding. Errors only in
+files you didn't touch (e.g. `src/worker.ts`) are pre-existing — note them in the report, don't
+try to fix them. Common issues:
 - Wrong import paths to generated client
 - Mismatched Zod schema shapes
 - Missing `CAPTURE_RAW_HTTP_RESPONSE` parameter
@@ -236,7 +287,7 @@ After all collections are built:
 npm run compile    # Full type check
 ```
 
-Then run `/count-mcp-tools` to confirm all collections are covered. All collections from `.discover.json` should show tool count > 0. If any show "Not started", report which collections were missed.
+Then, unless this was a scoped request, run `/count-mcp-tools` to confirm all collections are covered (if that skill isn't installed, skip it and list the tools per collection yourself). All collections from `.discover.json` should show tool count > 0. If any show "Not started", report which collections were missed.
 
 Report what was generated:
 - Number of collections created

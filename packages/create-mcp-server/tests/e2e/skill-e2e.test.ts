@@ -150,6 +150,15 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
       }
     } finally {
       abortController.abort();
+      // Per-tool breakdown of tool_use calls, so turn-count drift shows where the turns went.
+      // Logged in finally so it is printed even when the run is cut off at the turn cap.
+      const counts = new Map<string, number>();
+      for (const name of tools) counts.set(name, (counts.get(name) ?? 0) + 1);
+      const breakdown = [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name}=${count}`)
+        .join(", ");
+      console.log(`[Skill E2E] Tool calls: ${tools.length} (${breakdown || "none"})`);
     }
 
     return { text, tools };
@@ -161,7 +170,11 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
 
     await runSkill(`/build-tools
 
-Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.`, {
+Build tools ONLY for the "${targetCollection}" group from .discover.json. Build ONLY the GET (read by ID) and GET (list) operations — just two tools maximum. Skip create, update, delete. After creating the tools, run npm run compile to verify they compile cleanly. Fix any TypeScript errors.${
+      fs.existsSync(path.join(projectDir, "tsconfig.e2e.json"))
+        ? " In this project, compile with `npx tsc --noEmit -p tsconfig.e2e.json` instead of npm run compile — it is the check this test runs, and it excludes worker files whose errors are not yours to fix."
+        : ""
+    }`, {
       maxTurns: 50,
       maxBudget: 3.0,
     });

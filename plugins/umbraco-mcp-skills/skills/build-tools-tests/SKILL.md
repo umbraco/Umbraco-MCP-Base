@@ -23,7 +23,25 @@ Before running, ensure:
 - No arguments: build tests for all collections from `.discover.json`
 - Single collection name: build tests only for that collection (e.g. `/build-tools-tests form`)
 
+## Scoped Requests (fast path)
+
+When the request names one collection and limits the tests to specific tools (e.g. "only the read/list
+tools for `culture`"), test exactly those. The rules below still apply, with these changes:
+
+- **Read only what you need:** the collection's `index.ts` and its tool files. Don't read the generated
+  client or Zod files — `setup.ts` needs only the client getter, which the tool files already import
+  (`import type { getXxxAPI } from ...`); copy that name and path.
+- **Read-only collections skip Steps 4-6** (builder, helper, builder tests) as described in Step 3.
+- **Skip Step 8 (validation) and Step 10's full `npm test` and `/count-mcp-tools`.** Run only this
+  collection's tests and report.
+- **Only read `instance-management.md` if you actually hit an instance roadblock.**
+- **Don't ask for confirmation.** The request is the confirmation.
+
 ## Agents
+
+If the agents below aren't available in this session (no Agent/Task tool, or the plugin's `agents/`
+directory isn't installed), do the step yourself from the instructions in this file — don't search
+the filesystem for the agent definitions.
 
 This skill orchestrates the following agents — use them for the relevant steps:
 
@@ -332,7 +350,7 @@ describe("EntityBuilder", () => {
 
 **After creating:**
 1. Compile: `npm run compile`
-2. Run: `npm test -- __tests__/{collection}/{entity}-builder.test.ts`
+2. Run: `npm test -- src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.test.ts`
 3. Fix any failures before continuing
 
 ### Step 7: Per Collection — Create Integration Tests
@@ -510,8 +528,11 @@ This works for read-only collections too (cultures, languages, server info), whe
 For each test file:
 1. Write the test
 2. Compile: `npm run compile`
-3. Run: `npm test -- __tests__/{collection}/{test-file}.test.ts`
+3. Run: `npm test -- src/umbraco-api/tools/{collection}/__tests__/{test-file}.test.ts`
 4. Fix any failures before creating the next test file
+
+Compile errors only in files you didn't touch (e.g. `src/worker.ts`) are pre-existing — note them,
+don't try to fix them (this skill may not edit those files anyway).
 
 ### Step 8: Validate with `integration-test-validator`
 
@@ -545,7 +566,7 @@ npm run compile    # Full type check
 npm test           # All integration tests
 ```
 
-Then run `/count-mcp-tools` to confirm all collections have tests. All collections should show "yes" in the Tests column. If any show "no", report which collections are missing integration tests.
+Then, unless this was a scoped request, run `/count-mcp-tools` to confirm all collections have tests (if that skill isn't installed, skip it and list the test files per collection yourself). All collections should show "yes" in the Tests column. If any show "no", report which collections are missing integration tests.
 
 Report what was generated:
 - Number of collections with tests
