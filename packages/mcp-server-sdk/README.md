@@ -113,6 +113,7 @@ Features:
 - Self-signed certificate support in development
 - Repeat-style query string serialization for array params
 - Error logging — failed requests log status, method and path to stderr only. Response bodies can echo submitted values (names, emails, content fields) and MCP clients capture stderr in their own logs, so bodies are logged only on opt-in: `enableLogging: true` on `createUmbracoFetchClient`, or `UMBRACO_MCP_LOG_ERROR_BODIES=true` for the singleton client (which also makes the tool error handler log the full error instead of just the tool name and status)
+- Request tracing — `enableLogging: true` on `createUmbracoFetchClient` also logs a `Request:` / `Response:` line per call. These go to stderr via `console.error` (stdout carries the protocol in stdio servers), so hosts that grade logs by stream — e.g. Cloudflare Workers observability — record them at error level. Leave it off in production if that would trip error-rate alerts
 
 #### `UmbracoManagementClient`
 
