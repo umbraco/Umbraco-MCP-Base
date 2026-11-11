@@ -397,46 +397,143 @@ function isBearerChallenge(resp: Response): boolean {
   return /(?:^|,)\s*Bearer\b/i.test(resp.headers.get("www-authenticate") ?? "");
 }
 
+/** Stream FormData from the `form-data` package (Node only). */
+interface StreamFormData {
+  getHeaders: () => Record<string, string>;
+  pipe: Function;
+  on: (event: string, listener: (...args: any[]) => void) => unknown;
+  resume: () => unknown;
+  destroy?: () => unknown;
+}
+
 /**
- * Makes a fetch request to the Umbraco API.
+ * Collects a stream FormData into one Uint8Array. The `form-data` package emits
+ * a CombinedStream which is not async-iterable, so chunks come via 'data'.
+ * Uses no Node globals (Buffer), so it runs in Workers too, and the signal
+ * bounds the wait: a stream that never ends (e.g. one already drained by an
+ * earlier attempt) would otherwise hang the request whatever deadline was set.
+ */
+function collectStreamFormData(fd: StreamFormData, signal?: AbortSignal): Promise<Uint8Array> {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      reject(signal!.reason);
+      fd.destroy?.();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const done = () => signal?.removeEventListener("abort", onAbort);
+
+    const encoder = new TextEncoder();
+    const chunks: Uint8Array[] = [];
+    fd.on("data", (chunk: string | Uint8Array) =>
+      chunks.push(typeof chunk === "string" ? encoder.encode(chunk) : chunk));
+    fd.on("end", () => {
+      done();
+      const body = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      resolve(body);
+    });
+    fd.on("error", (error: unknown) => {
+      done();
+      reject(error);
+    });
+    fd.resume();
+  });
+}
+
+/**
+ * Builds the fetch body for a request payload and says whether the default
+ * `Content-Type: application/json` must be left off. Shared by every Umbraco
+ * fetch client (the singleton and factory here, and `@umbraco-cms/mcp-hosted`)
+ * so they cannot drift (umbraco/Umbraco-MCP-Base#446). Works in Node and Workers.
+ *
+ * Supported payloads:
+ *   - undefined: no body.
+ *   - Web FormData (globalThis.FormData; Workers and Node 18+): passed straight
+ *     to fetch, which sets the multipart Content-Type with boundary.
+ *   - Stream FormData (`form-data` package, Node only; has getHeaders()/pipe()):
+ *     collected into a Uint8Array for native fetch. The caller supplies the
+ *     multipart Content-Type through its own headers (from getHeaders()).
+ *   - anything else: JSON.stringify.
+ *
+ * @param signal - The request's abort signal; bounds collecting a stream body.
+ *   Without one, a stream that never ends (e.g. one already drained) still hangs.
+ * @internal Exported for `@umbraco-cms/mcp-hosted` (released in lockstep); not a
+ *   supported public API, so its shape may change in any release.
+ */
+export async function buildFetchBody(
+  data: unknown,
+  signal?: AbortSignal,
+): Promise<{ body?: BodyInit; skipDefaultContentType: boolean }> {
+  const isWebFormData = data != null
+    && typeof (globalThis as any).FormData !== "undefined"
+    && data instanceof (globalThis as any).FormData;
+  const isStreamFormData = !isWebFormData
+    && data != null
+    && typeof (data as any).getHeaders === "function"
+    && typeof (data as any).pipe === "function";
+  const skipDefaultContentType = isWebFormData || isStreamFormData;
+
+  if (data === undefined) return { skipDefaultContentType };
+  if (isWebFormData) return { body: data as FormData, skipDefaultContentType };
+  if (isStreamFormData) {
+    const body = await collectStreamFormData(data as StreamFormData, signal);
+    return { body: body as unknown as BodyInit, skipDefaultContentType };
+  }
+  return { body: JSON.stringify(data), skipDefaultContentType };
+}
+
+type UmbracoRequestConfig = {
+  url: string;
+  method: string;
+  data?: unknown;
+  params?: Record<string, unknown>;
+  headers?: Record<string, string>;
+};
+
+/** What differs between the singleton and factory clients. */
+interface UmbracoRequestAuth {
+  baseUrl: string;
+  /** Returns a valid token; the request's signal bounds the wait. */
+  getToken: (signal?: AbortSignal) => Promise<string>;
+  /**
+   * Called when Umbraco refused `token` with a bearer challenge. Drops it from
+   * the cache and returns true to resend with a fresh token, or false to return
+   * the 401 as is (e.g. the client was re-initialised meanwhile).
+   */
+  onTokenRejected: (token: string) => boolean;
+  /** Write full error bodies to stderr (see logHttpError). */
+  logErrorBodies: boolean;
+  /** Write each request and response line to stderr. */
+  logRequests?: boolean;
+}
+
+/**
+ * Sends one request to the Umbraco API. The single request path for both the
+ * singleton and factory clients, so headers, the 401 resend, response parsing
+ * and error throwing cannot drift between them (umbraco/Umbraco-MCP-Base#446).
  * @internal
  */
-async function doFetch<T>(
-  config: { url: string; method: string; data?: unknown; params?: Record<string, unknown>; headers?: Record<string, string> },
+async function executeUmbracoRequest<T>(
+  auth: UmbracoRequestAuth,
+  config: UmbracoRequestConfig,
   options?: UmbracoManagementClientOptions
 ): Promise<HttpResponse<T> | T> {
-  if (!authConfig) {
-    throw new Error(
-      "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
-    );
-  }
-
-  // Read the config before waiting for the token: a re-init meanwhile would
-  // otherwise send the old config's token to the new base URL.
-  const auth = authConfig;
-  const generation = tokenGeneration;
-  // Checked per request too: the env can change after initializeUmbracoFetch.
-  assertTlsNotDisabledForRemote(auth.baseUrl);
   // The request's signal bounds the wait for the token too: without it a CMS
   // that accepts the connection but never answers the token request would hang
   // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
-  const token = await getToken(options?.signal);
+  const token = await auth.getToken(options?.signal);
   const queryString = serializeParams(config.params);
   const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
-  // Detect FormData payloads. Two shapes are supported:
-  //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
-  //     Pass straight to fetch, which sets multipart Content-Type with boundary.
-  //   - Stream FormData (`form-data` npm package, Node-only) — has getHeaders()/pipe().
-  //     Caller supplies the multipart Content-Type via config.headers from getHeaders().
-  const isWebFormData = config.data != null
-    && typeof (globalThis as any).FormData !== "undefined"
-    && config.data instanceof (globalThis as any).FormData;
-  const isStreamFormData = !isWebFormData
-    && config.data != null
-    && typeof (config.data as any).getHeaders === "function"
-    && typeof (config.data as any).pipe === "function";
-  const skipDefaultContentType = isWebFormData || isStreamFormData;
+  const { body, skipDefaultContentType } = await buildFetchBody(config.data, options?.signal);
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
@@ -452,32 +549,22 @@ async function doFetch<T>(
     signal: options?.signal,
   };
 
-  if (config.data !== undefined) {
-    if (isWebFormData) {
-      // Pass through; fetch sets multipart Content-Type + boundary.
-      fetchOptions.body = config.data as FormData;
-    } else if (isStreamFormData) {
-      // Collect the stream-based FormData into a Buffer for native fetch.
-      // The `form-data` package emits a CombinedStream which is not async-iterable,
-      // so we collect chunks via the 'data' event.
-      const fd = config.data as { pipe: Function; resume: Function; on: Function };
-      fetchOptions.body = await new Promise<BodyInit>((resolve, reject) => {
-        const chunks: Buffer[] = [];
-        fd.on("data", (chunk: string | Buffer) =>
-          chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
-        fd.on("end", () => {
-          const buf = Buffer.concat(chunks);
-          resolve(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) as unknown as BodyInit);
-        });
-        fd.on("error", reject);
-        fd.resume();
-      });
-    } else {
-      fetchOptions.body = JSON.stringify(config.data);
-    }
+  if (body !== undefined) {
+    fetchOptions.body = body;
   }
 
-  let resp = await fetch(fullUrl, fetchOptions);
+  const send = async (): Promise<Response> => {
+    if (auth.logRequests) {
+      console.error("Request:", config.method.toUpperCase(), config.url);
+    }
+    const response = await fetch(fullUrl, fetchOptions);
+    if (auth.logRequests) {
+      console.error("Response:", response.status, config.url);
+    }
+    return response;
+  };
+
+  let resp = await send();
 
   // Resend once with a fresh token when the token itself was refused. Only a
   // bearer challenge counts: it comes from token validation, before the
@@ -489,13 +576,12 @@ async function doFetch<T>(
     resp.status === 401
     && isBearerChallenge(resp)
     && !options?.signal?.aborted
-    && generation === tokenGeneration
     && sentOurToken(headers, token)
+    && auth.onTokenRejected(token)
   ) {
     void resp.body?.cancel().catch(() => {});
-    invalidateToken(token);
-    headers.Authorization = `Bearer ${await getToken(options?.signal)}`;
-    resp = await fetch(fullUrl, fetchOptions);
+    headers.Authorization = `Bearer ${await auth.getToken(options?.signal)}`;
+    resp = await send();
   }
 
   // Parse response body
@@ -531,7 +617,7 @@ async function doFetch<T>(
 
   // Without returnFullResponse, check status and throw or return data
   if (!options?.validateStatus && resp.status >= 400) {
-    logHttpError(resp.status, config.method, config.url, data, errorBodyLoggingEnabled());
+    logHttpError(resp.status, config.method, config.url, data, auth.logErrorBodies);
     const error = new Error(
       `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
     );
@@ -540,6 +626,43 @@ async function doFetch<T>(
   }
 
   return data;
+}
+
+/**
+ * Makes a fetch request to the Umbraco API with the singleton client.
+ * @internal
+ */
+async function doFetch<T>(
+  config: UmbracoRequestConfig,
+  options?: UmbracoManagementClientOptions
+): Promise<HttpResponse<T> | T> {
+  if (!authConfig) {
+    throw new Error(
+      "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
+    );
+  }
+
+  // Read the config before waiting for the token: a re-init meanwhile would
+  // otherwise send the old config's token to the new base URL.
+  const auth = authConfig;
+  const generation = tokenGeneration;
+  // Checked per request too: the env can change after initializeUmbracoFetch.
+  assertTlsNotDisabledForRemote(auth.baseUrl);
+
+  return executeUmbracoRequest<T>(
+    {
+      baseUrl: auth.baseUrl,
+      getToken,
+      onTokenRejected: (token) => {
+        if (generation !== tokenGeneration) return false;
+        invalidateToken(token);
+        return true;
+      },
+      logErrorBodies: errorBodyLoggingEnabled(),
+    },
+    config,
+    options
+  );
 }
 
 // ============================================================================
@@ -675,100 +798,28 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
-    assertTlsNotDisabledForRemote(instanceAuthConfig.baseUrl);
-    // The request's signal bounds the token exchange as well as the request.
-    const token = await getInstanceToken(opts?.signal);
-    const queryString = serializeParams(config.params);
-    const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
+    const auth = instanceAuthConfig;
+    assertTlsNotDisabledForRemote(auth.baseUrl);
 
-    const isWebFormData = config.data != null
-      && typeof (globalThis as any).FormData !== "undefined"
-      && config.data instanceof (globalThis as any).FormData;
-    const isStreamFormData = !isWebFormData
-      && config.data != null
-      && typeof (config.data as any).getHeaders === "function"
-      && typeof (config.data as any).pipe === "function";
-    const skipDefaultContentType = isWebFormData || isStreamFormData;
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
-      Accept: "application/json",
-      ...config.headers,
-    };
-
-    const fetchOpts: RequestInit = {
-      method: config.method,
-      headers,
-      signal: opts?.signal,
-    };
-
-    if (config.data !== undefined) {
-      if (isWebFormData) {
-        fetchOpts.body = config.data as FormData;
-      } else if (isStreamFormData) {
-        const fd = config.data as { pipe: Function; resume: Function; on: Function };
-        fetchOpts.body = await new Promise<BodyInit>((resolve, reject) => {
-          const chunks: Buffer[] = [];
-          fd.on("data", (chunk: string | Buffer) =>
-            chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
-          fd.on("end", () => resolve(Buffer.concat(chunks) as unknown as BodyInit));
-          fd.on("error", reject);
-          fd.resume();
-        });
-      } else {
-        fetchOpts.body = JSON.stringify(config.data);
-      }
-    }
-
-    if (enableLogging) {
-      console.error("Request:", config.method.toUpperCase(), config.url);
-    }
-
-    const resp = await fetch(fullUrl, fetchOpts);
-
-    if (enableLogging) {
-      console.error("Response:", resp.status, config.url);
-    }
-
-    // Parse response body
-    let data: T;
-    const contentType = resp.headers.get("content-type") ?? "";
-    // Parse anything JSON: `application/json` plus the `+json` structured-syntax
-    // suffix (RFC 6839), e.g. `application/problem+json` used by RFC 7807 error
-    // bodies. Umbraco 18 returns Management API errors as `application/problem+json`,
-    // so without the suffix check they'd pass through unparsed as raw strings.
-    if (contentType.includes("application/json") || contentType.includes("+json")) {
-      data = (await resp.json()) as T;
-    } else {
-      const text = await resp.text();
-      data = (text || undefined) as T;
-    }
-
-    const responseHeaders: Record<string, string> = {};
-    resp.headers.forEach((value, key) => {
-      responseHeaders[key] = value;
-    });
-
-    if (opts?.returnFullResponse) {
-      return {
-        status: resp.status,
-        statusText: resolveStatusText(resp.status, resp.statusText),
-        data,
-        headers: responseHeaders,
-      } as T;
-    }
-
-    if (!opts?.validateStatus && resp.status >= 400) {
-      logHttpError(resp.status, config.method, config.url, data, enableLogging);
-      const error = new Error(
-        `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
-      );
-      (error as any).response = { status: resp.status, data };
-      throw error;
-    }
-
-    return data;
+    return executeUmbracoRequest<T>(
+      {
+        baseUrl: auth.baseUrl,
+        getToken: getInstanceToken,
+        onTokenRejected: (token) => {
+          // Re-initialised meanwhile: the new token belongs to another config.
+          if (auth !== instanceAuthConfig) return false;
+          if (instanceAccessToken === token) {
+            instanceAccessToken = null;
+            instanceTokenExpiry = null;
+          }
+          return true;
+        },
+        logErrorBodies: enableLogging,
+        logRequests: enableLogging,
+      },
+      config,
+      opts
+    ) as Promise<T>;
   };
 
   return {

@@ -14,6 +14,8 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
+  // Request body building, shared with other Umbraco fetch clients (e.g. hosted)
+  buildFetchBody,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,
