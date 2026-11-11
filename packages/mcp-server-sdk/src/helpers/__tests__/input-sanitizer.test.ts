@@ -850,5 +850,55 @@ describe("withInputSanitization", () => {
       const rawNested = { data: z.object({ id: z.string() }).describe(RAW_FIELD_MARKER) };
       expect(run(rawNested, { data: { id: "a\x00?b" } }).call).not.toThrow();
     });
+
+    it("keeps the check level through z.union", () => {
+      const nested = {
+        data: z.object({ parent: z.union([z.object({ id: z.string() }), z.null()]) }),
+      };
+      expect(run(nested, { data: { parent: { id: "../x" } } }).call).toThrow(ToolValidationError);
+      expect(run(nested, { data: { parent: null } }).call).not.toThrow();
+
+      const topLevel = { id: z.union([z.string(), z.null()]) };
+      expect(run(topLevel, { id: "a?b" }).call).toThrow(ToolValidationError);
+
+      const note = { data: z.object({ note: z.union([z.string(), z.null()]) }) };
+      expect(run(note, { data: { note: "a?b" } }).call).not.toThrow();
+    });
+
+    it.each(["textId", "titleId", "contextId", "labelKey"])(
+      "fully checks %s (free-text word is not the suffix)",
+      (key) => {
+        for (const bad of ["a?b", "../x"]) {
+          expect(run({ [key]: z.string() }, { [key]: bad }).call).toThrow(ToolValidationError);
+          const nested = { data: z.object({ [key]: z.string() }) };
+          expect(run(nested, { data: { [key]: bad } }).call).toThrow(ToolValidationError);
+        }
+      }
+    );
+
+    it.each(["context", "subtitle", "ciphertext"])(
+      "does not relax top-level %s (free-text word needs a boundary)",
+      (key) => {
+        expect(run({ [key]: z.string() }, { [key]: "../x" }).call).toThrow(ToolValidationError);
+      }
+    );
+
+    it.each(["filterText", "meta_description"])("relaxes nested %s", (key) => {
+      const schema = { data: z.object({ [key]: z.string() }) };
+      expect(run(schema, { data: { [key]: "a?b" } }).call).not.toThrow();
+    });
+
+    it("fully checks every element of a top-level string array", () => {
+      const schema = { filters: z.array(z.string()) };
+      expect(run(schema, { filters: ["ok", "a&b"] }).call).toThrow(ToolValidationError);
+    });
+
+    it.each(["keys", "aliases", "paths", "documentTypeKeys"])(
+      "treats nested plural %s as an id",
+      (key) => {
+        const schema = { data: z.object({ [key]: z.array(z.string()) }) };
+        expect(run(schema, { data: { [key]: ["ok", "../x"] } }).call).toThrow(ToolValidationError);
+      }
+    );
   });
 });

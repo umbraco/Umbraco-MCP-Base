@@ -252,9 +252,9 @@ UMBRACO_READONLY=true UMBRACO_INCLUDE_SLICES=read node dist/index.js --debug-con
 
 The SDK automatically validates all string inputs before tool handlers run:
 - Rejects control characters in every string field
-- Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in values that can reach a URL: top-level params (including strings in top-level arrays and records), plus nested identifier-named fields (`id`, `parentId`, `parent_id`, `mediaUUID`, `guid`, `key`, `unique`, `alias`, `path`, `folderPath`, …) and everything below them
+- Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in values that can reach a URL: top-level params (including strings in top-level arrays and records), plus nested identifier-named fields (`id`, `ids`, `parentId`, `parent_id`, `mediaUUID`, `guid`, `key`, `keys`, `unique`, `alias`, `aliases`, `path`, `paths`, `folderPath`, …) and everything below them, except keys matching the secret/free-text name rule below, which get only the control-character check
 - Nested fields whose name ends in `name` (e.g. `name`, `fileName`) keep the path-traversal check; other nested request-body text (e.g. `data.properties[0].description`) only gets the control-character check
-- Fields whose name ends in `password`, `secret`, `description`, `translation`, `text`, `message`, `comment`, `title` or `label` only get the control-character check, at any depth
+- Fields whose name ends in `password` or `secret`, or whose name is `description`, `translation`, `text`, `message`, `comment`, `title` or `label` (or ends in one as `_description` or a camelCase suffix such as `pageTitle`, `filterText` — not `context` or `subtitle`), only get the control-character check, at any depth, even under an identifier-named ancestor
 - Mark other free-text fields `[text]` in their `.describe()` to get only the control-character check (for example a top-level `name` spread from a request body); fields marked `[raw]` skip every check
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages

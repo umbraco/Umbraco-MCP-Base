@@ -186,21 +186,28 @@ const SECRET_FIELD_NAME = /(password|secret)$/i;
 
 /**
  * Name rule for free-text fields (`description`, `translation`, `pageTitle`,
- * …): never a path parameter, so only the control-character check runs, even
- * at the top level. Anchored at the end of the key, so `textId` is not free text.
+ * `filterText`, `meta_description`, …): never a path parameter, so only the
+ * control-character check runs, even at the top level. The word must be the
+ * whole key (case-insensitive), follow `_`, or be a capitalised camelCase
+ * suffix after a lowercase letter or digit — so `context`, `subtitle` and
+ * `ciphertext` are not free text. Anchored at the end of the key, so `textId`
+ * is not free text either.
  */
-const FREE_TEXT_FIELD_NAME = /(description|translation|text|message|comment|title|label)$/i;
+const FREE_TEXT_FIELD_NAME =
+  /^(description|translation|text|message|comment|title|label)$|_(description|translation|text|message|comment|title|label)$/i;
+const FREE_TEXT_FIELD_SUFFIX = /[a-z0-9](Description|Translation|Text|Message|Comment|Title|Label)$/;
 
 /**
  * Identifier-named keys: `id`, `ids`, `parentId`, `parentID`, `parent_id`,
- * `documentTypeIds`, `mediaUUID`, `guid`, `key`, `unique`, `alias`, `path`,
- * `folderPath`, …. These are what a handler routes into a URL path, and a real
+ * `documentTypeIds`, `mediaUUID`, `guid`, `key`, `keys`, `documentTypeKeys`,
+ * `unique`, `alias`, `aliases`, `path`, `paths`, `folderPath`, …. These are what a handler routes into a URL path, and a real
  * identifier never contains `?`, `&`, `%xx` or `../`, so they keep every check
  * at any depth. A camelCase suffix must follow a lowercase letter or digit, so
  * `valid`, `android`, `PAID` and `BIDs` don't match.
  */
-const ID_FIELD_NAME = /^(ids?|uuids?|guids?|key|unique|alias|path)$|_(ids?|uuids?|guids?|key|alias|path)$/i;
-const ID_FIELD_SUFFIX = /[a-z0-9](Ids?|IDs?|Uuids?|UUIDs?|Guids?|GUIDs?|Key|Alias|Path)$/;
+const ID_FIELD_NAME =
+  /^(ids?|uuids?|guids?|keys?|uniques?|alias(es)?|paths?)$|_(ids?|uuids?|guids?|keys?|alias(es)?|paths?)$/i;
+const ID_FIELD_SUFFIX = /[a-z0-9](Ids?|IDs?|Uuids?|UUIDs?|Guids?|GUIDs?|Keys?|Alias(es)?|Paths?)$/;
 
 /**
  * Name-named keys (`name`, `fileName`, `folderName`, `parent_name`, …). File
@@ -215,7 +222,7 @@ function isIdFieldName(key: string): boolean {
 
 /** True when a declared key's name says its value is a secret or free text. */
 function isRelaxedFieldName(key: string): boolean {
-  return SECRET_FIELD_NAME.test(key) || FREE_TEXT_FIELD_NAME.test(key);
+  return SECRET_FIELD_NAME.test(key) || FREE_TEXT_FIELD_NAME.test(key) || FREE_TEXT_FIELD_SUFFIX.test(key);
 }
 
 /** The check level a declared key's name implies, independent of depth. */
@@ -337,8 +344,9 @@ function sanitizeUnion(
  * its declared key implies (`checkLevelForKey`), raised to `floor`. `floor` is
  * the strictest level an ancestor's key implied, so everything under an
  * id-named key (`ids: [{ value }]`, `parentId: { value }`) stays fully
- * checked. Secret and free-text keys drop to control characters only, and so
- * does a `[text]`-marked node.
+ * checked — except keys matching the secret / free-text name rule, which get
+ * only the control-character check even under an id-named ancestor. A
+ * `[text]`-marked node also drops to control characters only.
  *
  * Truly unknown schema kinds (`z.tuple`, `z.lazy`, `z.intersection`,
  * `z.map`, `z.set`) throw — silent fall-through would leave nested string
@@ -446,17 +454,21 @@ function sanitizeAgainstSchema(
  *   a top-level record) can be used to build a URL path or query, so they get
  *   every check.
  * - Nested fields with an identifier name (`id`, `ids`, `parentId`,
- *   `parent_id`, `mediaUUID`, `guid`, `key`, `unique`, `alias`, `path`,
- *   `folderPath`, …) get every check, and so does everything below them.
+ *   `parent_id`, `mediaUUID`, `guid`, `key`, `keys`, `unique`, `alias`,
+ *   `aliases`, `path`, `paths`, `folderPath`, …) get every check, and so does
+ *   everything below them — except keys matching the secret / free-text name
+ *   rule below, which get only the control-character check.
  * - Nested fields whose name ends in `name` (`name`, `fileName`) keep the
  *   path-traversal check, since file entities build paths from them.
  * - Any other nested string (request-body text such as
  *   `data.properties[0].description`) gets only the control-character check,
  *   so free text like `Wat zoek je?` round-trips.
  *
- * Fields whose name ends in `password` / `secret`, or in `description`,
- * `translation`, `text`, `message`, `comment`, `title` / `label`
- * (case-insensitive), get only the control-character check at any depth. Mark
+ * Fields whose name ends in `password` / `secret` (case-insensitive), or
+ * whose name is, ends in `_` plus, or has a camelCase suffix of `description`,
+ * `translation`, `text`, `message`, `comment`, `title` / `label` (`pageTitle`,
+ * `meta_description`; not `context` or `subtitle`), get only the
+ * control-character check at any depth, even under an id-named ancestor. Mark
  * other free-text fields `[text]` for the same effect — for example a
  * top-level `name` spread from a request body. Don't route a relaxed field
  * into a URL path.

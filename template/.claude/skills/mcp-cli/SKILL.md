@@ -128,6 +128,7 @@ Introspection respects all filtering. `--list-tools` with `UMBRACO_READONLY=true
 The SDK validates all string inputs before tool handlers run:
 - Rejects control characters in every string
 - Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in top-level params and identifier fields (`id`, `parentId`, `path`, …), and `../` in nested `name` fields
+- Top-level params with a secret or free-text name (`password`, `secret`, `description`, `pageTitle`, …) and fields marked `[text]` only get the control-character check
 - Allows `?`, `&`, `%` and `../` in nested request-body text and in description-like fields (`description`, `translation`, `title`, …)
 - Validates UUID format where expected
 - Returns clear error messages for agent self-correction
