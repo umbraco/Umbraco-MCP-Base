@@ -67,30 +67,16 @@ Then read the generated files to understand:
 
 Fetch the swagger spec from the `swaggerUrl` in `.discover.json` and list only the collection's
 operations. Don't dump the raw spec — the Management API spec is several megabytes and gets
-truncated. This prints one line per operation whose `tags[0]` (or `"default"` for untagged
-operations, as `discover` groups them) equals the collection's original tag from
-`.discover.json`'s `collectionTags`:
+truncated. From the project root, run:
 
 ```bash
-curl -fsSk "{swaggerUrl}" | node -e '
-const fs = require("fs");
-const spec = JSON.parse(fs.readFileSync(0, "utf8"));
-const tagOf = (op) => op.tags?.[0] || "default";
-const ops = Object.entries(spec.paths).flatMap(([p, item]) =>
-  ["get", "post", "put", "patch", "delete", "head", "options"].filter((m) => item[m]).map((m) => [m, p, item[m]]));
-const tag = JSON.parse(fs.readFileSync(".discover.json", "utf8")).collectionTags?.[process.argv[1]];
-if (!tag) {
-  const all = new Set(ops.map(([, , op]) => tagOf(op)));
-  console.error(`.discover.json has no collectionTags entry for "${process.argv[1]}". Spec tags:`, [...all].sort().join(", "));
-  process.exit(1);
-}
-for (const [m, p, op] of ops)
-  if (tagOf(op) === tag) console.log(m.toUpperCase(), p, op.operationId, "-", op.summary ?? "");
-' {collection}
+curl -fsSk "{swaggerUrl}" | node ${CLAUDE_PLUGIN_ROOT}/skills/build-tools/scripts/list-operations.ts {collection}
 ```
 
-If it reports no `collectionTags` entry (a `.discover.json` from an older `discover`), pick the tag
-from the list it prints that corresponds to the collection and match on that instead.
+It prints one line per operation in the collection (`METHOD path operationId - summary`), matched
+on the collection's original tag from `.discover.json`'s `collectionTags`. If it exits saying there
+is no `collectionTags` entry (a `.discover.json` from an older `discover`), it lists the spec's tags:
+pick the one that corresponds to the collection and re-run with `--tag <thatTag>` appended.
 
 The method, path and `operationId` are usually all you need — the generated Zod schemas (Step 1)
 carry the parameter and response shapes. Only look deeper into the spec for an operation whose

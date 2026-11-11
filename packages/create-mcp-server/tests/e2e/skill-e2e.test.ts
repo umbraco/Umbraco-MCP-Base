@@ -84,6 +84,14 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
       const dest = path.join(skillsDir, skill);
       if (fs.existsSync(src) && !fs.existsSync(dest)) {
         fs.cpSync(src, dest, { recursive: true });
+        // Skills are copied in rather than installed as a plugin, so ${CLAUDE_PLUGIN_ROOT}
+        // (used to run the skills' bundled scripts) is unset here. Point it at the plugin source.
+        const skillFile = path.join(dest, "SKILL.md");
+        const pluginRoot = path.dirname(pluginsDir);
+        fs.writeFileSync(
+          skillFile,
+          fs.readFileSync(skillFile, "utf-8").replaceAll("${CLAUDE_PLUGIN_ROOT}", pluginRoot),
+        );
       }
     }
 
