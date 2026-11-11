@@ -144,16 +144,28 @@ export function useDraft202012ToolSchemas(server: McpServer): void {
       return {
         tools: Object.entries(registeredTools)
           .filter(([, tool]) => tool.enabled)
-          .map(([name, tool]) => ({
-            name,
-            title: tool.title,
-            description: tool.description,
-            inputSchema: toJsonSchema(tool.inputSchema, "input") ?? EMPTY_OBJECT_JSON_SCHEMA,
-            ...(tool.outputSchema ? { outputSchema: toJsonSchema(tool.outputSchema, "output") } : {}),
-            annotations: tool.annotations,
-            execution: tool.execution,
-            _meta: tool._meta,
-          })),
+          .flatMap(([name, tool]) => {
+            // A tool not wrapped by the SDK decorators skips their
+            // registration-time schema check (#417). If its schema can't
+            // be converted, leave that one tool out rather than failing
+            // the listing for every tool.
+            try {
+              return [{
+                name,
+                title: tool.title,
+                description: tool.description,
+                inputSchema: toJsonSchema(tool.inputSchema, "input") ?? EMPTY_OBJECT_JSON_SCHEMA,
+                ...(tool.outputSchema ? { outputSchema: toJsonSchema(tool.outputSchema, "output") } : {}),
+                annotations: tool.annotations,
+                execution: tool.execution,
+                _meta: tool._meta,
+              }];
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`Tool "${name}" left out of tools/list: its schema cannot be converted to JSON Schema: ${message}`);
+              return [];
+            }
+          }),
       };
     });
   } catch {
