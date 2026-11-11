@@ -322,22 +322,27 @@ export type SignInUnavailableReason =
  * start. Throwing fails the Durable Object's start instead, so no toolset is
  * served on a dead session.
  *
- * Recovery depends on the reason:
- * - `no-token-in-kv` and `refresh-rejected-expired` (once the KV entry has
- *   been deleted): the client gets back to sign-in only when the consumer
- *   wraps `McpAgent.serve()` in `createSiteRoutingApiHandler`, which answers
- *   `401 invalid_token` once the login's KV entry reads as gone (#382). A
- *   Durable Object cannot send that `401` itself: `McpAgent.serve()` reaches
- *   the object over a WebSocket upgrade, so only the Worker-side wrapper sets
- *   the HTTP status.
- * - `refresh-rejected-misconfigured` and `refresh-rejected-request`: the KV
- *   entry is kept (signing in again would replay the same client or request),
- *   so every Durable Object start keeps failing until an administrator fixes
- *   the Umbraco client registration. `message` says what to check.
+ * For every refresh rejection the stored KV entry is deleted (unless a
+ * concurrent refresh already rotated it), so all four reasons recover the same
+ * way: the client gets back to sign-in, but only when the consumer wraps
+ * `McpAgent.serve()` in `createSiteRoutingApiHandler`, which answers
+ * `401 invalid_token` once the login's KV entry reads as gone (#382). A
+ * Durable Object cannot send that `401` itself: `McpAgent.serve()` reaches the
+ * object over a WebSocket upgrade, so only the Worker-side wrapper sets the
+ * HTTP status. Without the wrapper the session fails every start until the
+ * outer grant expires.
  *
- * It propagates out of `McpAgent.init()`. The class is exported so a consumer
- * can recognise it — in an `onError` override, say — with `instanceof` (within
- * the same bundle) or by `error.name === "UmbracoSignInUnavailableError"`.
+ * `refresh-rejected-misconfigured` and `refresh-rejected-request` are also
+ * deleted, even though signing in again won't fix them: keeping the entry would
+ * only make every later start fail again and repeat the rejected refresh
+ * against Umbraco's token endpoint. A fresh sign-in with a broken client
+ * registration fails visibly at the Umbraco callback instead. `message` (also
+ * logged as a warning) tells an administrator what to fix.
+ *
+ * It propagates out of `McpAgent.init()`, so it reaches the Worker logs, not
+ * the MCP client. The class is exported so a consumer that overrides the
+ * agent's error handling can recognise it with `instanceof` (within the same
+ * bundle) or by `error.name === "UmbracoSignInUnavailableError"`.
  */
 export class UmbracoSignInUnavailableError extends Error {
   /** Why the session is unusable, as logged on the init `:done` line. */
@@ -353,7 +358,8 @@ export class UmbracoSignInUnavailableError extends Error {
 /** Why the session is unusable when KV has no token entry for the login. */
 const NO_TOKEN_MESSAGE =
   "No Umbraco token is stored for this login (expired from KV or deleted after Umbraco rejected its refresh token). " +
-  "The client is sent back to sign-in once the API handler sees the entry gone.";
+  "If the Worker's API handler is wrapped in createSiteRoutingApiHandler, the client is sent back to sign-in once " +
+  "that handler's KV read sees the entry gone; without it, the session keeps failing until the client reconnects.";
 
 /**
  * Same, but for the case where we know *why*: Umbraco rejected the stored
@@ -395,10 +401,9 @@ const REFRESH_REQUEST_REJECTED_MESSAGE =
  * that don't (`network`, `server_error`: a blip must not fail a working
  * session). `cause` becomes the error's `reason`, the `cause=` on the log
  * lines and the init span's `umbraco.mcp.init.cause`; `message` becomes the
- * thrown error's message and is also logged by `signInUnavailable` as a
- * `console.warn` line, so the administrator guidance reaches the Worker logs.
- * A `Record` over every `RefreshFailureReason` (not `Partial`) so adding a new
- * reason is a compile error here until it's given an explicit entry.
+ * thrown error's message. A `Record` over every `RefreshFailureReason` (not
+ * `Partial`) so adding a new reason is a compile error here until it's given an
+ * explicit entry.
  */
 const UNUSABLE_REFRESH_REASONS: Record<
   RefreshFailureReason,
@@ -412,12 +417,25 @@ const UNUSABLE_REFRESH_REASONS: Record<
 };
 
 /**
+ * The init mode each cause is recorded under. `auth-expired` is a user's
+ * session ending (routine); `auth-misconfigured` is a fault an administrator
+ * has to fix, kept apart so a broken client registration doesn't hide among
+ * ordinary idle timeouts on a dashboard.
+ */
+const SIGN_IN_UNAVAILABLE_MODES: Record<SignInUnavailableReason, Exclude<ServerInitMode, "full">> = {
+  "no-token-in-kv": "auth-expired",
+  "refresh-rejected-expired": "auth-expired",
+  "refresh-rejected-misconfigured": "auth-misconfigured",
+  "refresh-rejected-request": "auth-misconfigured",
+};
+
+/**
  * Records an unusable-session start on the init span and log, then returns the
- * error to throw. Keeps `umbraco.mcp.init.mode=auth-expired` (and the
- * `mode=auth-expired cause=…` log line) so the rate of these starts stays
- * visible now that no server is built for them. Also logs the error message
- * with its cause, so the administrator guidance for `misconfigured` /
- * `request_rejected` is visible in the Worker logs, not only on the error.
+ * error to throw. Writes `umbraco.mcp.init.mode` (and the `mode=… cause=…`
+ * `:done` log line) so the rate of these starts stays visible now that no
+ * server is built for them. For `auth-misconfigured` it also logs the error
+ * message as a warning, so the administrator guidance reaches the Worker logs;
+ * routine expiries get only the `:done` line.
  */
 function signInUnavailable(
   initSpan: TelemetrySpan,
@@ -426,13 +444,15 @@ function signInUnavailable(
   cause: SignInUnavailableReason,
   message: string
 ): UmbracoSignInUnavailableError {
+  const mode = SIGN_IN_UNAVAILABLE_MODES[cause];
   console.log(
-    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=auth-expired cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=${mode} cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
   );
-  console.warn(
-    `[mcp-hosted] createPerRequestServer id=${traceId} sign-in unavailable cause=${cause}: ${message}`
-  );
-  const mode: ServerInitMode = "auth-expired";
+  if (mode === "auth-misconfigured") {
+    console.warn(
+      `[mcp-hosted] createPerRequestServer id=${traceId} sign-in unavailable cause=${cause}: ${message}`
+    );
+  }
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, mode);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, cause);
@@ -555,7 +575,7 @@ async function initPerRequestServer(
 
   // Request-scoped span enrichment: which tenant, which region, which login.
   // Resolved here — the only layer that holds both `props` and `env` — and
-  // before either auth-expired throw below, so an `auth-expired`
+  // before either sign-in-unavailable throw below, so such a
   // start carries the same session/tenant identity as a full one. Never
   // throws (see `resolveRequestTelemetry`).
   const rawRequestTelemetry = await resolveRequestTelemetry(props, env);
@@ -700,16 +720,18 @@ async function initPerRequestServer(
   const refreshFailure = fetchClient.getRefreshFailure();
   const unusableRefresh = refreshFailure ? UNUSABLE_REFRESH_REASONS[refreshFailure.reason] : null;
   if (unusableRefresh) {
-    // Only `expired` means the stored entry is dead for good: drop it, so the
-    // client's next request finds no inner token and the API handler wrapper
+    // The stored entry can't be used again: drop it, so the client's next
+    // request finds no inner token and the API handler wrapper
     // (`createSiteRoutingApiHandler`) revokes the outer grant and 401s it back
-    // into a fresh sign-in. Not on `misconfigured` / `request_rejected`: a
-    // fresh login replays the same broken client or request, so signing in
-    // again can't help and the entry stays put for an administrator to fix.
+    // into a fresh sign-in. That includes `misconfigured` / `request_rejected`:
+    // signing in again won't fix them, but keeping the entry would fail every
+    // later start and re-post the rejected refresh to Umbraco each time. A
+    // fresh sign-in with a broken client fails at the Umbraco callback instead,
+    // once, where the user can see it.
     // Conditional on the rejected token: a concurrent refresh may already have
     // rotated the entry, in which case the session is alive and must be kept.
     const rejectedRefreshToken = fetchClient.getRejectedRefreshToken();
-    if (refreshFailure!.reason === "expired" && rejectedRefreshToken) {
+    if (rejectedRefreshToken) {
       try {
         const deleted = await deleteStoredUmbracoToken(
           env.OAUTH_KV,
@@ -723,7 +745,7 @@ async function initPerRequestServer(
         }
       } catch (error) {
         console.error(
-          `[mcp-hosted] createPerRequestServer id=${traceId} siteId=${safeSiteId} failed to delete expired Umbraco token entry:`,
+          `[mcp-hosted] createPerRequestServer id=${traceId} siteId=${safeSiteId} failed to delete rejected Umbraco token entry:`,
           error
         );
       }

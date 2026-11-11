@@ -209,7 +209,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     const { error } = await start();
 
     expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-misconfigured");
-    expect(doneLine(logSpy)).toContain("mode=auth-expired");
+    expect(doneLine(logSpy)).toContain("mode=auth-misconfigured");
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-misconfigured");
   });
 
@@ -246,11 +246,23 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(warned).toContain("administrator");
   });
 
+  it("does not log a warning for a routine expiry, only the :done line", async () => {
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+
+    await expectSignInUnavailable((await start()).error);
+
+    const warned = warnSpy.mock.calls
+      .map((args: unknown[]) => String(args[0]))
+      .filter((l: string) => l.includes("sign-in unavailable"));
+    expect(warned).toEqual([]);
+    expect(doneLine(logSpy)).toContain("mode=auth-expired cause=refresh-rejected-expired");
+  });
+
   it.each([
     ["misconfigured", "invalid_client", "refresh-rejected-misconfigured"],
     ["request_rejected", "invalid_scope", "refresh-rejected-request"],
   ] as const)(
-    "records auth-expired mode, zero tools and the cause on the init span for %s",
+    "records auth-misconfigured mode, zero tools and the cause on the init span for %s",
     async (reason, oauthError, cause) => {
       refreshFailure = { ok: false, reason, status: 400, error: oauthError, message: "rejected" };
       const { HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
@@ -258,7 +270,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       const { error, attributes } = await startRecordingInitSpan();
 
       expect((await expectSignInUnavailable(error)).reason).toBe(cause);
-      expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
+      expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-misconfigured");
       expect(attributes[HostedTelemetryAttributes.INIT_TOOL_COUNT]).toBe(0);
       expect(attributes[HostedTelemetryAttributes.INIT_CAUSE]).toBe(cause);
     }
@@ -290,7 +302,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     const { error } = await start();
 
     expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-request");
-    expect(doneLine(logSpy)).toContain("mode=auth-expired");
+    expect(doneLine(logSpy)).toContain("mode=auth-misconfigured");
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-request");
   });
 
@@ -428,26 +440,45 @@ describe("createPerRequestServer with a rejected refresh token", () => {
   });
 
   it.each([
-    ["misconfigured", "refresh-rejected-misconfigured"],
-    ["request_rejected", "refresh-rejected-request"],
-    ["network", null],
-    ["server_error", null],
+    ["misconfigured", "invalid_client", "refresh-rejected-misconfigured"],
+    ["request_rejected", "invalid_scope", "refresh-rejected-request"],
   ] as const)(
+    "deletes the inner KV entry when the refresh failed with %s",
+    async (reason, oauthError, cause) => {
+      // Signing in again won't fix a broken client or request, but keeping the
+      // entry would fail every later start and re-post the rejected refresh to
+      // Umbraco each time. Dropping it sends the client to sign-in once.
+      refreshFailure = { ok: false, reason, status: 400, error: oauthError, message: "rejected" };
+
+      const { server, error } = await start();
+
+      expect(server).toBeUndefined();
+      expect((await expectSignInUnavailable(error)).reason).toBe(cause);
+      expect(kvDelete).toHaveBeenCalledTimes(1);
+      expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
+    }
+  );
+
+  it("does NOT delete a misconfigured-client entry rotated by a concurrent refresh", async () => {
+    refreshFailure = { ok: false, reason: "misconfigured", status: 400, error: "invalid_client", message: "rejected" };
+    storedRefreshToken = "rt-rotated-by-someone-else";
+
+    const { error } = await start();
+
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-misconfigured");
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([["network"], ["server_error"]] as const)(
     "does not delete the inner KV entry when the refresh failed with %s",
-    async (reason, cause) => {
-      // Signing in again can't fix a broken client/request, and a blip or 5xx
-      // must not end a session — so only `expired` drops the entry.
+    async (reason) => {
+      // A blip or 5xx must not end a session.
       refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
 
       const { server, error } = await start();
 
-      if (cause) {
-        expect(server).toBeUndefined();
-        expect((await expectSignInUnavailable(error)).reason).toBe(cause);
-      } else {
-        expect(error).toBeUndefined();
-        expect(server).toBeDefined();
-      }
+      expect(error).toBeUndefined();
+      expect(server).toBeDefined();
       expect(kvDelete).not.toHaveBeenCalled();
     }
   );
