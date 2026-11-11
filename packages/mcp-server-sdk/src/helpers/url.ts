@@ -22,3 +22,22 @@ export function isLoopbackUrl(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * TLS certificate verification is left to Node.js (on by default). A local
+ * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
+ * refuse to talk to a non-local site with it set, so the client secret is never
+ * sent over an unverified connection. The message also goes to stderr, because
+ * stdout carries the MCP stdio protocol.
+ */
+export function assertTlsNotDisabledForRemote(baseUrl: string): void {
+  if (typeof process === "undefined" || process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
+  if (isLoopbackUrl(baseUrl)) return;
+  const message =
+    "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
+    "so its TLS certificate would not be verified. Refusing to start. Remove NODE_TLS_REJECT_UNAUTHORIZED " +
+    "(it is only for a local Umbraco on localhost, 127.0.0.1 or [::1]), or trust the certificate " +
+    "with NODE_EXTRA_CA_CERTS instead.";
+  console.error(message);
+  throw new Error(message);
+}

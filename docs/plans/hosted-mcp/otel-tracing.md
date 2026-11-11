@@ -86,7 +86,7 @@ the rest, mirroring how Umbraco.AI adds `umbraco.ai.*` alongside `gen_ai.*`:
 | `mcp.session.id` | DO-scoped session id | handler `extra` |
 | `umbraco.mcp.collection` | `document` | collection metadata |
 | `umbraco.mcp.slices` | `read,list` | `tool.slices` |
-| `umbraco.mcp.outcome` | `success` \| `validation_error` \| `client_error` \| `api_error` \| `transport_error` \| `unknown_error` | `withErrorHandling` taxonomy |
+| `umbraco.mcp.outcome` | `success` \| `validation_error` \| `client_error` \| `confirmation_timeout` \| `api_error` \| `transport_error` \| `unknown_error` | `withErrorHandling` taxonomy |
 | `umbraco.mcp.read_only` | `true` | `tool.annotations.readOnlyHint` |
 | `umbraco.mcp.server.name` / `.version` | `umbraco-cms-developer-mcp-17` / `18.0.2` | `CreateServerOptions` |
 | `umbraco.mcp.umbraco_major` | `17` | `expectedUmbracoMajor` |

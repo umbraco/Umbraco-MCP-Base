@@ -1,4 +1,8 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -373,6 +377,7 @@ describe("handleCliCommands", () => {
     it("calls a tool and prints JSON result", async () => {
       const callableTool = makeTool({
         name: "get-item",
+        inputSchema: { id: z.string() },
         handler: async (args: any) => ({
           content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, name: "Test" }) }],
         }),
@@ -453,6 +458,146 @@ describe("handleCliCommands", () => {
       expect(consoleErrorOutput).toContain("API timeout");
     });
 
+    describe("input validation", () => {
+      const run = (tool: ToolDefinition<any, any>, callToolArgs?: string) =>
+        handleCliCommands([makeCollection("items", [tool])], {
+          cliFlags: { listTools: false, generateContext: false, debugConfig: false, callTool: tool.name, callToolArgs },
+        });
+
+      it("exits 1 without calling the handler when a required arg is missing", async () => {
+        const handler = jest.fn(async () => ({ content: [] }));
+        const tool = makeTool({ name: "get-item", inputSchema: { id: z.string() }, handler: handler as any });
+
+        await expect(run(tool)).rejects.toThrow("process.exit(1)");
+
+        expect(exitCode).toBe(1);
+        expect(handler).not.toHaveBeenCalled();
+        expect(consoleErrorOutput).toContain("Input validation error: Invalid arguments for tool get-item: ");
+        expect(consoleErrorOutput).toContain("id");
+      });
+
+      it("exits 1 when an arg has the wrong type", async () => {
+        const handler = jest.fn(async () => ({ content: [] }));
+        const tool = makeTool({ name: "get-item", inputSchema: { id: z.string() }, handler: handler as any });
+
+        await expect(run(tool, '{"id":123}')).rejects.toThrow("process.exit(1)");
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(consoleErrorOutput).toContain("Input validation error");
+      });
+
+      it("exits 1 with a readable message when --call-args is not an object", async () => {
+        const handler = jest.fn(async () => ({ content: [] }));
+        const tool = makeTool({ name: "get-item", inputSchema: { id: z.string() }, handler: handler as any });
+
+        await expect(run(tool, "[]")).rejects.toThrow("process.exit(1)");
+
+        expect(handler).not.toHaveBeenCalled();
+        expect(consoleErrorOutput).toContain("Input validation error: Invalid arguments for tool get-item: ");
+        expect(consoleErrorOutput).toMatch(/expected object/i);
+      });
+
+      it("passes parsed data to the handler so defaults apply", async () => {
+        let receivedArgs: any;
+        const tool = makeTool({
+          name: "list-items",
+          inputSchema: { id: z.string(), take: z.number().default(10) },
+          handler: (async (args: any) => {
+            receivedArgs = args;
+            return { content: [] };
+          }) as any,
+        });
+
+        await expect(run(tool, '{"id":"abc"}')).rejects.toThrow("process.exit(0)");
+
+        expect(receivedArgs).toEqual({ id: "abc", take: 10 });
+      });
+
+      it("accepts a ZodType input schema", async () => {
+        let receivedArgs: any;
+        const tool = makeTool({
+          name: "get-item",
+          inputSchema: z.object({ id: z.string() }) as any,
+          handler: (async (args: any) => {
+            receivedArgs = args;
+            return { content: [] };
+          }) as any,
+        });
+
+        await expect(run(tool, '{"id":"abc"}')).rejects.toThrow("process.exit(0)");
+
+        expect(receivedArgs).toEqual({ id: "abc" });
+      });
+
+      it("exits 1 without an unhandled rejection when a schema refine throws", async () => {
+        const handler = jest.fn(async () => ({ content: [] }));
+        const tool = makeTool({
+          name: "get-item",
+          inputSchema: {
+            id: z.string().refine(() => {
+              throw new Error("refine exploded");
+            }),
+          },
+          handler: handler as any,
+        });
+
+        await expect(run(tool, '{"id":"abc"}')).rejects.toThrow("process.exit(1)");
+
+        expect(exitCode).toBe(1);
+        expect(handler).not.toHaveBeenCalled();
+        expect(consoleErrorOutput).toContain("Tool 'get-item' failed: refine exploded");
+      });
+
+      // The CLI re-implements McpServer.validateToolInput (it's private); this
+      // catches the two drifting apart when @modelcontextprotocol/sdk is upgraded.
+      // Non-object args aren't covered: MCP rejects them at the protocol layer.
+      it.each([
+        ["a missing required arg", undefined],
+        ["a wrongly typed arg", '{"id":123}'],
+        ["several failing args", '{"id":123,"take":"x"}'],
+      ])("prints the same validation message as the MCP path for %s", async (_label, callToolArgs) => {
+        const inputSchema = { id: z.string(), take: z.number().default(10) };
+        const handler = async () => ({ content: [] as Array<{ type: "text"; text: string }> });
+
+        const server = new McpServer({ name: "test-server", version: "1.0.0" });
+        server.registerTool("get-item", { inputSchema }, handler);
+        const client = new Client({ name: "test-client", version: "1.0.0" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+        let mcpMessage: string;
+        try {
+          const result = await client.callTool({
+            name: "get-item",
+            arguments: callToolArgs === undefined ? {} : JSON.parse(callToolArgs),
+          });
+          expect(result.isError).toBe(true);
+          mcpMessage = (result.content as Array<{ text: string }>)[0].text;
+        } finally {
+          await client.close();
+          await server.close();
+        }
+
+        await expect(
+          run(makeTool({ name: "get-item", inputSchema, handler: handler as any }), callToolArgs),
+        ).rejects.toThrow("process.exit(1)");
+
+        // McpError prefixes its own "MCP error <code>: "; the rest must match
+        expect(mcpMessage).toMatch(/Input validation error: /);
+        expect(consoleErrorOutput.trim()).toBe(
+          mcpMessage.slice(mcpMessage.indexOf("Input validation error: ")),
+        );
+      });
+
+      it("calls the handler when the tool has no inputSchema and no args", async () => {
+        const handler = jest.fn(async () => ({ content: [] }));
+        const tool = makeTool({ name: "ping", inputSchema: undefined, handler: handler as any });
+
+        await expect(run(tool)).rejects.toThrow("process.exit(0)");
+
+        expect(handler).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it("defaults to empty args when --call-args not provided", async () => {
       let receivedArgs: any;
       const callableTool = makeTool({
@@ -501,6 +646,7 @@ describe("handleCliCommands", () => {
       let receivedArgs: any;
       const callableTool = makeTool({
         name: "get-item",
+        inputSchema: { id: z.string(), description: z.string().optional(), nested: z.object({ count: z.number() }).optional() },
         handler: async (args: any) => {
           receivedArgs = args;
           return { content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, name: "Test" }) }] };
@@ -594,6 +740,7 @@ describe("handleCliCommands", () => {
       let receivedArgs: any;
       const callableTool = makeTool({
         name: "get-item",
+        inputSchema: { id: z.string(), description: z.string().optional(), nested: z.object({ count: z.number() }).optional() },
         handler: async (args: any) => {
           receivedArgs = args;
           return { content: [{ type: "text" as const, text: "{}" }] };
@@ -622,6 +769,7 @@ describe("handleCliCommands", () => {
       let receivedArgs: any;
       const callableTool = makeTool({
         name: "get-item",
+        inputSchema: { id: z.string(), description: z.string().optional(), nested: z.object({ count: z.number() }).optional() },
         handler: async (args: any) => {
           receivedArgs = args;
           return { content: [{ type: "text" as const, text: "{}" }] };

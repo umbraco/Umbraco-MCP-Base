@@ -67,6 +67,25 @@ describe("TLS certificate verification", () => {
     expect(client.isInitialized()).toBe(false);
   });
 
+  it.each([
+    ["initializeUmbracoFetch", async (mod: any) => {
+      mod.initializeUmbracoFetch(config("https://example.umbraco.io"));
+      return () => mod.UmbracoManagementClient({ url: "/x", method: "GET" });
+    }],
+    ["createUmbracoFetchClient", async (mod: any) => {
+      const client = mod.createUmbracoFetchClient();
+      client.initialize(config("https://example.umbraco.io"));
+      return () => client.mutator({ url: "/x", method: "GET" });
+    }],
+  ])("refuses an API request when TLS is disabled after %s", async (_name, setup) => {
+    const call = await setup(await loadClient());
+    process.env[TLS_ENV] = "0";
+    const fetchSpy = jest.spyOn(globalThis, "fetch");
+    await expect(call()).rejects.toThrow("Refusing to start");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it("refuses the build-time token request before sending the secret (npm run generate)", async () => {
     const mod = await loadClient();
     process.env[TLS_ENV] = "0";

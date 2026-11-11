@@ -88,6 +88,12 @@ export function removeChaining(projectDir: string): number {
       ""
     );
 
+    // Remove the chained-server filter passthrough (comment block + call)
+    content = content.replace(
+      /(?:^\/\/[^\n]*\n)*^mcpClientManager\.setFilterConfig\(\{[\s\S]*?\}\);\s*\n/m,
+      ""
+    );
+
     // Remove proxied tools discovery block
     const proxyBlockRegex =
       /\/\/\s*Discover and register proxied tools[\s\S]*?(?=const transport|\/\/\s*Start|async function main)/;

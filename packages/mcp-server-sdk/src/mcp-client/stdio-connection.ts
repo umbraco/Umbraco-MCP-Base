@@ -48,6 +48,15 @@ export function buildChildEnv(
   return { ...parentEnv, ...overrides } as Record<string, string>;
 }
 
+/** List filters and the SDK CLI flag each is passed to a chained server as. */
+const LIST_FILTER_FLAGS = [
+  ["tools", "--umbraco-include-tools"],
+  ["toolCollections", "--umbraco-include-tool-collections"],
+  ["slices", "--umbraco-include-slices"],
+  ["excludeSlices", "--umbraco-exclude-slices"],
+  ["modes", "--umbraco-tool-modes"],
+] as const satisfies ReadonlyArray<readonly [keyof FilterConfig, string]>;
+
 export class StdioConnection implements McpConnection {
   private client: Client;
   private stderrTail = "";
@@ -163,23 +172,20 @@ export class StdioConnection implements McpConnection {
   }
 
   /**
-   * Build command arguments with filter passthrough.
-   * Appends --tools, --slices, etc. to pass filters to the chained server.
+   * Build command arguments with filter passthrough, using the SDK's own
+   * `--umbraco-*` config flags so a chained server built on the SDK applies
+   * them as it would its own command line.
    */
   private buildArgs(): string[] {
     const args = [...(this.config.args || [])];
+    const filters = this.filterConfig ?? {};
 
-    if (this.filterConfig?.tools?.length) {
-      args.push("--tools", this.filterConfig.tools.join(","));
+    for (const [key, flag] of LIST_FILTER_FLAGS) {
+      const values = filters[key];
+      if (values?.length) args.push(flag, values.join(","));
     }
-    if (this.filterConfig?.toolCollections?.length) {
-      args.push("--tool-collections", this.filterConfig.toolCollections.join(","));
-    }
-    if (this.filterConfig?.slices?.length) {
-      args.push("--slices", this.filterConfig.slices.join(","));
-    }
-    if (this.filterConfig?.modes?.length) {
-      args.push("--modes", this.filterConfig.modes.join(","));
+    if (filters.readOnly) {
+      args.push("--umbraco-readonly");
     }
 
     return args;

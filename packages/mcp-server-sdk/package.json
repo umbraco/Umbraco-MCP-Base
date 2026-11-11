@@ -58,7 +58,7 @@
     "prepublishOnly": "npm run build"
   },
   "engines": {
-    "node": ">=22.3.0"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "repository": {
     "type": "git",
@@ -77,7 +77,7 @@
   },
   "homepage": "https://github.com/umbraco/Umbraco-MCP-Base#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "json-schema-to-typescript": "^15.0.4",
     "zod": "^4.4.3"
   },

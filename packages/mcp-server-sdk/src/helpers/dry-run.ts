@@ -13,11 +13,20 @@ import { ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 import { createToolResult } from "./tool-result.js";
 import { resolveToolCallParams } from "./tool-call-params.js";
+import { readBooleanEnv } from "./env.js";
 
 /**
- * Module-level dry-run toggle.
+ * Module-level dry-run toggle. `null` until configured; the first
+ * isDryRunEnabled() call then reads UMBRACO_DRY_RUN once and keeps it.
  */
-let dryRunEnabled = false;
+let dryRunEnabled: boolean | null = null;
+
+/**
+ * Marker set on a tool that `withDryRun` can intercept (mutation tools only).
+ * It is an enumerable symbol so it survives any `...tool` spread, whatever
+ * the decorator order. Read by `getRegisteredOutputSchema`.
+ */
+export const DRY_RUN_INTERCEPTS = Symbol("umbraco-mcp.dryRunIntercepts");
 
 /**
  * Enable or disable dry-run mode globally.
@@ -29,10 +38,20 @@ export function configureDryRunMode(enabled: boolean): void {
   dryRunEnabled = enabled;
 }
 
+/** Clears the configured mode so UMBRACO_DRY_RUN is read again. @internal */
+export function resetDryRunMode(): void {
+  dryRunEnabled = null;
+}
+
 /**
- * Returns whether dry-run mode is currently enabled.
+ * Returns whether dry-run mode is currently enabled. Servers that never call
+ * getServerConfig() fall back to UMBRACO_DRY_RUN ("true" or "1"), read on first
+ * use so mutation tools don't switch mode mid-session if the env changes.
  */
 export function isDryRunEnabled(): boolean {
+  if (dryRunEnabled === null) {
+    dryRunEnabled = readBooleanEnv("UMBRACO_DRY_RUN");
+  }
   return dryRunEnabled;
 }
 
@@ -51,17 +70,13 @@ export function withDryRun<
   tool: ToolDefinition<Args, OutputArgs>
 ): ToolDefinition<Args, OutputArgs> {
   const originalHandler = tool.handler;
+  // Read-only tools are never intercepted
+  const intercepts = tool.annotations?.readOnlyHint !== true;
 
-  return {
+  const wrapped: ToolDefinition<Args, OutputArgs> = {
     ...tool,
     handler: ((...params: any[]) => {
-      if (!dryRunEnabled) {
-        return originalHandler(...(params as [any, any]));
-      }
-
-      // Read-only tools execute normally in dry-run mode
-      const isReadOnly = tool.annotations?.readOnlyHint === true;
-      if (isReadOnly) {
+      if (!isDryRunEnabled() || !intercepts) {
         return originalHandler(...(params as [any, any]));
       }
 
@@ -83,4 +98,33 @@ export function withDryRun<
       });
     }) as ToolCallback<Args>,
   };
+
+  if (intercepts) {
+    Object.defineProperty(wrapped, DRY_RUN_INTERCEPTS, {
+      value: true,
+      enumerable: true,
+    });
+  }
+
+  return wrapped;
+}
+
+/**
+ * The `outputSchema` to pass to `server.registerTool` for a tool.
+ *
+ * A dry-run preview doesn't match a mutation tool's `outputSchema`, and the
+ * MCP SDK rejects a result that doesn't. So while dry-run is on, a tool that
+ * `withDryRun` intercepts is registered without one. Call this at
+ * registration, after config is loaded, so dry-run mode is known.
+ *
+ * The decision is made when the tool is registered, so dry-run mode should
+ * not be toggled after tools are registered.
+ */
+export function getRegisteredOutputSchema<OutputArgs>(
+  tool: { outputSchema?: OutputArgs }
+): OutputArgs | undefined {
+  if (isDryRunEnabled() && (tool as Record<symbol, unknown>)[DRY_RUN_INTERCEPTS] === true) {
+    return undefined;
+  }
+  return tool.outputSchema;
 }

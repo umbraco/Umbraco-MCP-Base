@@ -62,7 +62,7 @@ const realCmsServer: McpServerConfig = {
  * Each server configured here will:
  * 1. Be available for internal delegation (tools calling mcpClientManager.callTool())
  * 2. Have its tools proxied to the parent client (if proxyTools is true)
- * 3. Receive the same filter configuration (tools, slices, modes) as this server
+ * 3. Receive this server's readonly mode and slice filters (see setFilterConfig in index.ts)
  */
 export const mcpServers: McpServerConfig[] = [
   // Use mock server for testing, real server otherwise

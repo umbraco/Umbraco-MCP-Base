@@ -92,12 +92,26 @@ function openPlainOutputObjects({
   }
 }
 
-function toJsonSchema(schema: unknown, io: "input" | "output"): Record<string, unknown> | undefined {
+/**
+ * Converts a tool's input or output schema (a full Zod schema — classic or
+ * Mini — or a raw `ZodRawShape`) to JSON Schema draft 2020-12. Output schemas
+ * are left open to additive fields (see `openPlainOutputObjects`).
+ *
+ * `unrepresentable: "any"` renders types JSON Schema cannot express (e.g.
+ * `z.date()`) as `{}` instead of throwing — for display-only callers such as
+ * CLI introspection. `ListTools` keeps Zod's default (throw).
+ */
+export function toJsonSchema(
+  schema: unknown,
+  io: "input" | "output",
+  options?: { unrepresentable?: "throw" | "any" },
+): Record<string, unknown> | undefined {
   if (!schema) return undefined;
   const zodSchema = isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
   return z.toJSONSchema(zodSchema, {
     target: "draft-2020-12",
     io,
+    ...(options?.unrepresentable ? { unrepresentable: options.unrepresentable } : {}),
     ...(io === "output" ? { override: openPlainOutputObjects } : {}),
   }) as Record<string, unknown>;
 }

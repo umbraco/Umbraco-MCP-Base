@@ -5,7 +5,7 @@
  * - OAuth client credentials authentication
  * - Automatic token refresh
  * - Query string serialization for arrays
- * - Error logging
+ * - Error logging (status only; bodies are opt-in)
  *
  * Works in Node.js 22+ and Cloudflare Workers.
  *
@@ -26,7 +26,10 @@
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { resolveStatusText } from "../helpers/status-text.js";
-import { isLoopbackUrl, normalizeBaseUrl } from "../helpers/url.js";
+import { assertTlsNotDisabledForRemote, normalizeBaseUrl } from "../helpers/url.js";
+
+// Re-exported so existing imports from the fetch client keep working.
+export { assertTlsNotDisabledForRemote };
 import { assertModuleFallbackAllowed, getActiveRequestContext } from "../request-context/async-request-context.js";
 
 /**
@@ -64,30 +67,25 @@ export interface UmbracoManagementClientOptions {
 // Module State
 // ============================================================================
 
-/**
- * TLS certificate verification is left to Node.js (on by default). A local
- * Umbraco with a self-signed certificate needs NODE_TLS_REJECT_UNAUTHORIZED=0;
- * refuse to talk to a non-local site with it set, so the client secret is never
- * sent over an unverified connection. The message also goes to stderr, because
- * stdout carries the MCP stdio protocol.
- */
-export function assertTlsNotDisabledForRemote(baseUrl: string): void {
-  if (typeof process === "undefined" || process.env?.NODE_TLS_REJECT_UNAUTHORIZED !== "0") return;
-  if (isLoopbackUrl(baseUrl)) return;
-  const message =
-    "[umbraco-mcp] NODE_TLS_REJECT_UNAUTHORIZED=0 is set and the Umbraco base URL is not local, " +
-    "so its TLS certificate would not be verified. Refusing to start. Remove NODE_TLS_REJECT_UNAUTHORIZED " +
-    "(it is only for a local Umbraco on localhost, 127.0.0.1 or [::1]), or trust the certificate " +
-    "with NODE_EXTRA_CA_CERTS instead.";
-  console.error(message);
-  throw new Error(message);
-}
-
 export const DEFAULT_TOKEN_PATH = "/umbraco/management/api/v1/security/back-office/token";
 
 let authConfig: UmbracoFetchAuthConfig | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
+// Shared by concurrent callers so a cold start or expiry sends one token request.
+interface TokenFlight {
+  promise: Promise<string>;
+  /** Aborts the shared request; fired once every waiting caller has given up. */
+  controller: AbortController;
+  waiters: number;
+}
+let inFlightToken: TokenFlight | null = null;
+// Bumped by clearUmbracoFetchToken, so a token request started before a
+// re-init or clear doesn't store its late response.
+let tokenGeneration = 0;
+
+/** Cap on the refresh margin: it only has to cover latency and clock skew. */
+const MAX_TOKEN_EXPIRY_MARGIN_MS = 30_000;
 
 // ============================================================================
 // Query String Serialization
@@ -173,31 +171,84 @@ export const requestClientCredentialsToken = async (config: {
 
 /**
  * Fetches a new access token from Umbraco.
+ *
+ * The stored expiry is brought forward by min(30 s, 10% of expires_in), so a
+ * token isn't sent just before it expires.
+ *
+ * @param signal - Aborts the token exchange (see `getToken` for whose signal).
  */
-const fetchAccessToken = async (): Promise<string> => {
+const fetchAccessToken = async (signal?: AbortSignal): Promise<string> => {
   if (!authConfig) {
     throw new Error(
       "UmbracoFetch not initialized. Call initializeUmbracoFetch() first."
     );
   }
 
-  const { accessToken: token, expiresIn } = await requestClientCredentialsToken(
-    authConfig
-  );
+  const generation = tokenGeneration;
+  const { accessToken: token, expiresIn } = await requestClientCredentialsToken({
+    ...authConfig,
+    signal,
+  });
 
-  accessToken = token;
-  tokenExpiry = Date.now() + expiresIn * 1000;
+  // Re-initialized or cleared while in flight: the response is for the old config.
+  if (generation === tokenGeneration) {
+    const lifetimeMs = expiresIn * 1000;
+    accessToken = token;
+    tokenExpiry = Date.now() + lifetimeMs - Math.min(MAX_TOKEN_EXPIRY_MARGIN_MS, lifetimeMs * 0.1);
+  }
   return token;
 };
 
 /**
- * Gets a valid access token, refreshing if expired.
+ * Gets a valid access token, refreshing if expired. Concurrent callers share
+ * one token request; a failed request isn't cached.
+ *
+ * @param signal - The calling request's abort signal, so a caller's deadline
+ *   also bounds its wait for the token (umbraco/Umbraco-MCP-Base#428). The
+ *   shared request has its own signal: one caller giving up rejects only that
+ *   caller, and the request is aborted once every waiting caller has given up.
  */
-const getToken = async (): Promise<string> => {
-  if (!accessToken || (tokenExpiry && Date.now() >= tokenExpiry)) {
-    await fetchAccessToken();
+const getToken = async (signal?: AbortSignal): Promise<string> => {
+  if (accessToken && !(tokenExpiry && Date.now() >= tokenExpiry)) {
+    return accessToken;
   }
-  return accessToken!;
+  signal?.throwIfAborted();
+  if (!inFlightToken) {
+    const controller = new AbortController();
+    const flight: TokenFlight = {
+      controller,
+      waiters: 0,
+      promise: fetchAccessToken(controller.signal).finally(() => {
+        if (inFlightToken === flight) inFlightToken = null;
+      }),
+    };
+    inFlightToken = flight;
+  }
+
+  const flight = inFlightToken;
+  flight.waiters++;
+  if (!signal) return flight.promise;
+  return new Promise<string>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason);
+      if (--flight.waiters === 0) flight.controller.abort(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    flight.promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+};
+
+/**
+ * Drops the cached token after a 401, but only if it is still the one that was
+ * sent, so concurrent 401s for the same token cause one refresh.
+ */
+const invalidateToken = (rejectedToken: string): void => {
+  if (accessToken === rejectedToken) {
+    accessToken = null;
+    tokenExpiry = null;
+  }
 };
 
 // ============================================================================
@@ -249,6 +300,8 @@ export function isUmbracoFetchInitialized(): boolean {
 export function clearUmbracoFetchToken(): void {
   accessToken = null;
   tokenExpiry = null;
+  inFlightToken = null;
+  tokenGeneration++;
 }
 
 // ============================================================================
@@ -291,8 +344,58 @@ export function setCustomTransport(transport: CustomTransport | null): void {
 }
 
 // ============================================================================
+// Error logging
+// ============================================================================
+
+/**
+ * Logs a failed request to stderr. Only status, method and path are written by
+ * default: error bodies (e.g. `application/problem+json`) can echo submitted
+ * values such as member names or emails, and MCP clients capture a stdio
+ * server's stderr in their own log files. The full body is written only when
+ * the caller opts in (`enableLogging` on the factory, or the
+ * `UMBRACO_MCP_LOG_ERROR_BODIES=true` env var for the singleton client).
+ * @internal
+ */
+function logHttpError(
+  status: number,
+  method: string,
+  url: string,
+  data: unknown,
+  includeBody: boolean
+): void {
+  const path = url.split("?")[0];
+  const line = `HTTP Error: ${status} ${method.toUpperCase()} ${path}`;
+  if (includeBody) {
+    console.error(line, data);
+  } else {
+    console.error(line);
+  }
+}
+
+function errorBodyLoggingEnabled(): boolean {
+  return typeof process !== "undefined" && process.env?.UMBRACO_MCP_LOG_ERROR_BODIES === "true";
+}
+
+// ============================================================================
 // Core fetch implementation
 // ============================================================================
+
+/** True when every Authorization header in `headers` carries our cached token. */
+function sentOurToken(headers: Record<string, string>, token: string): boolean {
+  return Object.entries(headers).every(
+    ([name, value]) => name.toLowerCase() !== "authorization" || value === `Bearer ${token}`
+  );
+}
+
+/**
+ * True when a 401 is a bearer-token challenge from the token validation
+ * middleware (`WWW-Authenticate: Bearer …`), i.e. the token itself was refused.
+ * An endpoint that returns 401 from its own code (Umbraco does this for some
+ * permission checks) sends no challenge, and a fresh token wouldn't help.
+ */
+function isBearerChallenge(resp: Response): boolean {
+  return /(?:^|,)\s*Bearer\b/i.test(resp.headers.get("www-authenticate") ?? "");
+}
 
 /**
  * Makes a fetch request to the Umbraco API.
@@ -308,9 +411,18 @@ async function doFetch<T>(
     );
   }
 
-  const token = await getToken();
+  // Read the config before waiting for the token: a re-init meanwhile would
+  // otherwise send the old config's token to the new base URL.
+  const auth = authConfig;
+  const generation = tokenGeneration;
+  // Checked per request too: the env can change after initializeUmbracoFetch.
+  assertTlsNotDisabledForRemote(auth.baseUrl);
+  // The request's signal bounds the wait for the token too: without it a CMS
+  // that accepts the connection but never answers the token request would hang
+  // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
+  const token = await getToken(options?.signal);
   const queryString = serializeParams(config.params);
-  const fullUrl = `${authConfig.baseUrl}${config.url}${queryString}`;
+  const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
   // Detect FormData payloads. Two shapes are supported:
   //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
@@ -365,7 +477,26 @@ async function doFetch<T>(
     }
   }
 
-  const resp = await fetch(fullUrl, fetchOptions);
+  let resp = await fetch(fullUrl, fetchOptions);
+
+  // Resend once with a fresh token when the token itself was refused. Only a
+  // bearer challenge counts: it comes from token validation, before the
+  // endpoint runs, so resending is safe for every method. Done before the
+  // returnFullResponse branch so tool calls (which return the 401) get it too.
+  // Skipped when the caller supplied its own Authorization header, or when the
+  // client was re-initialised meanwhile (the new token belongs to another config).
+  if (
+    resp.status === 401
+    && isBearerChallenge(resp)
+    && !options?.signal?.aborted
+    && generation === tokenGeneration
+    && sentOurToken(headers, token)
+  ) {
+    void resp.body?.cancel().catch(() => {});
+    invalidateToken(token);
+    headers.Authorization = `Bearer ${await getToken(options?.signal)}`;
+    resp = await fetch(fullUrl, fetchOptions);
+  }
 
   // Parse response body
   let data: T;
@@ -400,7 +531,7 @@ async function doFetch<T>(
 
   // Without returnFullResponse, check status and throw or return data
   if (!options?.validateStatus && resp.status >= 400) {
-    console.error(`HTTP Error: ${resp.status}`, data);
+    logHttpError(resp.status, config.method, config.url, data, errorBodyLoggingEnabled());
     const error = new Error(
       `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
     );
@@ -472,7 +603,7 @@ export const UmbracoManagementClient = <T>(
 export interface CreateUmbracoFetchClientOptions {
   /** Token endpoint path (defaults to Umbraco's standard path) */
   tokenPath?: string;
-  /** Enable request logging (defaults to false) */
+  /** Enable request logging, including full error response bodies (defaults to false) */
   enableLogging?: boolean;
 }
 
@@ -513,7 +644,7 @@ export function createUmbracoFetchClient(
   let instanceAccessToken: string | null = null;
   let instanceTokenExpiry: number | null = null;
 
-  const fetchToken = async (): Promise<string> => {
+  const fetchToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAuthConfig) {
       throw new Error("Client not initialized. Call initialize() first.");
     }
@@ -521,6 +652,7 @@ export function createUmbracoFetchClient(
     const { accessToken, expiresIn } = await requestClientCredentialsToken({
       ...instanceAuthConfig,
       tokenPath,
+      signal,
     });
 
     instanceAccessToken = accessToken;
@@ -528,9 +660,9 @@ export function createUmbracoFetchClient(
     return accessToken;
   };
 
-  const getInstanceToken = async (): Promise<string> => {
+  const getInstanceToken = async (signal?: AbortSignal): Promise<string> => {
     if (!instanceAccessToken || (instanceTokenExpiry && Date.now() >= instanceTokenExpiry)) {
-      await fetchToken();
+      await fetchToken(signal);
     }
     return instanceAccessToken!;
   };
@@ -543,7 +675,9 @@ export function createUmbracoFetchClient(
       throw new Error("Client not initialized. Call initialize() first.");
     }
 
-    const token = await getInstanceToken();
+    assertTlsNotDisabledForRemote(instanceAuthConfig.baseUrl);
+    // The request's signal bounds the token exchange as well as the request.
+    const token = await getInstanceToken(opts?.signal);
     const queryString = serializeParams(config.params);
     const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
 
@@ -566,6 +700,7 @@ export function createUmbracoFetchClient(
     const fetchOpts: RequestInit = {
       method: config.method,
       headers,
+      signal: opts?.signal,
     };
 
     if (config.data !== undefined) {
@@ -586,37 +721,14 @@ export function createUmbracoFetchClient(
       }
     }
 
-    console.log("[sdk-fetch] body shape:", {
-      url: config.url,
-      isWebFormData,
-      isStreamFormData,
-      dataKind: config.data == null ? "null" : (config.data as any)?.constructor?.name,
-      hasGetHeaders: typeof (config.data as any)?.getHeaders === "function",
-      hasPipe: typeof (config.data as any)?.pipe === "function",
-      globalFormDataExists: typeof (globalThis as any).FormData !== "undefined",
-      bodyKind: fetchOpts.body == null ? "null" : (fetchOpts.body as any)?.constructor?.name,
-      ctHeader: (fetchOpts.headers as Record<string, string>)?.["Content-Type"] ?? null,
-    });
-    if (isWebFormData) {
-      const fdEntries: Array<{ name: string; kind: string; size?: number }> = [];
-      for (const [k, v] of (config.data as any).entries()) {
-        fdEntries.push({
-          name: k,
-          kind: typeof v === "string" ? "string" : (v?.constructor?.name ?? typeof v),
-          size: typeof v === "string" ? v.length : v?.size,
-        });
-      }
-      console.log("[sdk-fetch] web formdata entries:", fdEntries);
-    }
-
     if (enableLogging) {
-      console.log("Request:", config.method.toUpperCase(), config.url);
+      console.error("Request:", config.method.toUpperCase(), config.url);
     }
 
     const resp = await fetch(fullUrl, fetchOpts);
 
     if (enableLogging) {
-      console.log("Response:", resp.status, config.url);
+      console.error("Response:", resp.status, config.url);
     }
 
     // Parse response body
@@ -648,7 +760,7 @@ export function createUmbracoFetchClient(
     }
 
     if (!opts?.validateStatus && resp.status >= 400) {
-      console.error(`HTTP Error: ${resp.status}`, data);
+      logHttpError(resp.status, config.method, config.url, data, enableLogging);
       const error = new Error(
         `Request failed with status ${resp.status}: ${resolveStatusText(resp.status, resp.statusText)}`
       );

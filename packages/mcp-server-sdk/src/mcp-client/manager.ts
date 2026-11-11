@@ -127,6 +127,24 @@ export class McpClientManager {
   }
 
   /**
+   * Set the filters passed to chained servers. Lets a manager created before
+   * the server config is resolved (a module-level singleton) pick up filters
+   * given as CLI flags. Must run before the first connection, because a stdio
+   * server receives its filters when it is spawned.
+   *
+   * @throws If a chained server is already connected
+   */
+  setFilterConfig(filterConfig: FilterConfig | undefined): void {
+    if (this.connections.size > 0) {
+      throw new Error(
+        "setFilterConfig must be called before connecting to a chained MCP server: " +
+          `already connected to ${[...this.connections.keys()].join(", ")}.`,
+      );
+    }
+    this.filterConfig = filterConfig;
+  }
+
+  /**
    * Get all registered server configurations.
    */
   getConfigs(): Map<string, McpServerConfig> {

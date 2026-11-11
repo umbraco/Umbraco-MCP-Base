@@ -16,6 +16,7 @@ import { jest, describe, it, expect, beforeEach } from "@jest/globals";
 const mockGetServerConfig = jest.fn<(...args: any[]) => any>();
 jest.unstable_mockModule("@umbraco-cms/mcp-server-sdk", () => ({
   getServerConfig: mockGetServerConfig,
+  resetServerConfig: jest.fn(),
 }));
 
 // Import our module after setting up mocks
