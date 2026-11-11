@@ -12,7 +12,11 @@ import {
   createCloudflareTracingAdapter,
   type CloudflareTracing,
 } from "../telemetry/cloudflare-tracing.js";
-import { SERVER_INIT_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
+import {
+  SERVER_INIT_SPAN,
+  HostedTelemetryAttributes,
+  type ServerInitMode,
+} from "../telemetry/attributes.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import {
   shouldIncludeTool,
@@ -297,28 +301,49 @@ export async function resolveRequestSite(
 }
 
 /**
+ * Why `createPerRequestServer` found the session unusable, as carried on
+ * `UmbracoSignInUnavailableError.reason`, logged as `cause=` on the init
+ * `:done` line and recorded as `umbraco.mcp.init.cause` on the init span.
+ */
+export type SignInUnavailableReason =
+  | "no-token-in-kv"
+  | "refresh-rejected-expired"
+  | "refresh-rejected-misconfigured"
+  | "refresh-rejected-request";
+
+/**
  * Thrown by `createPerRequestServer` when this session has no usable Umbraco
  * sign-in: KV holds no token entry for the login, or Umbraco definitively
  * rejected the stored refresh token (`expired`), the OAuth client
  * (`misconfigured`) or the refresh request itself (`request_rejected`).
  *
- * Replaces the one-tool `authentication-expired` server this used to return
- * (#451). That server answered nobody: production telemetry showed no session
- * ever called a tool after a degraded start. Throwing fails the Durable
- * Object's start instead, so no toolset is served on a dead session. The
- * client gets back to sign-in through `createSiteRoutingApiHandler`, which
- * answers `401 invalid_token` once the login's KV entry reads as gone (#382).
- * A Durable Object cannot send that `401` itself: `McpAgent.serve()` reaches
- * the object over a WebSocket upgrade, so only the Worker-side wrapper sets
- * the HTTP status.
+ * Replaces the one-tool `authentication-expired` server this used to return.
+ * Per #451, telemetry showed no session calling a tool after a degraded
+ * start. Throwing fails the Durable Object's start instead, so no toolset is
+ * served on a dead session.
  *
- * Consumers don't need to catch it: let it propagate out of `McpAgent.init()`.
+ * Recovery depends on the reason:
+ * - `no-token-in-kv` and `refresh-rejected-expired` (once the KV entry has
+ *   been deleted): the client gets back to sign-in only when the consumer
+ *   wraps `McpAgent.serve()` in `createSiteRoutingApiHandler`, which answers
+ *   `401 invalid_token` once the login's KV entry reads as gone (#382). A
+ *   Durable Object cannot send that `401` itself: `McpAgent.serve()` reaches
+ *   the object over a WebSocket upgrade, so only the Worker-side wrapper sets
+ *   the HTTP status.
+ * - `refresh-rejected-misconfigured` and `refresh-rejected-request`: the KV
+ *   entry is kept (signing in again would replay the same client or request),
+ *   so every Durable Object start keeps failing until an administrator fixes
+ *   the Umbraco client registration. `message` says what to check.
+ *
+ * It propagates out of `McpAgent.init()`. The class is exported so a consumer
+ * can recognise it — in an `onError` override, say — with `instanceof` (within
+ * the same bundle) or by `error.name === "UmbracoSignInUnavailableError"`.
  */
 export class UmbracoSignInUnavailableError extends Error {
-  /** Why the session is unusable, as logged on the init `:done` line (`no-token-in-kv`, `refresh-rejected-…`). */
-  readonly reason: string;
+  /** Why the session is unusable, as logged on the init `:done` line. */
+  readonly reason: SignInUnavailableReason;
 
-  constructor(reason: string, message: string) {
+  constructor(reason: SignInUnavailableReason, message: string) {
     super(message);
     this.name = "UmbracoSignInUnavailableError";
     this.reason = reason;
@@ -366,15 +391,18 @@ const REFRESH_REQUEST_REJECTED_MESSAGE =
   "this Worker and Umbraco (a proxy or gateway) could be altering the refresh request.";
 
 /**
- * Which `RefreshFailureReason`s make the session unusable, and what to log
- * when they do — `null` for the two that don't (`network`, `server_error`: a
- * blip must not fail a working session). A `Record` over every
- * `RefreshFailureReason` (not `Partial`) so adding a new reason is a compile
- * error here until it's given an explicit entry.
+ * Which `RefreshFailureReason`s make the session unusable — `null` for the two
+ * that don't (`network`, `server_error`: a blip must not fail a working
+ * session). `cause` becomes the error's `reason`, the `cause=` on the log
+ * lines and the init span's `umbraco.mcp.init.cause`; `message` becomes the
+ * thrown error's message and is also logged by `signInUnavailable` as a
+ * `console.warn` line, so the administrator guidance reaches the Worker logs.
+ * A `Record` over every `RefreshFailureReason` (not `Partial`) so adding a new
+ * reason is a compile error here until it's given an explicit entry.
  */
 const UNUSABLE_REFRESH_REASONS: Record<
   RefreshFailureReason,
-  { message: string; cause: string } | null
+  { message: string; cause: SignInUnavailableReason } | null
 > = {
   expired: { message: REFRESH_EXPIRED_MESSAGE, cause: "refresh-rejected-expired" },
   misconfigured: { message: REFRESH_MISCONFIGURED_MESSAGE, cause: "refresh-rejected-misconfigured" },
@@ -387,20 +415,27 @@ const UNUSABLE_REFRESH_REASONS: Record<
  * Records an unusable-session start on the init span and log, then returns the
  * error to throw. Keeps `umbraco.mcp.init.mode=auth-expired` (and the
  * `mode=auth-expired cause=…` log line) so the rate of these starts stays
- * visible now that no server is built for them.
+ * visible now that no server is built for them. Also logs the error message
+ * with its cause, so the administrator guidance for `misconfigured` /
+ * `request_rejected` is visible in the Worker logs, not only on the error.
  */
 function signInUnavailable(
   initSpan: TelemetrySpan,
   traceId: string,
   initStartedAt: number,
-  cause: string,
+  cause: SignInUnavailableReason,
   message: string
 ): UmbracoSignInUnavailableError {
   console.log(
     `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=auth-expired cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
   );
-  initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "auth-expired");
+  console.warn(
+    `[mcp-hosted] createPerRequestServer id=${traceId} sign-in unavailable cause=${cause}: ${message}`
+  );
+  const mode: ServerInitMode = "auth-expired";
+  initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, mode);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
+  initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, cause);
   return new UmbracoSignInUnavailableError(cause, message);
 }
 
@@ -641,17 +676,19 @@ async function initPerRequestServer(
   ]);
   const umbracoVersion = serverInformation?.version;
 
-  // Those round-trips are also this request's liveness probe. If any hit
-  // a 401 and the refresh came back with a definitive `invalid_grant`, KV still
-  // holds an entry (so the guard above passed) but the session is over — fail
-  // the start the same way rather than serve a toolset that 401s on every call.
+  // Those round-trips are also this request's liveness probe. If any hit a
+  // 401 and the refresh came back with a definitive rejection, KV still holds
+  // an entry (so the guard above passed) but the session is over — fail the
+  // start the same way rather than serve a toolset that 401s on every call.
   //
   // Gated on the *definitive* reasons: `expired` (Umbraco will never accept
   // this refresh token again), `misconfigured` (Umbraco rejected the client
   // itself — a bad client_id/secret or grant configuration, which no number of
-  // retries will heal) and `request_rejected`. A network blip or a 5xx from the token endpoint must
-  // not strip a session's tools, because the very next request may well refresh
-  // cleanly, so those two keep the full toolset.
+  // retries will heal) and `request_rejected` (Umbraco rejected the request's
+  // params or scope, and every refresh posts the same ones). A network blip or
+  // a 5xx from the token endpoint must not strip a session's tools, because
+  // the very next request may well refresh cleanly, so those two keep the full
+  // toolset.
   //
   // `getRefreshFailure()` only ever reports something after the fetch client
   // has actually made a request — `fetchCurrentUser` above is what does that

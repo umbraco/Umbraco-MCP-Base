@@ -36,8 +36,18 @@ export const HostedTelemetryAttributes = {
    * Umbraco (`createPerRequestServer` throws `UmbracoSignInUnavailableError`).
    */
   INIT_MODE: "umbraco.mcp.init.mode",
-  /** Number of tools registered on the server this request will use. */
+  /**
+   * Number of tools registered on the server this request will use. `0` when
+   * `INIT_MODE` is `auth-expired` (no server was built).
+   */
   INIT_TOOL_COUNT: "umbraco.mcp.init.tool_count",
+  /**
+   * Why no server was built, set only when `INIT_MODE` is `auth-expired`: one
+   * of the `SignInUnavailableReason` values (`no-token-in-kv`,
+   * `refresh-rejected-expired`, `refresh-rejected-misconfigured`,
+   * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`.
+   */
+  INIT_CAUSE: "umbraco.mcp.init.cause",
   /** Whether a site was resolved (multi-site / cloud routing) — the alias itself is never recorded. */
   INIT_SITE_RESOLVED: "umbraco.mcp.init.site_resolved",
 

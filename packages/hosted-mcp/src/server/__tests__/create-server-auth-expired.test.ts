@@ -104,8 +104,32 @@ function doneLine(spy: ReturnType<typeof jest.spyOn>): string | undefined {
     .find((l: string) => l.includes("createPerRequestServer:done"));
 }
 
+/**
+ * Runs a start with a recording telemetry adapter and returns the init span's
+ * attributes alongside the outcome.
+ */
+async function startRecordingInitSpan(): Promise<{ error?: unknown; attributes: Record<string, unknown> }> {
+  const { setTelemetryAdapter, clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
+  const { SERVER_INIT_SPAN } = await import("../../telemetry/attributes.js");
+  const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
+  setTelemetryAdapter({
+    startSpan: (name, attributes, fn) => {
+      const span = { name, attributes: { ...attributes } as Record<string, unknown> };
+      recorded.push(span);
+      return fn({ setAttribute: (key, value) => { span.attributes[key] = value; } });
+    },
+  });
+  try {
+    const { error } = await start();
+    return { error, attributes: recorded.find((s) => s.name === SERVER_INIT_SPAN)!.attributes };
+  } finally {
+    clearTelemetryAdapter();
+  }
+}
+
 describe("createPerRequestServer with a rejected refresh token", () => {
   let logSpy: ReturnType<typeof jest.spyOn>;
+  let warnSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
     refreshFailure = undefined;
@@ -113,10 +137,12 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     storedRefreshToken = "rt-rejected";
     kvDelete.mockClear();
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("fails the start with UmbracoSignInUnavailableError on a definitive invalid_grant", async () => {
@@ -204,6 +230,49 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     // expired-session advice must not leak into this message.
     expect(text).not.toContain("Umbraco:CMS:Global:TimeOut");
     expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
+  });
+
+  it("logs the administrator guidance with its cause, not only on the error", async () => {
+    refreshFailure = { ok: false, reason: "misconfigured", status: 400, error: "invalid_client", message: "rejected" };
+
+    const { error } = await start();
+    const { message } = await expectSignInUnavailable(error);
+
+    const warned = warnSpy.mock.calls
+      .map((args: unknown[]) => String(args[0]))
+      .find((l: string) => l.includes("cause=refresh-rejected-misconfigured"));
+    expect(warned).toBeDefined();
+    expect(warned).toContain(message);
+    expect(warned).toContain("administrator");
+  });
+
+  it.each([
+    ["misconfigured", "invalid_client", "refresh-rejected-misconfigured"],
+    ["request_rejected", "invalid_scope", "refresh-rejected-request"],
+  ] as const)(
+    "records auth-expired mode, zero tools and the cause on the init span for %s",
+    async (reason, oauthError, cause) => {
+      refreshFailure = { ok: false, reason, status: 400, error: oauthError, message: "rejected" };
+      const { HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
+
+      const { error, attributes } = await startRecordingInitSpan();
+
+      expect((await expectSignInUnavailable(error)).reason).toBe(cause);
+      expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
+      expect(attributes[HostedTelemetryAttributes.INIT_TOOL_COUNT]).toBe(0);
+      expect(attributes[HostedTelemetryAttributes.INIT_CAUSE]).toBe(cause);
+    }
+  );
+
+  it("still throws UmbracoSignInUnavailableError when no telemetry adapter is registered", async () => {
+    const { clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
+    clearTelemetryAdapter();
+    refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
+
+    const { server, error } = await start();
+
+    expect(server).toBeUndefined();
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-expired");
   });
 
   it("fails the start when Umbraco rejected the request itself", async () => {
@@ -319,6 +388,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-expired");
     expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_CAUSE]).toBe("refresh-rejected-expired");
     expect(init.attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-xyz");
     expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
   });
@@ -340,8 +410,10 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     storedRefreshToken = "rt-rotated-by-someone-else";
 
-    await start();
+    const { error } = await start();
 
+    // Kept the entry, but this request's refresh was still rejected, so the start fails.
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-expired");
     expect(kvDelete).not.toHaveBeenCalled();
   });
 
@@ -349,20 +421,33 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     rejectedRefreshToken = undefined;
 
-    await start();
+    const { error } = await start();
 
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-expired");
     expect(kvDelete).not.toHaveBeenCalled();
   });
 
-  it.each([["misconfigured"], ["request_rejected"], ["network"], ["server_error"]] as const)(
+  it.each([
+    ["misconfigured", "refresh-rejected-misconfigured"],
+    ["request_rejected", "refresh-rejected-request"],
+    ["network", null],
+    ["server_error", null],
+  ] as const)(
     "does not delete the inner KV entry when the refresh failed with %s",
-    async (reason) => {
+    async (reason, cause) => {
       // Signing in again can't fix a broken client/request, and a blip or 5xx
       // must not end a session — so only `expired` drops the entry.
       refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
 
-      await start();
+      const { server, error } = await start();
 
+      if (cause) {
+        expect(server).toBeUndefined();
+        expect((await expectSignInUnavailable(error)).reason).toBe(cause);
+      } else {
+        expect(error).toBeUndefined();
+        expect(server).toBeDefined();
+      }
       expect(kvDelete).not.toHaveBeenCalled();
     }
   );

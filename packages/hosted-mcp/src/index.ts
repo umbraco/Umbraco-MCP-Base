@@ -48,6 +48,7 @@ export {
   resolveRequestSite,
   runInSessionContext,
   UmbracoSignInUnavailableError,
+  type SignInUnavailableReason,
   type CreateServerOptions,
   type InstructionsResolver,
   type SiteResolver,

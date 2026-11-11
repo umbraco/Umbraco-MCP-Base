@@ -117,8 +117,11 @@ export interface SiteRoutingApiHandlerOptions {
  * is revoked and the request gets a `401 invalid_token`, which MCP clients
  * answer by signing in again (#371). The Durable Object can't send that 401
  * itself (it is reached over a WebSocket upgrade), so it fails its start
- * instead (`UmbracoSignInUnavailableError`) and this check returns the 401
- * once the deleted entry reads as gone here.
+ * instead (`UmbracoSignInUnavailableError`). When that start failed because
+ * the entry was absent or was deleted (`expired`), this check returns the 401
+ * once the entry reads as gone here. Other definitive rejections
+ * (`misconfigured`, `request_rejected`) keep the entry, so this check passes
+ * and the start keeps failing until an administrator fixes the client.
  */
 export function createSiteRoutingApiHandler(
   baseHandler: { fetch: FetchHandler },

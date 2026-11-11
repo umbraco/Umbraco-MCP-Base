@@ -85,14 +85,17 @@ const baseOptions = {
 describe("mcp.server.init span", () => {
   const originalFetch = globalThis.fetch;
   let logSpy: ReturnType<typeof jest.spyOn>;
+  let warnSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
     recordSpans();
     logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    warnSpy.mockRestore();
     clearTelemetryAdapter();
     globalThis.fetch = originalFetch;
   });
@@ -106,6 +109,7 @@ describe("mcp.server.init span", () => {
     );
     expect(error).toBeInstanceOf(UmbracoSignInUnavailableError);
     expect((error as InstanceType<typeof UmbracoSignInUnavailableError>).reason).toBe("no-token-in-kv");
+    return error as InstanceType<typeof UmbracoSignInUnavailableError>;
   }
 
   it("opens an init span around server creation", async () => {
@@ -120,7 +124,15 @@ describe("mcp.server.init span", () => {
     expect(spanNamed(SERVER_INIT_SPAN)!.attributes).toMatchObject({
       [HostedTelemetryAttributes.INIT_MODE]: "auth-expired",
       [HostedTelemetryAttributes.INIT_TOOL_COUNT]: 0,
+      [HostedTelemetryAttributes.INIT_CAUSE]: "no-token-in-kv",
     });
+  });
+
+  it("says in the error that no token is stored and the client is sent back to sign-in", async () => {
+    const { message } = await startExpired();
+
+    expect(message).toContain("No Umbraco token is stored for this login");
+    expect(message).toContain("sent back to sign-in");
   });
 
   it("stamps the session id and tenant on an auth-expired (no-token-in-kv) start", async () => {
@@ -183,6 +195,14 @@ describe("mcp.server.init span", () => {
     const server = await createPerRequestServer(baseOptions, fullEnv, props);
 
     expect(server).toBeDefined();
+    expect(spans).toHaveLength(0);
+  });
+
+  it("still throws UmbracoSignInUnavailableError when no adapter is registered", async () => {
+    clearTelemetryAdapter();
+
+    await startExpired();
+
     expect(spans).toHaveLength(0);
   });
 });
