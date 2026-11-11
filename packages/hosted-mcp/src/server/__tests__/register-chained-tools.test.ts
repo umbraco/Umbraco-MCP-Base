@@ -1,4 +1,4 @@
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import { z } from "zod";
 import type { ToolCollectionExport, ToolDefinition, ToolModeDefinition } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../../types/env.js";
@@ -22,7 +22,12 @@ jest.unstable_mockModule("../../config/worker-config.js", () => ({
   loadSiteConfig: jest.fn<any>(),
 }));
 
+// The admin config (env + site overrides) the main server resolved, when a
+// test sets one; `undefined` makes the helper fall back to `loadWorkerConfig`.
+const mockGetServerAdminConfig = jest.fn<any>().mockReturnValue(undefined);
+
 jest.unstable_mockModule("../create-server.js", () => ({
+  getServerAdminConfig: mockGetServerAdminConfig,
   // The mock server was never built by `createPerRequestServer`, so it has no
   // session store values; the wrapper is then a pass-through.
   getServerSessionContext: jest.fn<any>().mockReturnValue(undefined),
@@ -204,6 +209,64 @@ describe("registerChainedTools", () => {
 
     expect(count).toBe(0);
     expect(server.registerTool).not.toHaveBeenCalled();
+  });
+
+  describe("admin boundary", () => {
+    const readAndListServer = {
+      name: "demo",
+      displayName: "Demo Add-On",
+      modeRegistry: [{ name: "all", displayName: "All", description: "", collections: ["things"] }],
+      collections: [
+        createMockCollection("things", [
+          createMockTool("get-thing", ["read"]),
+          createMockTool("list-things", ["list"]),
+          createMockTool("delete-thing", ["delete"]),
+        ]),
+      ],
+      allModeNames: ["all"] as readonly string[],
+      allSliceNames: ["read", "list", "delete"] as readonly string[],
+    };
+    const selectAll = { chainedModeSelections: { demo: ["all"] } };
+
+    async function registered(consent: ConsentChoices): Promise<string[]> {
+      await registerChainedTools({
+        server: createMockServer() as any,
+        env: createMockEnv(),
+        props: createMockProps({ consentChoices: consent }),
+        chainedServer: readAndListServer as any,
+        fetchUser: false,
+      });
+      return registeredTools.map((t) => t.name).sort();
+    }
+
+    afterEach(() => {
+      mockGetServerAdminConfig.mockReturnValue(undefined);
+    });
+
+    it("narrows the admin's slices with the user's, never replaces them", async () => {
+      mockGetServerAdminConfig.mockReturnValue({ includeSlices: ["read", "list"] });
+      expect(await registered({ ...selectAll, selectedSlices: ["list", "delete"] })).toEqual([
+        "demo--list-things",
+      ]);
+    });
+
+    it("registers nothing when the user's slices share nothing with the admin's", async () => {
+      mockGetServerAdminConfig.mockReturnValue({ includeSlices: ["read", "list"] });
+      expect(await registered({ ...selectAll, selectedSlices: ["delete"] })).toEqual([]);
+    });
+
+    it("applies the user's slices when the admin set none", async () => {
+      expect(await registered({ ...selectAll, selectedSlices: ["delete"] })).toEqual([
+        "demo--delete-thing",
+      ]);
+    });
+
+    it("starts from the main server's admin config, including site overrides", async () => {
+      // e.g. a site that excludes the delete slice; the env config (mocked
+      // as empty above) knows nothing about it.
+      mockGetServerAdminConfig.mockReturnValue({ excludeSlices: ["delete"] });
+      expect(await registered(selectAll)).toEqual(["demo--get-thing", "demo--list-things"]);
+    });
   });
 
   it("returns 0 on error without crashing", async () => {

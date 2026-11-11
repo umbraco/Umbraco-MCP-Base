@@ -759,6 +759,23 @@ describe("createAuthorizeHandler", () => {
     });
   });
 
+  describe("POST — approve (single-site) with a forged site id", () => {
+    it("rejects a site id when no sites are configured", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        headers: { Cookie: consentCookie() },
+        body: createApproveFormBody({ siteId: "made-up" }),
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      expect(response.status).toBe(400);
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+  });
+
   describe("POST — approve (multi-site)", () => {
     const sites: SiteConfig[] = [
       {
@@ -775,6 +792,25 @@ describe("createAuthorizeHandler", () => {
         oauthClientId: "staging-client",
       },
     ];
+
+    it.each([
+      ["no site", {}],
+      ["a site that isn't configured", { siteId: "not-a-site" }],
+    ])("rejects an approval with %s instead of falling back to the env-level Umbraco", async (_label, fields) => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { sites });
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        headers: { Cookie: consentCookie() },
+        body: createApproveFormBody(fields),
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Location")).toBeNull();
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
 
     it("records the site's callback path in state, matching the redirect_uri sent to Umbraco", async () => {
       const env = createMockEnv();

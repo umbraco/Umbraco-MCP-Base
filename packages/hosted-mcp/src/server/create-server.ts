@@ -210,6 +210,9 @@ export interface CreateServerOptions {
  * - readOnly can only be turned ON by the user, never turned OFF
  *   (if admin already set readOnly via excludeSlices, user can't undo it).
  */
+/** A mode name no registry contains: the config loader then enables no collection. */
+const NO_TOOLS_SENTINEL = "__none__";
+
 export function mergeConsentChoices(
   envConfig: ServerConfigForCollections,
   choices?: ConsentChoices,
@@ -223,9 +226,13 @@ export function mergeConsentChoices(
   if (choices.selectedModes && choices.selectedModes.length > 0) {
     if (merged.toolModes && merged.toolModes.length > 0) {
       // Intersect: only keep modes that are in BOTH admin config and user selection
-      merged.toolModes = merged.toolModes.filter((m) =>
+      const allowedModes = merged.toolModes.filter((m) =>
         choices.selectedModes!.includes(m)
       );
+      // An empty list means "no mode restriction" to the config loader, so a
+      // selection with nothing in common with the admin's modes must block
+      // every mode rather than lift the admin's restriction.
+      merged.toolModes = allowedModes.length > 0 ? allowedModes : [NO_TOOLS_SENTINEL];
     } else {
       // Admin has no mode restriction — user selection becomes the restriction
       merged.toolModes = [...choices.selectedModes];
@@ -237,7 +244,7 @@ export function mergeConsentChoices(
   ) {
     // User selected chained server modes but no main modes — disable all main tools.
     // Use a sentinel mode that won't match any real mode to ensure no main tools appear.
-    merged.toolModes = ["__none__"];
+    merged.toolModes = [NO_TOOLS_SENTINEL];
   }
 
   // Merge selected collections: exclude deselected collections within the effective modes
@@ -263,9 +270,17 @@ export function mergeConsentChoices(
   if (choices.selectedSlices?.length) {
     if (merged.includeSlices?.length) {
       // Intersect: only keep slices in BOTH admin config and user selection
-      merged.includeSlices = merged.includeSlices.filter((s) =>
+      const allowedSlices = merged.includeSlices.filter((s) =>
         choices.selectedSlices!.includes(s)
       );
+      if (allowedSlices.length > 0) {
+        merged.includeSlices = allowedSlices;
+      } else {
+        // As with modes, an empty slice list means "no slice restriction".
+        // Nothing the user selected is allowed, so no tools are: keep the
+        // admin's slices and block every mode.
+        merged.toolModes = [NO_TOOLS_SENTINEL];
+      }
     } else {
       // Admin has no slice restriction — user selection becomes the restriction
       merged.includeSlices = [...choices.selectedSlices];
@@ -803,6 +818,10 @@ async function initPerRequestServer(
     workerConfig = loadSiteConfig(site, workerConfig);
   }
 
+  // Chained tools registered on this server later must start from the same
+  // admin + site boundary (see `registerChainedTools`).
+  adminConfigs.set(server, workerConfig);
+
   // Merge user consent choices (narrows admin/site config, never expands)
   const effectiveConfig = mergeConsentChoices(workerConfig, props.consentChoices, options.modeRegistry);
 
@@ -862,6 +881,20 @@ async function initPerRequestServer(
  * `WeakMap` keyed by the per-request server: it dies with the session.
  */
 const sessionContexts = new WeakMap<McpServer, HostedSessionContext>();
+
+/**
+ * Each full server's admin filter config: the Worker env config with the
+ * resolved site's overrides applied, before the user's consent choices.
+ */
+const adminConfigs = new WeakMap<McpServer, ServerConfigForCollections>();
+
+/**
+ * The admin filter config (env + site overrides) `createPerRequestServer`
+ * resolved for `server`, or `undefined` for a server it didn't build.
+ */
+export function getServerAdminConfig(server: McpServer): ServerConfigForCollections | undefined {
+  return adminConfigs.get(server);
+}
 
 /**
  * A hosted session's per-request store values: the SDK's session values plus

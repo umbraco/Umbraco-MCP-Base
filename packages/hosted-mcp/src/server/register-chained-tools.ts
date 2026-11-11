@@ -27,6 +27,7 @@ import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
 import {
   getServerSessionContext,
+  getServerAdminConfig,
   withRequestSessionContext,
 } from "./create-server.js";
 
@@ -93,7 +94,10 @@ export async function registerChainedTools(
     }
 
     // Build filter config from admin env vars + user consent choices
-    const workerConfig = loadWorkerConfig(env);
+    // The admin boundary for this session: env config plus the resolved
+    // site's overrides, exactly as the main server uses. Falls back to the
+    // env config for a server `createPerRequestServer` didn't build.
+    const workerConfig = getServerAdminConfig(server) ?? loadWorkerConfig(env);
     const consent = props.consentChoices;
     const chainedFilterConfig: Record<string, unknown> = {
       slices: workerConfig.includeSlices,
@@ -129,7 +133,19 @@ export async function registerChainedTools(
       chainedFilterConfig.readOnly = true;
     }
     if (consent?.selectedSlices?.length) {
-      chainedFilterConfig.slices = consent.selectedSlices;
+      // The user's slices narrow the admin's, never replace them.
+      const adminSlices = workerConfig.includeSlices;
+      if (adminSlices?.length) {
+        const allowed = adminSlices.filter((s) => consent.selectedSlices!.includes(s));
+        if (allowed.length > 0) {
+          chainedFilterConfig.slices = allowed;
+        } else {
+          // An empty slice list means "no restriction": block all instead.
+          chainedFilterConfig.toolCollections = ["__none__"];
+        }
+      } else {
+        chainedFilterConfig.slices = consent.selectedSlices;
+      }
     }
 
     const manager = createMcpClientManager({

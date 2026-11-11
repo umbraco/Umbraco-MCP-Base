@@ -548,6 +548,16 @@ export function createAuthorizeHandler(
         };
       } else {
         site = resolveSite(consentChoices?.siteId, options?.sites);
+        // With a configured site list the user must pick one of those sites.
+        // Otherwise the sign-in would fall back to the env-level Umbraco with
+        // none of the chosen site's restrictions, carrying a site id that
+        // matches no site.
+        if (!site && options?.sites?.length) {
+          return invalidRequest("Select one of the available sites");
+        }
+        if (!site && consentChoices?.siteId) {
+          return invalidRequest("Unknown site");
+        }
       }
 
       const siteBaseUrl = site?.baseUrl ?? env.UMBRACO_BASE_URL;
