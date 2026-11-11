@@ -47,6 +47,7 @@ const mockFetch = jest.fn<typeof fetch>();
 // Dynamic import after mocks are set up
 const { createAuthorizeHandler, createCallbackHandler, createLogoutCallbackHandler } =
   await import("../umbraco-handler.js");
+const { flowCookieName, FlowBindingError } = await import("../flow-cookies.js");
 
 // ============================================================================
 // Test Helpers
@@ -88,6 +89,19 @@ function createMockAuthRequest(
 
 // Fixed consent state token for tests — must match KV setup in each test
 const TEST_CONSENT_STATE = "test-consent-state-token";
+
+/** The consent cookie a browser sends back after being shown the consent screen. */
+function consentCookie(state: string = TEST_CONSENT_STATE): string {
+  return `${flowCookieName("consent", state)}=${state}`;
+}
+
+/** A callback request from the browser that approved consent (carries the state cookie). */
+function callbackRequest(url: string): Request {
+  const state = new URL(url).searchParams.get("state");
+  return new Request(url, {
+    headers: state ? { Cookie: `${flowCookieName("state", state)}=${state}` } : {},
+  });
+}
 
 function createApproveFormBody(
   fields: Record<string, string | string[]> = {}
@@ -207,7 +221,8 @@ describe("createAuthorizeHandler", () => {
         string,
         unknown
       >;
-      expect(opts.clientName).toBe("my-client");
+      expect(opts.clientName).toBeUndefined();
+      expect(opts.clientId).toBe("my-client");
       expect(opts.umbracoBaseUrl).toBe("https://umbraco.example.com");
       expect(opts.scopes).toEqual(["openid"]);
       expect(opts.redirectUri).toBe("https://client.test/cb");
@@ -244,6 +259,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
       const authRequest = createMockAuthRequest({
@@ -270,6 +286,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
       const authRequest = createMockAuthRequest({ state: "" });
@@ -287,6 +304,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -305,6 +323,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -329,6 +348,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -344,6 +364,7 @@ describe("createAuthorizeHandler", () => {
       const authRequest = createMockAuthRequest();
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -374,6 +395,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
 
@@ -395,6 +417,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
 
@@ -416,6 +439,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
 
@@ -440,6 +464,7 @@ describe("createAuthorizeHandler", () => {
       form.set("state", TEST_CONSENT_STATE);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: form,
       });
 
@@ -499,6 +524,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["content", "media"],
         }),
@@ -521,6 +547,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({ readOnly: "true" }),
       });
 
@@ -539,6 +566,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["content"],
           "selectedCollections[]": ["document", "media"],
@@ -562,6 +590,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["content"],
         }),
@@ -580,6 +609,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedSlices[]": ["read", "list"],
         }),
@@ -602,6 +632,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["content"],
         }),
@@ -620,6 +651,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -636,6 +668,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["content", "demo:alerts", "demo:reporting"],
         }),
@@ -658,6 +691,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["demo:alerts"],
           "selectedCollections[]": ["document", "demo:notification"],
@@ -681,6 +715,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["demo:alerts"],
         }),
@@ -703,6 +738,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({
           "selectedModes[]": ["demo:alerts", "forms:forms"],
         }),
@@ -743,6 +779,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env, { sites });
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({ siteId: "prod" }),
       });
 
@@ -757,6 +794,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env, { sites });
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({ siteId: "prod" }),
       });
 
@@ -771,6 +809,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env, { sites });
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody({ siteId: "staging" }),
       });
 
@@ -789,6 +828,7 @@ describe("createAuthorizeHandler", () => {
       const handler = createAuthorizeHandler(env);
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -807,6 +847,7 @@ describe("createAuthorizeHandler", () => {
       });
       const request = new Request("https://worker.example.com/authorize", {
         method: "POST",
+        headers: { Cookie: consentCookie() },
         body: createApproveFormBody(),
       });
 
@@ -853,7 +894,7 @@ describe("createCallbackHandler", () => {
       );
 
       const handler = createCallbackHandler(env);
-      const request = new Request(
+      const request = callbackRequest(
         "https://worker.example.com/callback?code=auth-code-123&state=test-state"
       );
 
@@ -876,7 +917,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=abc&state=xyz"
         )
       );
@@ -899,7 +940,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=my-code&state=my-state"
         )
       );
@@ -934,7 +975,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -964,7 +1005,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -991,7 +1032,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -1022,7 +1063,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       const result = await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -1044,7 +1085,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       const result = await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -1073,7 +1114,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback/prod?code=c&state=s"
         )
       );
@@ -1106,7 +1147,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback/staging?code=c&state=s"
         )
       );
@@ -1138,7 +1179,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback/my-project?code=c&state=s"
         )
       );
@@ -1159,7 +1200,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request(
+          callbackRequest(
             "https://worker.example.com/callback?error=invalid_scope&error_description=Bad+scope"
           )
         )
@@ -1172,7 +1213,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request("https://worker.example.com/callback?state=s")
+          callbackRequest("https://worker.example.com/callback?state=s")
         )
       ).rejects.toThrow("Missing code or state");
     });
@@ -1183,7 +1224,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request("https://worker.example.com/callback?code=c")
+          callbackRequest("https://worker.example.com/callback?code=c")
         )
       ).rejects.toThrow("Missing code or state");
     });
@@ -1195,7 +1236,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request(
+          callbackRequest(
             "https://worker.example.com/callback?code=c&state=expired"
           )
         )
@@ -1211,7 +1252,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request(
+          callbackRequest(
             "https://worker.example.com/callback?code=c&state=s"
           )
         )
@@ -1227,7 +1268,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request(
+          callbackRequest(
             "https://worker.example.com/callback?code=c&state=s"
           )
         )
@@ -1248,7 +1289,7 @@ describe("createCallbackHandler", () => {
 
       await expect(
         handler(
-          new Request(
+          callbackRequest(
             "https://worker.example.com/callback?code=c&state=s"
           )
         )
@@ -1269,7 +1310,7 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
       await handler(
-        new Request(
+        callbackRequest(
           "https://worker.example.com/callback?code=c&state=s"
         )
       );
@@ -1464,6 +1505,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const response = await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1487,6 +1529,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1511,6 +1554,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const response = await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest()
@@ -1527,6 +1571,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const response = await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1570,6 +1615,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const response = await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1593,6 +1639,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1775,6 +1822,7 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       const response = await handler(
         new Request("https://worker.example.com/authorize", {
           method: "POST",
+          headers: { Cookie: consentCookie() },
           body: createApproveFormBody(),
         }),
         createMockAuthRequest({
@@ -1785,6 +1833,309 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       expect(response.status).toBe(400);
       const body = (await response.json()) as { error: string };
       expect(body.error).toBe("invalid_client");
+    });
+  });
+});
+
+// ============================================================================
+// Browser-bound consent and callback
+// ============================================================================
+
+describe("browser-bound authorization flow", () => {
+  function consentPost(
+    form: FormData,
+    headers: Record<string, string> = { Cookie: consentCookie() }
+  ): Request {
+    return new Request("https://worker.example.com/authorize", {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  }
+
+  function setCookies(response: Response): string[] {
+    return response.headers.getSetCookie();
+  }
+
+  describe("consent screen (GET)", () => {
+    it("sets a __Host- consent cookie holding the consent state shown in the form", async () => {
+      const handler = createAuthorizeHandler(createMockEnv());
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest()
+      );
+
+      const opts = mockConsentResponse.mock.calls[0][0] as { state: string };
+      const cookies = setCookies(response);
+      expect(cookies).toHaveLength(1);
+      expect(cookies[0]).toBe(
+        `${flowCookieName("consent", opts.state)}=${opts.state}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600`
+      );
+    });
+
+    it("keeps the consent screen's own security headers", async () => {
+      mockConsentResponse.mockReturnValue(
+        new Response("<html></html>", {
+          headers: { "Content-Type": "text/html", "X-Frame-Options": "DENY" },
+        })
+      );
+      const handler = createAuthorizeHandler(createMockEnv());
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest()
+      );
+      expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+    });
+
+    it("passes the client's registered name and its client_id to the consent screen", async () => {
+      const lookupClient = jest.fn<(id: string) => Promise<unknown>>().mockResolvedValue({
+        clientId: "mcp-client-1",
+        clientName: "  Claude  ",
+      });
+      const env = createMockEnv({ OAUTH_PROVIDER: { lookupClient } as any });
+      const handler = createAuthorizeHandler(env);
+      await handler(new Request("https://worker.example.com/authorize"), createMockAuthRequest());
+
+      expect(lookupClient).toHaveBeenCalledWith("mcp-client-1");
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.clientName).toBe("Claude");
+      expect(opts.clientId).toBe("mcp-client-1");
+    });
+
+    it("leaves clientName undefined when the client registered without a name", async () => {
+      const lookupClient = jest.fn<(id: string) => Promise<unknown>>().mockResolvedValue({
+        clientId: "mcp-client-1",
+      });
+      const env = createMockEnv({ OAUTH_PROVIDER: { lookupClient } as any });
+      await createAuthorizeHandler(env)(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest()
+      );
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.clientName).toBeUndefined();
+    });
+
+    it("still renders the consent screen when the client lookup fails", async () => {
+      const lookupClient = jest
+        .fn<(id: string) => Promise<unknown>>()
+        .mockRejectedValue(new Error("kv down"));
+      const env = createMockEnv({ OAUTH_PROVIDER: { lookupClient } as any });
+      const response = await createAuthorizeHandler(env)(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(200);
+      const opts = mockConsentResponse.mock.calls[0][0] as Record<string, unknown>;
+      expect(opts.clientName).toBeUndefined();
+    });
+  });
+
+  describe("consent submission (POST)", () => {
+    it.each(["approve", "deny", "reauth"])(
+      "rejects %s with 403 when the browser has no consent cookie",
+      async (action) => {
+        const form = createApproveFormBody({ action });
+        const response = await createAuthorizeHandler(createMockEnv())(
+          consentPost(form, {}),
+          createMockAuthRequest()
+        );
+
+        expect(response.status).toBe(403);
+        expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+        expect(mockStoreOAuthState).not.toHaveBeenCalled();
+        expect(response.headers.get("Location")).toBeNull();
+      }
+    );
+
+    it("rejects with 403 when the consent cookie holds a different state", async () => {
+      const otherState = "test-consent-state-other";
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody(), {
+          Cookie: `${flowCookieName("consent", TEST_CONSENT_STATE)}=${otherState}`,
+        }),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(403);
+      expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+    });
+
+    it("clears the consent cookie when rejecting", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody(), {}),
+        createMockAuthRequest()
+      );
+      expect(setCookies(response)).toContain(
+        `${flowCookieName("consent", TEST_CONSENT_STATE)}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`
+      );
+    });
+
+    it("rejects a cross-site submission even when the browser holds the cookie", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody(), {
+          Cookie: consentCookie(),
+          "Sec-Fetch-Site": "cross-site",
+        }),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(403);
+      expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+    });
+
+    it("rejects a submission from a foreign Origin when Sec-Fetch-Site is absent", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody(), {
+          Cookie: consentCookie(),
+          Origin: "https://evil.example",
+        }),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(403);
+    });
+
+    it("accepts a same-origin submission carrying the matching cookie", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody(), {
+          Cookie: consentCookie(),
+          "Sec-Fetch-Site": "same-origin",
+          Origin: "https://worker.example.com",
+        }),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(302);
+    });
+
+    it("on approve, sets the state cookie for the Umbraco state and clears the consent cookie", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody()),
+        createMockAuthRequest()
+      );
+
+      const umbracoState = new URL(response.headers.get("Location")!).searchParams.get("state")!;
+      const cookies = setCookies(response);
+      expect(cookies).toContain(
+        `${flowCookieName("state", umbracoState)}=${umbracoState}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600`
+      );
+      expect(cookies).toContain(
+        `${flowCookieName("consent", TEST_CONSENT_STATE)}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`
+      );
+    });
+
+    it("on reauth, sets the state cookie for the state carried through sign-out", async () => {
+      const form = createApproveFormBody({ action: "reauth" });
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(form),
+        createMockAuthRequest()
+      );
+
+      const signoutState = new URL(response.headers.get("Location")!).searchParams.get("state")!;
+      expect(setCookies(response)).toContain(
+        `${flowCookieName("state", signoutState)}=${signoutState}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600`
+      );
+    });
+
+    it("on deny, does not set a state cookie", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody({ action: "deny" })),
+        createMockAuthRequest()
+      );
+      expect(response.status).toBe(302);
+      expect(setCookies(response).some((c) => c.startsWith("__Host-mcp_state_"))).toBe(false);
+    });
+
+    it("lets two consent screens in the same browser each be approved", async () => {
+      const second = "second-consent-state-token";
+      const cookieHeader = `${consentCookie()}; ${consentCookie(second)}`;
+      const handler = createAuthorizeHandler(createMockEnv());
+
+      const first = await handler(
+        consentPost(createApproveFormBody(), { Cookie: cookieHeader }),
+        createMockAuthRequest()
+      );
+      const form = createApproveFormBody();
+      form.set("state", second);
+      const other = await handler(consentPost(form, { Cookie: cookieHeader }), createMockAuthRequest());
+
+      expect(first.status).toBe(302);
+      expect(other.status).toBe(302);
+    });
+  });
+
+  describe("required authorization parameters", () => {
+    it.each([
+      ["client_id", { clientId: "" }],
+      ["redirect_uri", { redirectUri: "" }],
+    ])("rejects a request without %s before showing consent", async (_name, override) => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest(override)
+      );
+      expect(response.status).toBe(400);
+      expect(mockConsentResponse).not.toHaveBeenCalled();
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+
+    it("rejects a consent submission without redirect_uri", async () => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        consentPost(createApproveFormBody()),
+        createMockAuthRequest({ redirectUri: "" })
+      );
+      expect(response.status).toBe(400);
+      expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("callback", () => {
+    const storedState = () => ({
+      authRequest: createMockAuthRequest(),
+      codeVerifier: "verifier",
+      siteClientId: "test-client-id",
+      siteBaseUrl: "https://umbraco.example.com",
+    });
+
+    it("rejects a callback without the state cookie before touching state or tokens", async () => {
+      mockConsumeOAuthState.mockResolvedValue(storedState());
+      const handler = createCallbackHandler(createMockEnv());
+
+      await expect(
+        handler(new Request("https://worker.example.com/callback?code=c&state=s"))
+      ).rejects.toThrow(FlowBindingError);
+
+      expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockStoreUmbracoToken).not.toHaveBeenCalled();
+    });
+
+    it("rejects a callback whose state cookie holds a different value", async () => {
+      mockConsumeOAuthState.mockResolvedValue(storedState());
+      const request = new Request("https://worker.example.com/callback?code=c&state=state-one", {
+        headers: { Cookie: `${flowCookieName("state", "state-one")}=state-two` },
+      });
+
+      await expect(createCallbackHandler(createMockEnv())(request)).rejects.toThrow(
+        FlowBindingError
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects a callback when only the consent cookie is present", async () => {
+      const request = new Request("https://worker.example.com/callback?code=c&state=state-one", {
+        headers: { Cookie: `${flowCookieName("consent", "state-one")}=state-one` },
+      });
+      await expect(createCallbackHandler(createMockEnv())(request)).rejects.toThrow(
+        FlowBindingError
+      );
+    });
+
+    it("completes when the browser carries the matching state cookie", async () => {
+      mockConsumeOAuthState.mockResolvedValue(storedState());
+      mockFetch.mockResolvedValue(
+        createJsonResponse(200, { access_token: "a", token_type: "Bearer", expires_in: 3600 })
+      );
+
+      const result = await createCallbackHandler(createMockEnv())(
+        callbackRequest("https://worker.example.com/callback?code=c&state=state-one")
+      );
+      expect(result.authRequest.clientId).toBe("mcp-client-1");
     });
   });
 });

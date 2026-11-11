@@ -39,8 +39,13 @@ export interface ConsentModeOption {
 }
 
 export interface ConsentScreenOptions {
-  /** The MCP client's display name or client_id */
-  clientName: string;
+  /**
+   * The name the MCP client registered with (`client_name`). Self-declared by
+   * the client, so it is shown as such. `undefined` when none was registered.
+   */
+  clientName?: string;
+  /** The MCP client's `client_id` */
+  clientId?: string;
   /** The Umbraco instance URL being accessed */
   umbracoBaseUrl: string;
   /** Requested OAuth scopes */
@@ -73,10 +78,11 @@ export interface ConsentScreenOptions {
  * Renders an HTML consent screen identifying the requesting MCP client.
  *
  * Security properties:
- * - Identifies the requesting MCP client by name
+ * - Identifies the requesting MCP client by its registered name, marked as
+ *   self-declared, with its client_id
  * - Shows which Umbraco instance will be accessed
  * - Displays requested scopes
- * - Shows the registered redirect_uri
+ * - Shows the registered redirect_uri, with its hostname highlighted
  * - CSRF protection via state parameter in hidden form field
  * - Prevents iframing (headers set by caller: X-Frame-Options: DENY)
  * - frame-ancestors CSP set by caller
@@ -95,6 +101,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
 
   const {
     clientName,
+    clientId,
     umbracoBaseUrl,
     scopes,
     redirectUri,
@@ -114,6 +121,13 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
   const title = serverName
     ? `Authorize ${escapeHtml(serverName)}`
     : "Authorize MCP Client";
+
+  const redirectHost = safeHostname(redirectUri);
+  const applicationHtml = clientName
+    ? `<div class="field-value">${escapeHtml(clientName)}</div>
+        <div class="field-note">Name provided by the application${clientId ? ` · ID ${escapeHtml(clientId)}` : ""}</div>`
+    : `<div class="field-value">Unnamed application</div>${clientId ? `
+        <div class="field-note">ID ${escapeHtml(clientId)}</div>` : ""}`;
 
   const toolSelectionHtml = toolConfig ? renderToolSelection(toolConfig, serverName) : "";
   const siteSelectionHtml = sites && sites.length > 0 ? renderSiteSelection(sites) : "";
@@ -159,6 +173,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     .field { margin-bottom: 0; }
     .field-label { font-size: 0.75rem; text-transform: uppercase; color: #666; margin-bottom: 0.25rem; }
     .field-value { font-size: 0.95rem; color: #333; word-break: break-all; }
+    .field-note { font-size: 0.8rem; color: #666; word-break: break-all; margin-top: 0.15rem; }
     .scopes { list-style: none; padding: 0; }
     .scopes li {
       background: #f0f0f0;
@@ -233,7 +248,7 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
     <div class="fields-grid">
       <div class="field">
         <div class="field-label">Application</div>
-        <div class="field-value">${escapeHtml(clientName)}</div>
+        ${applicationHtml}
       </div>
 
       ${sites && sites.length > 0 ? siteSelectionHtml : `<div class="field">
@@ -247,8 +262,9 @@ export function renderConsentScreen(options: ConsentScreenOptions): string {
       </div>
 
       <div class="field">
-        <div class="field-label">Redirect URI</div>
-        <div class="field-value">${escapeHtml(redirectUri)}</div>
+        <div class="field-label">After approval you'll be sent to</div>
+        <div class="field-value"><strong>${escapeHtml(redirectHost ?? redirectUri)}</strong></div>
+        <div class="field-note">${escapeHtml(redirectUri)}</div>
       </div>
     </div>
 
@@ -461,6 +477,14 @@ function renderSiteSelection(
   <h2>Umbraco Instance</h2>
   ${options}
 </div>`;
+}
+
+function safeHostname(uri: string): string | undefined {
+  try {
+    return new URL(uri).hostname || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function escapeHtml(str: string): string {
