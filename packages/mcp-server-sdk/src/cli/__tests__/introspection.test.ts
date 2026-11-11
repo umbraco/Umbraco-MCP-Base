@@ -53,6 +53,12 @@ describe("toolToJsonSchema", () => {
     expect(schema.properties.when).toEqual({});
   });
 
+  it("accepts a ZodObject inputSchema without throwing", () => {
+    const objSchema = toolToJsonSchema(makeTool(z.object({ id: z.guid() }) as any)) as any;
+    expect(objSchema.properties.id).toMatchObject({ type: "string", format: "uuid" });
+    expect(objSchema.required).toEqual(["id"]);
+  });
+
   it("returns an empty object schema when there is no inputSchema", () => {
     expect(toolToJsonSchema(makeTool(undefined))).toEqual({ type: "object", properties: {} });
   });

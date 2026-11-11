@@ -13,9 +13,8 @@ import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 
 /**
  * Render a JSON Schema node as a short type label for the context file.
- * @internal exported for tests
  */
-export function describeType(schema: Record<string, unknown>): string {
+function describeType(schema: Record<string, unknown>): string {
   const t = schema.type;
   if (typeof t === "string") return t;
   if (Array.isArray(t) && t.length > 0) return t.join(" | ");

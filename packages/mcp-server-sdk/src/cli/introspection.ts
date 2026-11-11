@@ -6,7 +6,7 @@
  * for command-line use (--list-tools, --describe-tool).
  */
 
-import { z, ZodRawShape } from "zod";
+import { z, ZodRawShape, ZodType } from "zod";
 import { ToolDefinition } from "../types/tool-definition.js";
 
 /**
@@ -32,7 +32,9 @@ export function toolToJsonSchema(tool: ToolDefinition<any, any>): Record<string,
     return { type: "object", properties: {} };
   }
 
-  return z.toJSONSchema(z.object(schema as ZodRawShape), {
+  // Accept a full ZodType as well as a raw shape, as --call-tool does
+  const wrapped = schema instanceof ZodType ? schema : z.object(schema as ZodRawShape);
+  return z.toJSONSchema(wrapped, {
     target: "draft-2020-12",
     io: "input",
     unrepresentable: "any",
