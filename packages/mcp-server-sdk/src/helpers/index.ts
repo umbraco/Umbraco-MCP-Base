@@ -59,6 +59,7 @@ export {
   validateUUID,
   withInputSanitization,
   RAW_FIELD_MARKER,
+  TEXT_FIELD_MARKER,
   type SanitizeStringOptions,
 } from "./input-sanitizer.js";
 

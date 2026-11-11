@@ -173,7 +173,9 @@ See [local-dev-testing.md](local-dev-testing.md) for SDK contributor guidance on
 ## Input Sanitization
 
 The SDK automatically validates all string inputs before tool handlers run:
-- Rejects control characters, path traversal (`../`), embedded query params, percent-encoded strings
+- Rejects control characters in every string
+- Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in top-level params and identifier fields (`id`, `parentId`, `path`, …), and `../` in nested `name` fields
+- Allows `?`, `&`, `%` and `../` in nested request-body text and in description-like fields (`description`, `translation`, `title`, …)
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages
 

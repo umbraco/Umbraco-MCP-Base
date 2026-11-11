@@ -15,6 +15,7 @@ import {
   validateUUID,
   withInputSanitization,
   RAW_FIELD_MARKER,
+  TEXT_FIELD_MARKER,
 } from "../input-sanitizer.js";
 import { ToolValidationError } from "../tool-validation-error.js";
 
@@ -297,8 +298,12 @@ describe("withInputSanitization", () => {
     });
 
     it("applies to nested keys and array elements", () => {
-      const nested = run({ user: z.object({ newPassword: z.string() }) }, { user: { newPassword: nasty } });
+      // Under an id-named parent every nested string is fully checked, so the
+      // relaxation is observable there: the sibling `token` is rejected.
+      const schema = { parentKey: z.object({ newPassword: z.string(), token: z.string() }) };
+      const nested = run(schema, { parentKey: { newPassword: nasty, token: "t" } });
       expect(nested.call).not.toThrow();
+      expect(run(schema, { parentKey: { newPassword: "p", token: nasty } }).call).toThrow(ToolValidationError);
       const arr = run({ password: z.array(z.string()) }, { password: [nasty] });
       expect(arr.call).not.toThrow();
     });
@@ -319,9 +324,10 @@ describe("withInputSanitization", () => {
       expect(run(schema, { password: nasty }).call).not.toThrow();
     });
 
-    it("relaxes password inside objects in an array", () => {
-      const schema = { users: z.array(z.object({ password: z.string() })) };
-      expect(run(schema, { users: [{ password: nasty }] }).call).not.toThrow();
+    it("relaxes password inside objects in an id-named array", () => {
+      const schema = { userIds: z.array(z.object({ value: z.string(), password: z.string() })) };
+      expect(run(schema, { userIds: [{ value: "u", password: nasty }] }).call).not.toThrow();
+      expect(run(schema, { userIds: [{ value: nasty, password: "p" }] }).call).toThrow(ToolValidationError);
     });
 
     it("matches the name case-insensitively", () => {
@@ -339,8 +345,9 @@ describe("withInputSanitization", () => {
     });
 
     it("still relaxes a declared secret field nested under a record value", () => {
-      const schema = { users: z.record(z.string(), z.object({ password: z.string() })) };
-      expect(run(schema, { users: { bob: { password: nasty } } }).call).not.toThrow();
+      const schema = { userIds: z.record(z.string(), z.object({ value: z.string(), password: z.string() })) };
+      expect(run(schema, { userIds: { bob: { value: "u", password: nasty } } }).call).not.toThrow();
+      expect(run(schema, { userIds: { bob: { value: nasty, password: "p" } } }).call).toThrow(ToolValidationError);
     });
 
     it("rejects a secret-like field the name rule misses, unless marked [raw]", () => {
@@ -725,8 +732,8 @@ describe("withInputSanitization", () => {
       "accepts %s in nested free text",
       (text) => {
         expect(run(updateDocumentTypeSchema, docTypeInput(text)).call).not.toThrow();
-        const schema = { data: z.record(z.string(), z.string()) };
-        expect(run(schema, { data: { note: text } }).call).not.toThrow();
+        const schema = { data: z.object({ meta: z.record(z.string(), z.string()) }) };
+        expect(run(schema, { data: { meta: { note: text } } }).call).not.toThrow();
       }
     );
 
@@ -756,14 +763,73 @@ describe("withInputSanitization", () => {
       expect(run(schema, { data: { ...ok, mediaUUID: bad } }).call).toThrow(ToolValidationError);
     });
 
-    it("does not treat words ending in lowercase 'id' as ids", () => {
-      const schema = { data: z.object({ valid: z.string(), android: z.string() }) };
-      expect(run(schema, { data: { valid: "a?b", android: "a&b" } }).call).not.toThrow();
+    it.each(["valid", "android", "PAID", "VOID", "ANDROID", "BIDs", "STATUS_PAID"])(
+      "does not treat %s as an id",
+      (key) => {
+        const schema = { data: z.object({ [key]: z.string() }) };
+        expect(run(schema, { data: { [key]: "a?b&c" } }).call).not.toThrow();
+      }
+    );
+
+    it.each([
+      "parent_id", "PARENT_ID", "document_type_ids", "parentID", "uuid", "documentGuid", "GUID",
+      "key", "contentKey", "unique", "alias", "propertyAlias", "path", "folderPath",
+    ])("treats nested %s as an id", (key) => {
+      const schema = { data: z.object({ [key]: z.string() }) };
+      expect(run(schema, { data: { [key]: "a?b" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { data: { [key]: "../x" } }).call).toThrow(ToolValidationError);
     });
 
     it("does not let caller-chosen z.record keys make a value id-checked", () => {
-      const schema = { data: z.record(z.string(), z.string()) };
-      expect(run(schema, { data: { id: "a?b" } }).call).not.toThrow();
+      const schema = { data: z.object({ meta: z.record(z.string(), z.string()) }) };
+      expect(run(schema, { data: { meta: { id: "a?b" } } }).call).not.toThrow();
+    });
+
+    it("keeps every check on top-level z.record values", () => {
+      const schema = { query: z.record(z.string(), z.string()) };
+      expect(run(schema, { query: { filter: "x&skip=0" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { query: { path: "../a" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { query: { filter: "plain" } }).call).not.toThrow();
+    });
+
+    it("keeps every check on everything below an id-named key", () => {
+      const nested = { data: z.object({ parentId: z.object({ value: z.string() }) }) };
+      expect(run(nested, { data: { parentId: { value: "x?y" } } }).call).toThrow(ToolValidationError);
+      const topLevel = { ids: z.array(z.object({ value: z.string() })) };
+      expect(run(topLevel, { ids: [{ value: "../x" }] }).call).toThrow(ToolValidationError);
+      expect(run(topLevel, { ids: [{ value: "ok" }] }).call).not.toThrow();
+    });
+
+    it("keeps the path-traversal check on nested path and name fields (file entities)", () => {
+      const createScript = {
+        data: z.object({ name: z.string(), parent: z.object({ path: z.string() }).nullable(), content: z.string() }),
+      };
+      const input = (name: string, path: string) => ({ data: { name, parent: { path }, content: "x" } });
+      expect(run(createScript, input("../../web.config", "/scripts")).call).toThrow(ToolValidationError);
+      expect(run(createScript, input("app.js", "../../")).call).toThrow(ToolValidationError);
+      expect(run(createScript, input("Q&A?", "/scripts")).call).not.toThrow();
+      expect(run(createScript, input("app.js", "/scripts/a?b")).call).toThrow(ToolValidationError);
+    });
+
+    it("accepts free text in top-level description-like params (flattened bodies)", () => {
+      const createExample = { name: z.string(), description: z.string().nullish(), pageTitle: z.string().optional() };
+      for (const text of ["What is this?", "Tom & Jerry", "50%20off", "see ../readme"]) {
+        expect(run(createExample, { name: "n", description: text, pageTitle: text }).call).not.toThrow();
+      }
+      expect(run(createExample, { name: "n", description: "a\x00b" }).call).toThrow(ToolValidationError);
+      // A top-level `name` can be a path parameter, so it keeps every check.
+      expect(run(createExample, { name: "Q&A" }).call).toThrow(ToolValidationError);
+    });
+
+    it("lets [text] relax a field to the control-character check only", () => {
+      const schema = { name: z.string().describe(`${TEXT_FIELD_MARKER} Item name`) };
+      expect(run(schema, { name: "Q&A?" }).call).not.toThrow();
+      expect(run(schema, { name: "see ../x" }).call).not.toThrow();
+      expect(run(schema, { name: "a\x00b" }).call).toThrow(ToolValidationError);
+
+      const subtree = { data: z.object({ note: z.string(), id: z.string() }).describe(TEXT_FIELD_MARKER) };
+      expect(run(subtree, { data: { note: "a?b", id: "ok" } }).call).not.toThrow();
+      expect(run(subtree, { data: { note: "ok", id: "a?b" } }).call).toThrow(ToolValidationError);
     });
 
     it("still rejects control characters everywhere", () => {
