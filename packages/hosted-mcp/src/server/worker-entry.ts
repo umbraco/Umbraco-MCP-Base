@@ -560,7 +560,7 @@ async function handleSingleSiteRequest(
 ): Promise<Response> {
   // Handle MCP client authorization (consent screen + redirect to Umbraco)
   if (path === "/authorize") {
-    return handleAuthorize(withDefaultResource(request), env, authOptions);
+    return handleAuthorize(request, env, authOptions);
   }
 
   // Handle Umbraco OAuth callback — exchange code, then complete MCP auth
@@ -594,7 +594,7 @@ async function handleMultiSiteRequest(
   // Site selection happens in the consent form, not via separate /authorize/:siteId
   // endpoints, because MCP OAuth discovery only supports a single authorization_endpoint.
   if (path === "/authorize") {
-    return handleAuthorize(withDefaultResource(request), env, authOptions);
+    return handleAuthorize(request, env, authOptions);
   }
 
   // Callback — match /callback/:siteId for multi-site.
@@ -709,25 +709,6 @@ function renderProtectedResourceMetadata(
 // ============================================================================
 // Authorize / Callback Handlers
 // ============================================================================
-
-/**
- * Makes sure an authorization request names this Worker as its resource
- * (RFC 8707). The OAuth provider only binds a token to an audience when the
- * grant has a resource, and only checks the audience when the token has one,
- * so a client that leaves `resource` out would otherwise get a token with no
- * audience at all. MCP 2025-11-25 requires clients to send it and servers to
- * validate the audience; defaulting it to this Worker's origin keeps clients
- * that omit it working while every token is audience-bound.
- *
- * Not used under `siteRouting`, where `resource` selects the site and is
- * required.
- */
-export function withDefaultResource(request: Request): Request {
-  const url = new URL(request.url);
-  if (url.searchParams.has("resource")) return request;
-  url.searchParams.set("resource", url.origin);
-  return new Request(url.toString(), request);
-}
 
 async function handleAuthorize(
   request: Request,

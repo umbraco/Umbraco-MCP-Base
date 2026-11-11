@@ -43,6 +43,7 @@ import {
   withSetCookies,
 } from "./flow-cookies.js";
 import { toHex } from "../crypto/hex.js";
+import { toBase64Url } from "../crypto/base64url.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -214,10 +215,7 @@ async function generatePkce(): Promise<{
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
   const digest = await crypto.subtle.digest("SHA-256", data);
-  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const codeChallenge = toBase64Url(new Uint8Array(digest));
   return { codeVerifier, codeChallenge };
 }
 
@@ -812,15 +810,10 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // another site's path was issued by a different authorization server
     // than the one this state belongs to (OAuth mix-up, RFC 9700 §4.4) and
     // must not be sent to this site's token endpoint.
-    // States stored before the path was recorded (at most 10 minutes old at
-    // upgrade) fall back to rebuilding it the way the token exchange used to.
-    const callbackPath =
-      typeof stateData.callbackPath === "string"
-        ? stateData.callbackPath
-        : consentChoices?.siteId
-          ? `/callback/${consentChoices.callbackId ?? consentChoices.siteId}`
-          : "/callback";
-    if (url.pathname !== callbackPath) {
+    // A state stored before the path was recorded (a sign-in in progress
+    // during an upgrade) has none and is rejected; the user starts again.
+    const callbackPath = stateData.callbackPath;
+    if (typeof callbackPath !== "string" || url.pathname !== callbackPath) {
       throw new Error("Callback does not match the site this sign-in was started for");
     }
 
@@ -865,6 +858,16 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     const tokens = (await tokenResp.json()) as TokenResponse;
 
+    // Identify the Umbraco user the grant belongs to, alongside the KV writes
+    // below. The OAuth provider revokes a user's earlier grants for the same
+    // client when a new one is issued, so this must be per user — never a
+    // shared value.
+    const userInfoPromise = resolveGrantUser(
+      tokens.access_token,
+      effectiveBaseUrl,
+      effectiveServerUrl
+    );
+
     // Generate a unique key for this token set
     const tokenKey = generateSecureRandom();
 
@@ -888,14 +891,7 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Mark this MCP client as having completed auth (for reauth button visibility)
     await markClientAuthed(env.OAUTH_KV, authRequest.clientId);
 
-    // Identify the Umbraco user the grant belongs to. The OAuth provider
-    // revokes a user's earlier grants for the same client when a new one is
-    // issued, so this must be per user — never a shared value.
-    const userInfo = await resolveGrantUser(
-      tokens.access_token,
-      effectiveBaseUrl,
-      effectiveServerUrl
-    );
+    const userInfo = await userInfoPromise;
 
     return {
       props: {

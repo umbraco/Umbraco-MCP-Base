@@ -844,7 +844,7 @@ describe("getSessionAuth", () => {
 
   it("deduplicates concurrent refreshes, even across clients sharing a token key", async () => {
     const kv = mapKv();
-    let resolveToken!: (response: Response) => void;
+    let resolveToken: ((response: Response) => void) | undefined;
     mockFetch.mockImplementation(
       () => new Promise<Response>((resolve) => (resolveToken = resolve))
     );
@@ -852,7 +852,10 @@ describe("getSessionAuth", () => {
     const second = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
 
     const pending = Promise.all([first.getSessionAuth(), first.getSessionAuth(), second.getSessionAuth()]);
-    // Let every caller reach the token endpoint before it answers.
+    // Let every caller reach the token endpoint before it answers. Reading the
+    // stored entry uses Web Crypto, which resolves on its own schedule, so
+    // wait for the request rather than a fixed number of ticks.
+    while (!resolveToken) await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     resolveToken(createJsonResponse(200, { access_token: "fresh-access", refresh_token: "fresh-refresh", expires_in: 300 }));
 

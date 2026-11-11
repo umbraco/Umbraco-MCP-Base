@@ -895,6 +895,7 @@ describe("createCallbackHandler", () => {
       siteClientId: "test-client-id",
       siteClientSecret: "test-client-secret",
       siteBaseUrl: "https://umbraco.example.com",
+      callbackPath: "/callback",
       ...overrides,
     };
   }
@@ -1190,6 +1191,7 @@ describe("createCallbackHandler", () => {
           siteClientSecret: "prod-secret",
           siteBaseUrl: "https://prod.umbraco.com",
           consentChoices: { siteId: "prod" } as ConsentChoices,
+          callbackPath: "/callback/prod",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1223,6 +1225,7 @@ describe("createCallbackHandler", () => {
       mockConsumeOAuthState.mockResolvedValue(
         makeStoredState({
           consentChoices: { siteId: "staging" } as ConsentChoices,
+          callbackPath: "/callback/staging",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1255,6 +1258,7 @@ describe("createCallbackHandler", () => {
             siteId: "my-project.uksouth01",
             callbackId: "my-project",
           } as ConsentChoices,
+          callbackPath: "/callback/my-project",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1335,14 +1339,18 @@ describe("createCallbackHandler", () => {
       );
     });
 
-    it("falls back to rebuilding the path for a state stored before it was recorded", async () => {
+    it("rejects a state stored before the callback path was recorded, even on the matching path", async () => {
       const env = createMockEnv();
-      mockConsumeOAuthState.mockResolvedValue(stateFor(undefined, "tenant-a"));
+      mockConsumeOAuthState.mockResolvedValue({
+        ...makeStoredState({ consentChoices: { siteId: "tenant-a" } as ConsentChoices }),
+        callbackPath: undefined,
+      });
 
       const handler = createCallbackHandler(env);
       await expect(
-        handler(callbackRequest("https://worker.example.com/callback/tenant-b?code=c&state=s"))
+        handler(callbackRequest("https://worker.example.com/callback/tenant-a?code=c&state=s"))
       ).rejects.toThrow("does not match the site");
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -2257,6 +2265,7 @@ describe("browser-bound authorization flow", () => {
       codeVerifier: "verifier",
       siteClientId: "test-client-id",
       siteBaseUrl: "https://umbraco.example.com",
+      callbackPath: "/callback",
     });
 
     it("rejects a callback without the state cookie before touching state or tokens", async () => {

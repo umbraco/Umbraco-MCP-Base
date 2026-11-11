@@ -10,6 +10,7 @@ import type { HostedMcpEnv } from "../types/env.js";
 import { logAuth } from "./log.js";
 import { AUTH_REFRESH_SPAN, HostedTelemetryAttributes } from "../telemetry/attributes.js";
 import { sanitizeForLog } from "../util/log-sanitize.js";
+import { toBase64Url, fromBase64Url } from "../crypto/base64url.js";
 
 // ============================================================================
 // Umbraco Backoffice Endpoint Paths
@@ -154,10 +155,19 @@ export async function consumeOAuthState(
  * client secrets without also holding a live MCP grant.
  *
  * Entries written before encryption (`umbraco_token:<tokenKey>`, plain JSON)
- * are still read, and are replaced by an encrypted entry the next time the
- * tokens are stored (login or refresh). They are not rewritten on read: a
- * read-time migration could race a concurrent refresh and put back a refresh
- * token Umbraco has already rotated.
+ * are still read when no encrypted entry exists. The next store (login or
+ * refresh) writes an encrypted entry, which is read first from then on.
+ * The plaintext entry is not deleted then: it is left to expire (its TTL is
+ * at most 30 days) because
+ * - deleting it is a second KV write that could fail after the tokens were
+ *   saved,
+ * - KV is eventually consistent, so a reader elsewhere could see the delete
+ *   before the new entry and treat a live session as signed out, and
+ * - the previous release only reads the plaintext key, so keeping it keeps a
+ *   rollback from losing sessions.
+ * The plaintext entry only holds the pre-upgrade tokens, whose refresh token
+ * Umbraco rotates on the first refresh. It is deleted with the session
+ * (`deleteStoredUmbracoToken`).
  */
 const ENTRY_PREFIX = "umbraco_token_v2:";
 const LEGACY_ENTRY_PREFIX = "umbraco_token:";
@@ -166,30 +176,54 @@ const ENTRY_HKDF_INFO = "umbraco-mcp-hosted/umbraco-token-entry/v2";
 
 const textEncoder = new TextEncoder();
 
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+/**
+ * Derived KV key names and AES keys, per token key. Both are deterministic,
+ * so caching them only saves repeated Web Crypto work on the request path.
+ * Bounded; the oldest entry is dropped first.
+ */
+const DERIVED_CACHE_LIMIT = 256;
+const kvKeyCache = new Map<string, Promise<string>>();
+const cryptoKeyCache = new Map<string, Promise<CryptoKey>>();
 
-function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function cached<T>(cache: Map<string, Promise<T>>, tokenKey: string, derive: () => Promise<T>): Promise<T> {
+  let value = cache.get(tokenKey);
+  if (!value) {
+    value = derive();
+    // Don't keep a rejected derivation around.
+    value.catch(() => cache.delete(tokenKey));
+    if (cache.size >= DERIVED_CACHE_LIMIT) {
+      cache.delete(cache.keys().next().value!);
+    }
+    cache.set(tokenKey, value);
+  }
+  return value;
 }
 
 /** KV key of the encrypted entry for `tokenKey`. Exported for tests. */
-export async function umbracoTokenKvKey(tokenKey: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    textEncoder.encode(`umbraco-token-kv-name:${tokenKey}`)
-  );
-  return ENTRY_PREFIX + toBase64Url(new Uint8Array(digest));
+export function umbracoTokenKvKey(tokenKey: string): Promise<string> {
+  return cached(kvKeyCache, tokenKey, async () => {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      textEncoder.encode(`umbraco-token-kv-name:${tokenKey}`)
+    );
+    return ENTRY_PREFIX + toBase64Url(new Uint8Array(digest));
+  });
 }
 
-async function entryCryptoKey(tokenKey: string): Promise<CryptoKey> {
+/**
+ * A short reference to a login for logs: a prefix of its entry's KV key name,
+ * which anyone who can list KV already sees. Never log `tokenKey` itself: it
+ * is the secret the entry's location and encryption key are derived from.
+ */
+export async function tokenLogRef(tokenKey: string): Promise<string> {
+  return (await umbracoTokenKvKey(tokenKey)).slice(ENTRY_PREFIX.length, ENTRY_PREFIX.length + 12);
+}
+
+function entryCryptoKey(tokenKey: string): Promise<CryptoKey> {
+  return cached(cryptoKeyCache, tokenKey, () => deriveEntryCryptoKey(tokenKey));
+}
+
+async function deriveEntryCryptoKey(tokenKey: string): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey(
     "raw",
     textEncoder.encode(tokenKey),
@@ -279,7 +313,7 @@ export async function storeUmbracoToken(
 ): Promise<void> {
   logAuth(
     env,
-    `storeUmbracoToken key=${tokenKey} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
+    `storeUmbracoToken login=${await tokenLogRef(tokenKey)} has_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"} scope=${tokens.scope ?? "n/a"} has_site_context=${!!site} site_client_id=${site?.oauthClientId ?? "n/a"}`
   );
   const stamped = withExpiresAt(tokens);
   const entry: StoredTokenEntry = site ? { tokens: stamped, site } : { tokens: stamped };
@@ -287,8 +321,6 @@ export async function storeUmbracoToken(
   await kv.put(kvKey, await sealEntry(tokenKey, kvKey, entry), {
     expirationTtl: ENTRY_TTL_SECONDS,
   });
-  // Replace any plaintext entry from before encryption at rest.
-  await kv.delete(`${LEGACY_ENTRY_PREFIX}${tokenKey}`);
   // This write is now the source of truth for `tokenKey` — whether it's a
   // refresh's rotation or a fresh login. Drop any cached rotated token so a
   // stale one from an earlier failed write can never outrank it.
@@ -665,7 +697,10 @@ export function refreshUmbracoToken(
 ): Promise<RefreshTokenResult> {
   const inFlight = inFlightRefreshes.get(tokenKey);
   if (inFlight) {
-    logAuth(env, `refreshUmbracoToken joining in-flight refresh key=${tokenKey}`);
+    // Stays synchronous so the in-flight lookup and registration can't race.
+    void tokenLogRef(tokenKey).then((ref) =>
+      logAuth(env, `refreshUmbracoToken joining in-flight refresh login=${ref}`)
+    );
     return inFlight;
   }
 
@@ -703,10 +738,10 @@ async function performRefresh(
    * `invalid_grant`, and that reads as a definitive `expired`.
    */
   const readStoredEntry = () =>
-    getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch((error) => {
+    getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch(async (error) => {
       logAuth(
         env,
-        `refreshUmbracoToken KV READ FAILED key=${tokenKey} error=${sanitizeForLog(
+        `refreshUmbracoToken KV READ FAILED login=${await tokenLogRef(tokenKey)} error=${sanitizeForLog(
           error instanceof Error ? error.message : "unknown error"
         )}`
       );
@@ -728,7 +763,7 @@ async function performRefresh(
   if (effectiveRefreshToken !== refreshToken) {
     logAuth(
       env,
-      `refreshUmbracoToken key=${tokenKey} using ${
+      `refreshUmbracoToken login=${await tokenLogRef(tokenKey)} using ${
         cachedRotatedToken ? "a rotated token pending KV persistence" : "rotated refresh token from KV"
       } instead of the caller's snapshot`
     );
@@ -747,7 +782,7 @@ async function performRefresh(
 
   logAuth(
     env,
-    `refreshUmbracoToken request key=${tokenKey} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!effectiveSite}`
+    `refreshUmbracoToken request login=${await tokenLogRef(tokenKey)} endpoint=${endpoints.token_endpoint} client_id=${clientId} has_client_secret=${!!clientSecret} site_context=${!!effectiveSite}`
   );
 
   // Traced because this is the path that breaks in production, and a refresh
@@ -813,7 +848,7 @@ async function performRefresh(
           const detail = sanitizeForLog(
             error instanceof Error ? error.message : "unknown error"
           );
-          logAuth(env, `refreshUmbracoToken NETWORK FAILURE key=${tokenKey} error=${detail}`);
+          logAuth(env, `refreshUmbracoToken NETWORK FAILURE login=${await tokenLogRef(tokenKey)} error=${detail}`);
           return {
             ok: false,
             failure: {
@@ -838,7 +873,7 @@ async function performRefresh(
           const body = await resp.text().catch(() => UNREADABLE_BODY);
           logAuth(
             env,
-            `refreshUmbracoToken FAILED key=${tokenKey} status=${resp.status} body=${body.slice(0, 500)}`
+            `refreshUmbracoToken FAILED login=${await tokenLogRef(tokenKey)} status=${resp.status} body=${body.slice(0, 500)}`
           );
           const errorCode = parseOAuthErrorCode(body);
           const reason = classifyRefreshFailure(errorCode);
@@ -861,7 +896,7 @@ async function performRefresh(
         try {
           tokens = (await resp.json()) as TokenResponse;
         } catch {
-          logAuth(env, `refreshUmbracoToken UNPARSEABLE BODY key=${tokenKey} status=${resp.status}`);
+          logAuth(env, `refreshUmbracoToken UNPARSEABLE BODY login=${await tokenLogRef(tokenKey)} status=${resp.status}`);
           return {
             ok: false,
             failure: {
@@ -874,7 +909,7 @@ async function performRefresh(
         }
 
         if (typeof tokens?.access_token !== "string" || tokens.access_token.length === 0) {
-          logAuth(env, `refreshUmbracoToken NO ACCESS TOKEN key=${tokenKey} status=${resp.status}`);
+          logAuth(env, `refreshUmbracoToken NO ACCESS TOKEN login=${await tokenLogRef(tokenKey)} status=${resp.status}`);
           return {
             ok: false,
             failure: {
@@ -916,7 +951,7 @@ async function performRefresh(
         if (retryToken && retryToken !== effectiveRefreshToken) {
           logAuth(
             env,
-            `refreshUmbracoToken RETRY key=${tokenKey} invalid_grant on the posted token; KV now holds a newer one, retrying once`
+            `refreshUmbracoToken RETRY login=${await tokenLogRef(tokenKey)} invalid_grant on the posted token; KV now holds a newer one, retrying once`
           );
           postedRefreshToken = retryToken;
           attempt = await postRefresh(retryToken, "retry");
@@ -955,7 +990,7 @@ async function performRefresh(
         const detail = sanitizeForLog(
           error instanceof Error ? error.message : "unknown error"
         );
-        logAuth(env, `refreshUmbracoToken KV WRITE FAILED key=${tokenKey} error=${detail}`);
+        logAuth(env, `refreshUmbracoToken KV WRITE FAILED login=${await tokenLogRef(tokenKey)} error=${detail}`);
         return fail({
           ok: false,
           reason: "server_error",
@@ -965,7 +1000,7 @@ async function performRefresh(
 
       logAuth(
         env,
-        `refreshUmbracoToken OK key=${tokenKey} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
+        `refreshUmbracoToken OK login=${await tokenLogRef(tokenKey)} new_refresh=${!!tokens.refresh_token} expires_in=${tokens.expires_in ?? "n/a"}`
       );
       span.setAttribute(HostedTelemetryAttributes.AUTH_OUTCOME, "refreshed");
       span.setAttribute(
