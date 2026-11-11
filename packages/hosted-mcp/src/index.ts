@@ -47,7 +47,7 @@ export {
   mergeConsentChoices,
   resolveRequestSite,
   runInSessionContext,
-  isAuthExpiredServer,
+  UmbracoSignInUnavailableError,
   type CreateServerOptions,
   type InstructionsResolver,
   type SiteResolver,

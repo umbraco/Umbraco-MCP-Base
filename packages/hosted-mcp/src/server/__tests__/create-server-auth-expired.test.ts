@@ -1,10 +1,12 @@
 /**
- * Degraded `authentication-expired` server — refresh-rejection path.
+ * Auth-expired start — refresh-rejection path.
  *
  * The no-token-in-KV path is covered in `telemetry/__tests__/spans.test.ts`.
  * This file covers the other half added for umbraco/Umbraco-MCP-Base#320: KV
  * still holds an entry, but Umbraco has definitively rejected its refresh token,
- * so the session is over even though a fetch client could be built.
+ * so the session is over even though a fetch client could be built. Since #451
+ * that fails server creation with `UmbracoSignInUnavailableError` instead of
+ * building the old one-tool `authentication-expired` server.
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
@@ -71,6 +73,30 @@ function toolNames(server: unknown): string[] {
   return Object.keys((server as { _registeredTools: Record<string, unknown> })._registeredTools);
 }
 
+/**
+ * Runs `createPerRequestServer` and returns the server it built or the error it
+ * threw, so a test can assert on either without an unhandled rejection.
+ */
+async function start(
+  startEnv: HostedMcpEnv = env,
+  startProps: AuthProps = props,
+  sessionId?: string
+): Promise<{ server?: unknown; error?: unknown }> {
+  const { createPerRequestServer } = await import("../create-server.js");
+  try {
+    return { server: await createPerRequestServer(baseOptions, startEnv, startProps, sessionId) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/** Asserts `error` is the auth-expired error and returns it. */
+async function expectSignInUnavailable(error: unknown): Promise<Error & { reason: string }> {
+  const { UmbracoSignInUnavailableError } = await import("../create-server.js");
+  expect(error).toBeInstanceOf(UmbracoSignInUnavailableError);
+  return error as Error & { reason: string };
+}
+
 /** The `:done` line, which records the mode this request resolved to. */
 function doneLine(spy: ReturnType<typeof jest.spyOn>): string | undefined {
   return spy.mock.calls
@@ -93,7 +119,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     logSpy.mockRestore();
   });
 
-  it("degrades to the authentication-expired server on a definitive invalid_grant", async () => {
+  it("fails the start with UmbracoSignInUnavailableError on a definitive invalid_grant", async () => {
     refreshFailure = {
       ok: false,
       reason: "expired",
@@ -102,23 +128,22 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
+    const { server, error } = await start();
 
-    expect(toolNames(server)).toEqual(["authentication-expired"]);
-    expect(doneLine(logSpy)).toContain("mode=degraded-auth-expired");
+    expect(server).toBeUndefined();
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-expired");
+    expect(doneLine(logSpy)).toContain("mode=auth-expired");
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected");
   });
 
   it("never logs the raw site alias, only a keyed-hash reference", async () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-    const { createPerRequestServer } = await import("../create-server.js");
-    await createPerRequestServer(
-      baseOptions,
+    const { error } = await start(
       { ...env, TENANT_HASH_KEY: "k".repeat(32) } as unknown as HostedMcpEnv,
       { ...props, consentChoices: { siteId: "secret-alias" } } as AuthProps
     );
+    await expectSignInUnavailable(error);
     const lines = [...logSpy.mock.calls, ...errSpy.mock.calls].map((c: unknown[]) => String(c[0]));
     errSpy.mockRestore();
     expect(lines.some((l: string) => l.includes("createPerRequestServer:start"))).toBe(true);
@@ -127,7 +152,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(lines.find((l: string) => l.includes(":start"))).toMatch(/siteId=[0-9a-f]{12}/);
   });
 
-  it("tells the user why, and how to recover", async () => {
+  it("says why in the error, and that signing in again recovers", async () => {
     refreshFailure = {
       ok: false,
       reason: "expired",
@@ -136,19 +161,14 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
+    const { error } = await start();
+    const { message } = await expectSignInUnavailable(error);
 
-    const tool = (server as unknown as {
-      _registeredTools: Record<string, { handler: () => Promise<{ content: { text: string }[] }> }>;
-    })._registeredTools["authentication-expired"];
-    const result = await tool.handler();
-
-    expect(result.content[0].text).toContain("disconnect and reconnect");
-    expect(result.content[0].text).toContain("Umbraco:CMS:Global:TimeOut");
+    expect(message).toContain("sign in again");
+    expect(message).toContain("Umbraco:CMS:Global:TimeOut");
   });
 
-  it("degrades to the authentication-expired server when Umbraco rejected the OAuth client", async () => {
+  it("fails the start when Umbraco rejected the OAuth client", async () => {
     // Regression for #320: `misconfigured` used to be bucketed with the
     // transient reasons, so a bad client_id/secret handed back a full toolset
     // that 401'd on every single call, with nothing to tell an operator why.
@@ -160,15 +180,14 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
+    const { error } = await start();
 
-    expect(toolNames(server)).toEqual(["authentication-expired"]);
-    expect(doneLine(logSpy)).toContain("mode=degraded-auth-expired");
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-misconfigured");
+    expect(doneLine(logSpy)).toContain("mode=auth-expired");
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-misconfigured");
   });
 
-  it("tells an administrator to fix the client registration rather than reconnect", async () => {
+  it("tells an administrator to fix the client registration rather than sign in again", async () => {
     refreshFailure = {
       ok: false,
       reason: "misconfigured",
@@ -177,26 +196,19 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
-
-    const tool = (server as unknown as {
-      _registeredTools: Record<string, { handler: () => Promise<{ content: { text: string }[] }> }>;
-    })._registeredTools["authentication-expired"];
-    const result = await tool.handler();
-
-    const text = result.content[0].text;
+    const { error } = await start();
+    const text = (await expectSignInUnavailable(error)).message;
     expect(text).toContain("administrator");
     expect(text).toContain("client id");
-    // Reconnecting replays the same broken credentials, so the expired-session
-    // advice must not leak into this message.
+    // Signing in again replays the same broken credentials, so the
+    // expired-session advice must not leak into this message.
     expect(text).not.toContain("Umbraco:CMS:Global:TimeOut");
     expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
   });
 
-  it("degrades to the authentication-expired server when Umbraco rejected the request itself", async () => {
+  it("fails the start when Umbraco rejected the request itself", async () => {
     // A permanently narrowed scope (or a malformed request) fails the same
-    // fixed param set on every retry forever — degrading here is what stops
+    // fixed param set on every retry forever — failing here is what stops
     // the session from silently keeping a full, 401-ing toolset indefinitely.
     refreshFailure = {
       ok: false,
@@ -206,11 +218,10 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
+    const { error } = await start();
 
-    expect(toolNames(server)).toEqual(["authentication-expired"]);
-    expect(doneLine(logSpy)).toContain("mode=degraded-auth-expired");
+    expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-request");
+    expect(doneLine(logSpy)).toContain("mode=auth-expired");
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-request");
   });
 
@@ -223,15 +234,8 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       message: "rejected",
     };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    const server = await createPerRequestServer(baseOptions, env, props);
-
-    const tool = (server as unknown as {
-      _registeredTools: Record<string, { handler: () => Promise<{ content: { text: string }[] }> }>;
-    })._registeredTools["authentication-expired"];
-    const result = await tool.handler();
-
-    const text = result.content[0].text;
+    const { error } = await start();
+    const text = (await expectSignInUnavailable(error)).message;
     expect(text).toContain("administrator");
     expect(text).toContain("scope");
     // Distinct diagnostic from `misconfigured`: this isn't a client_id/secret
@@ -240,15 +244,14 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(text.toLowerCase()).not.toContain("disconnect and reconnect");
   });
 
-  it("uses a distinct cause for each degrading reason", async () => {
+  it("uses a distinct cause for each unusable-session reason", async () => {
     const causes: string[] = [];
 
     for (const reason of ["expired", "misconfigured", "request_rejected"] as const) {
       logSpy.mockClear();
       refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
 
-      const { createPerRequestServer } = await import("../create-server.js");
-      await createPerRequestServer(baseOptions, env, props);
+      await expectSignInUnavailable((await start()).error);
 
       causes.push(doneLine(logSpy)!.match(/cause=(\S+)/)![1]);
     }
@@ -265,7 +268,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       const server = await createPerRequestServer(baseOptions, env, props);
 
       // No collections are configured, so "full" means zero tools — crucially
-      // NOT the degraded single-tool server. A blip must not strip a session.
+      // NOT a failed start. A blip must not strip a session.
       expect(toolNames(server)).toEqual([]);
       expect(doneLine(logSpy)).toContain("mode=full");
     }
@@ -279,7 +282,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(doneLine(logSpy)).toContain("mode=full");
   });
 
-  it("stamps the session id and tenant on the init span of a refresh-failure degraded start", async () => {
+  it("stamps the session id and tenant on the init span of a refresh-failure auth-expired start", async () => {
     // Regression for #371: the refresh-rejected branch must carry the same
     // session/tenant identity as the no-token-in-kv branch (spans.test.ts).
     refreshFailure = {
@@ -303,20 +306,19 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     });
 
     try {
-      const { createPerRequestServer } = await import("../create-server.js");
-      await createPerRequestServer(
-        baseOptions,
+      const { error } = await start(
         { ...env, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
         { ...props, consentChoices: { siteId: "my-site" } },
         "session-xyz",
       );
+      await expectSignInUnavailable(error);
     } finally {
       clearTelemetryAdapter();
     }
 
     const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
     expect(doneLine(logSpy)).toContain("cause=refresh-rejected-expired");
-    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
     expect(init.attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-xyz");
     expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
   });
@@ -326,8 +328,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     // grant and 401s the client back into a fresh sign-in.
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    await createPerRequestServer(baseOptions, env, props);
+    await expectSignInUnavailable((await start()).error);
 
     expect(kvDelete).toHaveBeenCalledTimes(1);
     expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
@@ -339,8 +340,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     storedRefreshToken = "rt-rotated-by-someone-else";
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    await createPerRequestServer(baseOptions, env, props);
+    await start();
 
     expect(kvDelete).not.toHaveBeenCalled();
   });
@@ -349,8 +349,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     rejectedRefreshToken = undefined;
 
-    const { createPerRequestServer } = await import("../create-server.js");
-    await createPerRequestServer(baseOptions, env, props);
+    await start();
 
     expect(kvDelete).not.toHaveBeenCalled();
   });
@@ -362,8 +361,7 @@ describe("createPerRequestServer with a rejected refresh token", () => {
       // must not end a session — so only `expired` drops the entry.
       refreshFailure = { ok: false, reason, status: 400, message: "rejected" };
 
-      const { createPerRequestServer } = await import("../create-server.js");
-      await createPerRequestServer(baseOptions, env, props);
+      await start();
 
       expect(kvDelete).not.toHaveBeenCalled();
     }
@@ -376,21 +374,20 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     expect(kvDelete).not.toHaveBeenCalled();
   });
 
-  it("still returns the degraded server when deleting the expired entry fails", async () => {
+  it("still fails the start with UmbracoSignInUnavailableError when deleting the expired entry fails", async () => {
     refreshFailure = { ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" };
     kvDelete.mockRejectedValueOnce(new Error("kv down"));
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
     try {
-      const { createPerRequestServer } = await import("../create-server.js");
-      const server = await createPerRequestServer(baseOptions, env, props);
-      expect(toolNames(server)).toEqual(["authentication-expired"]);
+      const { error } = await start();
+      expect((await expectSignInUnavailable(error)).reason).toBe("refresh-rejected-expired");
     } finally {
       errorSpy.mockRestore();
     }
   });
 
-  it("stamps the tenant but no session id on a refresh-failure degraded start without a session id", async () => {
+  it("stamps the tenant but no session id on a refresh-failure auth-expired start without a session id", async () => {
     refreshFailure = {
       ok: false,
       reason: "expired",
@@ -412,42 +409,18 @@ describe("createPerRequestServer with a rejected refresh token", () => {
     });
 
     try {
-      const { createPerRequestServer } = await import("../create-server.js");
-      await createPerRequestServer(
-        baseOptions,
+      const { error } = await start(
         { ...env, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
         { ...props, consentChoices: { siteId: "my-site" } },
       );
+      await expectSignInUnavailable(error);
     } finally {
       clearTelemetryAdapter();
     }
 
     const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
-    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
     expect(init.attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
     expect(TelemetryAttributes.MCP_SESSION_ID in init.attributes).toBe(false);
-  });
-
-  it("isAuthExpiredServer recognises a real degraded server and rejects a real full one", async () => {
-    // Every other test of `isAuthExpiredServer` (register-chained-tools.test.ts)
-    // mocks it away entirely, so nothing exercises the real WeakSet-based
-    // implementation against a server `createAuthExpiredServer` actually built.
-    // Without this, `authExpiredServers.add(server)` being dropped, or called
-    // on the wrong object, would pass every existing test.
-    refreshFailure = {
-      ok: false,
-      reason: "expired",
-      status: 400,
-      error: "invalid_grant",
-      message: "rejected",
-    };
-
-    const { createPerRequestServer, isAuthExpiredServer } = await import("../create-server.js");
-    const degraded = await createPerRequestServer(baseOptions, env, props);
-    expect(isAuthExpiredServer(degraded)).toBe(true);
-
-    refreshFailure = undefined;
-    const full = await createPerRequestServer(baseOptions, env, props);
-    expect(isAuthExpiredServer(full)).toBe(false);
   });
 });

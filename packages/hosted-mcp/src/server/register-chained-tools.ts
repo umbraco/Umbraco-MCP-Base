@@ -26,7 +26,6 @@ import type { ChainedServerConsentConfig } from "./worker-entry.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
 import {
-  isAuthExpiredServer,
   getServerSessionContext,
   withRequestSessionContext,
 } from "./create-server.js";
@@ -75,15 +74,6 @@ export async function registerChainedTools(
   options: RegisterChainedToolsOptions,
 ): Promise<number> {
   const { server, env, props, chainedServer, fetchUser = true } = options;
-
-  // `server` may be the degraded, single-tool `authentication-expired`
-  // server `createPerRequestServer` hands back when this session has no
-  // usable Umbraco credentials. Registering a whole chained toolset on top
-  // of it would bury that one tool under a set that also 401s on every
-  // call — silently defeating the point of degrading in the first place.
-  if (isAuthExpiredServer(server)) {
-    return 0;
-  }
 
   try {
     // Fetch the real authenticated user for chained tool filtering

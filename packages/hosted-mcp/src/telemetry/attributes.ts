@@ -31,8 +31,9 @@ export const AUTH_REFRESH_SPAN = "mcp.auth.refresh";
 
 export const HostedTelemetryAttributes = {
   /**
-   * `full` when tools were registered, `degraded-auth-expired` when the KV token
-   * was gone or its refresh token was definitively rejected by Umbraco.
+   * `full` when tools were registered, `auth-expired` when no server was built
+   * because the KV token was gone or its refresh was definitively rejected by
+   * Umbraco (`createPerRequestServer` throws `UmbracoSignInUnavailableError`).
    */
   INIT_MODE: "umbraco.mcp.init.mode",
   /** Number of tools registered on the server this request will use. */
@@ -70,7 +71,7 @@ export const HostedTelemetryAttributes = {
 } as const;
 
 /** `umbraco.mcp.init.mode` values. */
-export type ServerInitMode = "full" | "degraded-auth-expired";
+export type ServerInitMode = "full" | "auth-expired";
 
 /** `umbraco.mcp.auth.outcome` values. */
 export type AuthRefreshOutcome = "refreshed" | "failed";

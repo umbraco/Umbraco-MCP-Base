@@ -140,8 +140,8 @@ export interface UmbracoFetchClient {
    * The last refresh failure this client observed, or `undefined` if it has
    * never failed to refresh. `createPerRequestServer` reads this after its
    * opening round-trips so a definitively dead session (`reason: "expired"`)
-   * can be surfaced as the degraded `authentication-expired` server rather
-   * than as a toolset that 401s on every call.
+   * fails server creation (`UmbracoSignInUnavailableError`) rather than
+   * surfacing as a toolset that 401s on every call.
    */
   getRefreshFailure(): RefreshFailure | undefined;
   /**

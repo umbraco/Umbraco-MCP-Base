@@ -43,13 +43,25 @@ function spanNamed(name: string): RecordedSpan | undefined {
 }
 
 // OAUTH_KV.get returning null drives createPerRequestServer down its
-// degraded ("token expired") path, which needs no live Umbraco.
-const degradedEnv = {
+// auth-expired ("no token in KV") path, which needs no live Umbraco. That path
+// throws `UmbracoSignInUnavailableError` instead of building a server.
+const expiredEnv = {
   UMBRACO_BASE_URL: "https://example.com",
   UMBRACO_OAUTH_CLIENT_ID: "test-client",
   COOKIE_ENCRYPTION_KEY: "0".repeat(64),
   OAUTH_KV: {
     get: async () => null,
+    put: async () => undefined,
+    delete: async () => undefined,
+  },
+} as unknown as HostedMcpEnv;
+
+// A stored, unexpired token: drives the full path. Every Umbraco round-trip is
+// answered by the `fetch` stub installed in the tests that use it.
+const fullEnv = {
+  ...expiredEnv,
+  OAUTH_KV: {
+    get: async () => JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } }),
     put: async () => undefined,
     delete: async () => undefined,
   },
@@ -71,6 +83,7 @@ const baseOptions = {
 };
 
 describe("mcp.server.init span", () => {
+  const originalFetch = globalThis.fetch;
   let logSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
@@ -81,43 +94,48 @@ describe("mcp.server.init span", () => {
   afterEach(() => {
     logSpy.mockRestore();
     clearTelemetryAdapter();
+    globalThis.fetch = originalFetch;
   });
 
-  it("opens an init span around server creation", async () => {
-    const { createPerRequestServer } = await import("../../server/create-server.js");
+  /** Runs the no-token-in-KV start, which must fail with the auth-expired error. */
+  async function startExpired(env: HostedMcpEnv = expiredEnv, startProps: AuthProps = props, sessionId?: string) {
+    const { createPerRequestServer, UmbracoSignInUnavailableError } = await import("../../server/create-server.js");
+    const error = await createPerRequestServer(baseOptions, env, startProps, sessionId).then(
+      () => undefined,
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(UmbracoSignInUnavailableError);
+    expect((error as InstanceType<typeof UmbracoSignInUnavailableError>).reason).toBe("no-token-in-kv");
+  }
 
-    await createPerRequestServer(baseOptions, degradedEnv, props);
+  it("opens an init span around server creation", async () => {
+    await startExpired();
 
     expect(spanNamed(SERVER_INIT_SPAN)).toBeDefined();
   });
 
-  it("records the degraded mode and tool count", async () => {
-    const { createPerRequestServer } = await import("../../server/create-server.js");
-
-    await createPerRequestServer(baseOptions, degradedEnv, props);
+  it("records the auth-expired mode and a zero tool count", async () => {
+    await startExpired();
 
     expect(spanNamed(SERVER_INIT_SPAN)!.attributes).toMatchObject({
-      [HostedTelemetryAttributes.INIT_MODE]: "degraded-auth-expired",
-      [HostedTelemetryAttributes.INIT_TOOL_COUNT]: 1,
+      [HostedTelemetryAttributes.INIT_MODE]: "auth-expired",
+      [HostedTelemetryAttributes.INIT_TOOL_COUNT]: 0,
     });
   });
 
-  it("stamps the session id and tenant on a degraded (no-token-in-kv) start", async () => {
-    // Regression for #371: degraded starts carried no session or tenant, so
-    // there was no way to tell which session/customer was stuck on the
-    // single-tool server.
-    const { createPerRequestServer } = await import("../../server/create-server.js");
+  it("stamps the session id and tenant on an auth-expired (no-token-in-kv) start", async () => {
+    // Regression for #371: these starts carried no session or tenant, so there
+    // was no way to tell which session/customer hit them.
     const { TelemetryAttributes } = await import("@umbraco-cms/mcp-server-sdk");
 
-    await createPerRequestServer(
-      baseOptions,
-      { ...degradedEnv, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
+    await startExpired(
+      { ...expiredEnv, TENANT_HASH_KEY: "tenant-hash-key" } as HostedMcpEnv,
       { ...props, consentChoices: { siteId: "my-site" } },
       "session-abc",
     );
 
     const attributes = spanNamed(SERVER_INIT_SPAN)!.attributes;
-    expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("degraded-auth-expired");
+    expect(attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("auth-expired");
     expect(attributes[TelemetryAttributes.MCP_SESSION_ID]).toBe("session-abc");
     // Hashed, never the plaintext alias.
     expect(attributes[TelemetryAttributes.TENANT]).toMatch(/^[0-9a-f]{64}$/);
@@ -125,11 +143,10 @@ describe("mcp.server.init span", () => {
   });
 
   it("leaves the session id and tenant unset when neither is available", async () => {
-    const { createPerRequestServer } = await import("../../server/create-server.js");
     const { TelemetryAttributes } = await import("@umbraco-cms/mcp-server-sdk");
 
     // Existing three-argument callers keep compiling and working.
-    await createPerRequestServer(baseOptions, degradedEnv, props);
+    await startExpired();
 
     const attributes = spanNamed(SERVER_INIT_SPAN)!.attributes;
     expect(attributes).not.toHaveProperty(TelemetryAttributes.MCP_SESSION_ID);
@@ -137,9 +154,7 @@ describe("mcp.server.init span", () => {
   });
 
   it("keeps the :start and :done log lines with their correlation id", async () => {
-    const { createPerRequestServer } = await import("../../server/create-server.js");
-
-    await createPerRequestServer(baseOptions, degradedEnv, props);
+    await startExpired();
 
     const lines = logSpy.mock.calls.map((args: unknown[]) => String(args[0]));
     const start = lines.find((l: string) => l.includes("createPerRequestServer:start"));
@@ -151,13 +166,21 @@ describe("mcp.server.init span", () => {
     // thing tying the two lines together on `wrangler tail`. Don't remove it.
     expect(start).toMatch(/id=[a-z0-9]+/);
     expect(done).toMatch(/id=[a-z0-9]+/);
+    // The auth-expired rate stays visible in logs after the degraded server's removal (#451).
+    expect(done).toContain("mode=auth-expired");
+    expect(done).toContain("cause=no-token-in-kv");
   });
 
   it("still returns a usable server when no adapter is registered", async () => {
     clearTelemetryAdapter();
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ version: "17.0.0" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
     const { createPerRequestServer } = await import("../../server/create-server.js");
 
-    const server = await createPerRequestServer(baseOptions, degradedEnv, props);
+    const server = await createPerRequestServer(baseOptions, fullEnv, props);
 
     expect(server).toBeDefined();
     expect(spans).toHaveLength(0);
