@@ -15,8 +15,10 @@ import { clearMediaTypeIdCache, resolveMediaTypeId } from "../resolve-media-type
 // Regression for #448: sites upgraded from older Umbraco versions carry
 // different media type keys than a fresh install. These are the keys from the
 // upgraded site in the issue.
-const UPGRADED_SITE = "https://upgraded.example.test";
-const OTHER_SITE = "https://other.example.test";
+// Loopback hosts: CI sets NODE_TLS_REJECT_UNAUTHORIZED=0, which the fetch client
+// refuses for non-local base URLs. Different ports are still different sites.
+const UPGRADED_SITE = "https://localhost:44301";
+const OTHER_SITE = "https://127.0.0.1:44302";
 const API = "/umbraco/management/api/v1";
 
 interface MediaType {
