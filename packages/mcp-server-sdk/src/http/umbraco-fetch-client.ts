@@ -398,6 +398,56 @@ function isBearerChallenge(resp: Response): boolean {
 }
 
 /**
+ * Builds the fetch body for a request payload and says whether the default
+ * `Content-Type: application/json` must be left off. Shared by the singleton
+ * and factory clients so the two cannot drift (umbraco/Umbraco-MCP-Base#446).
+ *
+ * Supported payloads:
+ *   - undefined: no body.
+ *   - Web FormData (globalThis.FormData; Workers and Node 18+): passed straight
+ *     to fetch, which sets the multipart Content-Type with boundary.
+ *   - Stream FormData (`form-data` package, Node only; has getHeaders()/pipe()):
+ *     collected into a Uint8Array for native fetch. The caller supplies the
+ *     multipart Content-Type through its own headers (from getHeaders()).
+ *   - anything else: JSON.stringify.
+ *
+ * @internal Exported for tests only; not part of the public entry points.
+ */
+export async function buildFetchBody(
+  data: unknown,
+): Promise<{ body?: BodyInit; skipDefaultContentType: boolean }> {
+  const isWebFormData = data != null
+    && typeof (globalThis as any).FormData !== "undefined"
+    && data instanceof (globalThis as any).FormData;
+  const isStreamFormData = !isWebFormData
+    && data != null
+    && typeof (data as any).getHeaders === "function"
+    && typeof (data as any).pipe === "function";
+  const skipDefaultContentType = isWebFormData || isStreamFormData;
+
+  if (data === undefined) return { skipDefaultContentType };
+  if (isWebFormData) return { body: data as FormData, skipDefaultContentType };
+  if (isStreamFormData) {
+    // The `form-data` package emits a CombinedStream which is not async-iterable,
+    // so collect chunks via the 'data' event.
+    const fd = data as { resume: Function; on: Function };
+    const body = await new Promise<BodyInit>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      fd.on("data", (chunk: string | Buffer) =>
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
+      fd.on("end", () => {
+        const buf = Buffer.concat(chunks);
+        resolve(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) as unknown as BodyInit);
+      });
+      fd.on("error", reject);
+      fd.resume();
+    });
+    return { body, skipDefaultContentType };
+  }
+  return { body: JSON.stringify(data), skipDefaultContentType };
+}
+
+/**
  * Makes a fetch request to the Umbraco API.
  * @internal
  */
@@ -424,19 +474,7 @@ async function doFetch<T>(
   const queryString = serializeParams(config.params);
   const fullUrl = `${auth.baseUrl}${config.url}${queryString}`;
 
-  // Detect FormData payloads. Two shapes are supported:
-  //   - Web FormData (globalThis.FormData) — works on Cloudflare Workers and Node 18+.
-  //     Pass straight to fetch, which sets multipart Content-Type with boundary.
-  //   - Stream FormData (`form-data` npm package, Node-only) — has getHeaders()/pipe().
-  //     Caller supplies the multipart Content-Type via config.headers from getHeaders().
-  const isWebFormData = config.data != null
-    && typeof (globalThis as any).FormData !== "undefined"
-    && config.data instanceof (globalThis as any).FormData;
-  const isStreamFormData = !isWebFormData
-    && config.data != null
-    && typeof (config.data as any).getHeaders === "function"
-    && typeof (config.data as any).pipe === "function";
-  const skipDefaultContentType = isWebFormData || isStreamFormData;
+  const { body, skipDefaultContentType } = await buildFetchBody(config.data);
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
@@ -452,29 +490,8 @@ async function doFetch<T>(
     signal: options?.signal,
   };
 
-  if (config.data !== undefined) {
-    if (isWebFormData) {
-      // Pass through; fetch sets multipart Content-Type + boundary.
-      fetchOptions.body = config.data as FormData;
-    } else if (isStreamFormData) {
-      // Collect the stream-based FormData into a Buffer for native fetch.
-      // The `form-data` package emits a CombinedStream which is not async-iterable,
-      // so we collect chunks via the 'data' event.
-      const fd = config.data as { pipe: Function; resume: Function; on: Function };
-      fetchOptions.body = await new Promise<BodyInit>((resolve, reject) => {
-        const chunks: Buffer[] = [];
-        fd.on("data", (chunk: string | Buffer) =>
-          chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
-        fd.on("end", () => {
-          const buf = Buffer.concat(chunks);
-          resolve(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) as unknown as BodyInit);
-        });
-        fd.on("error", reject);
-        fd.resume();
-      });
-    } else {
-      fetchOptions.body = JSON.stringify(config.data);
-    }
+  if (body !== undefined) {
+    fetchOptions.body = body;
   }
 
   let resp = await fetch(fullUrl, fetchOptions);
@@ -681,14 +698,7 @@ export function createUmbracoFetchClient(
     const queryString = serializeParams(config.params);
     const fullUrl = `${instanceAuthConfig.baseUrl}${config.url}${queryString}`;
 
-    const isWebFormData = config.data != null
-      && typeof (globalThis as any).FormData !== "undefined"
-      && config.data instanceof (globalThis as any).FormData;
-    const isStreamFormData = !isWebFormData
-      && config.data != null
-      && typeof (config.data as any).getHeaders === "function"
-      && typeof (config.data as any).pipe === "function";
-    const skipDefaultContentType = isWebFormData || isStreamFormData;
+    const { body, skipDefaultContentType } = await buildFetchBody(config.data);
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
@@ -703,22 +713,8 @@ export function createUmbracoFetchClient(
       signal: opts?.signal,
     };
 
-    if (config.data !== undefined) {
-      if (isWebFormData) {
-        fetchOpts.body = config.data as FormData;
-      } else if (isStreamFormData) {
-        const fd = config.data as { pipe: Function; resume: Function; on: Function };
-        fetchOpts.body = await new Promise<BodyInit>((resolve, reject) => {
-          const chunks: Buffer[] = [];
-          fd.on("data", (chunk: string | Buffer) =>
-            chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
-          fd.on("end", () => resolve(Buffer.concat(chunks) as unknown as BodyInit));
-          fd.on("error", reject);
-          fd.resume();
-        });
-      } else {
-        fetchOpts.body = JSON.stringify(config.data);
-      }
+    if (body !== undefined) {
+      fetchOpts.body = body;
     }
 
     if (enableLogging) {
