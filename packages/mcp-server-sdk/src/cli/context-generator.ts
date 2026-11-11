@@ -12,6 +12,21 @@ import { toolToJsonSchema } from "./introspection.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 
 /**
+ * Render a JSON Schema node as a short type label for the context file.
+ * @internal exported for tests
+ */
+export function describeType(schema: Record<string, unknown>): string {
+  const t = schema.type;
+  if (typeof t === "string") return t;
+  if (Array.isArray(t) && t.length > 0) return t.join(" | ");
+  const union = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(union) && union.length > 0) {
+    return union.map((b) => describeType(b as Record<string, unknown>)).join(" | ");
+  }
+  return "any";
+}
+
+/**
  * Options for context generation.
  */
 export interface GenerateContextOptions {
@@ -94,7 +109,7 @@ export function generateContextFile(
         lines.push("");
         for (const [key, schema] of Object.entries(properties)) {
           const s = schema as Record<string, unknown>;
-          const type = s.type ?? "unknown";
+          const type = describeType(s);
           const desc = s.description ? ` — ${s.description}` : "";
           const required = (jsonSchema.required as string[] | undefined)?.includes(key);
           lines.push(`- \`${key}\` (${type}${required ? ", required" : ""})${desc}`);
