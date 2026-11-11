@@ -5,6 +5,7 @@ import {
   CAPTURE_RAW_HTTP_RESPONSE,
 } from "../umbraco-fetch-client.js";
 import type { HostedMcpEnv } from "../../types/env.js";
+import { getStoredUmbracoToken } from "../../auth/token-storage.js";
 
 // Mock global fetch
 const mockFetch = jest.fn<typeof fetch>();
@@ -59,6 +60,14 @@ describe("createUmbracoFetchClient", () => {
   };
 
   describe("request construction", () => {
+    it("rejects a path that would change the endpoint, without calling Umbraco", async () => {
+      const client = createUmbracoFetchClient(baseConfig);
+      for (const url of ["/umbraco/api/v1/items/x?y=1", "/umbraco/api/v1/items/../users"]) {
+        await expect(client({ method: "get", url })).rejects.toMatchObject({ name: "ToolValidationError" });
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("sends GET request with Authorization header", async () => {
       mockFetch.mockResolvedValue(
         createJsonResponse(200, { id: "1", name: "Test" })
@@ -98,6 +107,22 @@ describe("createUmbracoFetchClient", () => {
       expect((options as RequestInit).body).toBe(
         JSON.stringify({ name: "New Item" })
       );
+    });
+
+    it("passes Web FormData through without the default JSON Content-Type", async () => {
+      mockFetch.mockResolvedValue(createJsonResponse(201, null));
+      const fd = new FormData();
+      fd.append("file", new Blob(["hello"]), "hello.txt");
+
+      const client = createUmbracoFetchClient(baseConfig);
+      await client(
+        { method: "post", url: "/umbraco/api/v1/temporary-file", data: fd },
+        CAPTURE_RAW_HTTP_RESPONSE
+      );
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect((options as RequestInit).body).toBe(fd);
+      expect((options as RequestInit).headers).not.toHaveProperty("Content-Type");
     });
 
     it("does not include body for GET requests", async () => {
@@ -617,10 +642,13 @@ describe("createUmbracoFetchClient", () => {
 
     it("prefers the refresh token persisted in KV over the caller's snapshot", async () => {
       const mockKV = {
-        get: jest.fn<(...args: unknown[]) => Promise<string | null>>().mockResolvedValue(
-          JSON.stringify({
-            tokens: { access_token: "kv-access", refresh_token: "kv-rotated-refresh" },
-          })
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: jest.fn<(key: string) => Promise<string | null>>(async (key) =>
+          key.startsWith("umbraco_token:")
+            ? JSON.stringify({
+                tokens: { access_token: "kv-access", refresh_token: "kv-rotated-refresh" },
+              })
+            : null
         ),
         put: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
         delete: jest.fn<(...args: unknown[]) => Promise<void>>().mockResolvedValue(undefined),
@@ -729,7 +757,7 @@ describe("getSessionAuth", () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(isTokenEndpoint(mockFetch.mock.calls[0])).toBe(true);
-    const stored = JSON.parse(kv.store.get("umbraco_token:session-key")!);
+    const stored = (await getStoredUmbracoToken(kv as unknown as KVNamespace, "session-key"))!;
     expect(stored.tokens.expires_at).toBeGreaterThanOrEqual(before + 300_000);
 
     // The new expiry is adopted, so the next call needs no request at all.
@@ -824,7 +852,7 @@ describe("getSessionAuth", () => {
 
   it("deduplicates concurrent refreshes, even across clients sharing a token key", async () => {
     const kv = mapKv();
-    let resolveToken!: (response: Response) => void;
+    let resolveToken: ((response: Response) => void) | undefined;
     mockFetch.mockImplementation(
       () => new Promise<Response>((resolve) => (resolveToken = resolve))
     );
@@ -832,7 +860,10 @@ describe("getSessionAuth", () => {
     const second = createUmbracoFetchClient(refreshableConfig(kv, Date.now() - 1_000));
 
     const pending = Promise.all([first.getSessionAuth(), first.getSessionAuth(), second.getSessionAuth()]);
-    // Let every caller reach the token endpoint before it answers.
+    // Let every caller reach the token endpoint before it answers. Reading the
+    // stored entry uses Web Crypto, which resolves on its own schedule, so
+    // wait for the request rather than a fixed number of ticks.
+    while (!resolveToken) await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     resolveToken(createJsonResponse(200, { access_token: "fresh-access", refresh_token: "fresh-refresh", expires_in: 300 }));
 

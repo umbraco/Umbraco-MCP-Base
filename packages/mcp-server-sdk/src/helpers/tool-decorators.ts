@@ -16,6 +16,7 @@ import { withInputSanitization } from "./input-sanitizer.js";
 import { withDryRun } from "./dry-run.js";
 import { withCursorPagination, type CursorPaginatedArgs } from "./cursor-pagination.js";
 import { withTelemetry } from "../telemetry/with-telemetry.js";
+import { toJsonSchema } from "./strict-json-schema-tools.js";
 
 // Re-export everything from split modules for convenience
 export {
@@ -66,6 +67,48 @@ function logToolError(toolName: string, error: unknown): void {
 }
 
 /**
+ * Fails fast at registration when a tool schema cannot be converted to JSON
+ * Schema (e.g. `z.date()`). Without this, the throw happens inside the
+ * `tools/list` handler and breaks the listing for every tool, not just the
+ * offending one (#417). Uses the same conversion as `tools/list`.
+ *
+ * Lives in `withErrorHandling` (not only `withStandardDecorators`) because
+ * it is the one wrapper every decorated tool passes through, including tools
+ * that call it directly. Tools registered without the SDK decorators are not
+ * checked here; `useDraft202012ToolSchemas` leaves such a tool out of
+ * `tools/list` instead of failing the whole listing.
+ */
+function assertSchemasConvertible(tool: ToolDefinition<any, any>): void {
+  for (const [kind, schema, io] of [
+    ["inputSchema", tool.inputSchema, "input"],
+    ["outputSchema", tool.outputSchema, "output"],
+  ] as const) {
+    if (!schema) continue;
+    try {
+      toJsonSchema(schema, io);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Find the failing top-level field: a raw shape is a plain
+      // { key: ZodType } object; a z.object keeps its shape on _zod.def.
+      const zod = (schema as { _zod?: { def?: { shape?: Record<string, unknown> } } })._zod;
+      const shape = zod ? zod.def?.shape : (schema as Record<string, unknown>);
+      let field = "";
+      if (shape) {
+        for (const [key, value] of Object.entries(shape)) {
+          try {
+            toJsonSchema({ [key]: value }, io);
+          } catch {
+            field = ` (field "${key}")`;
+            break;
+          }
+        }
+      }
+      throw new Error(`Tool "${tool.name}": ${kind}${field} cannot be converted to JSON Schema: ${message}`);
+    }
+  }
+}
+
+/**
  * Wraps a tool handler with standardized error handling.
  * Catches all errors and converts them to MCP tool error results.
  *
@@ -79,6 +122,7 @@ function logToolError(toolName: string, error: unknown): void {
 export function withErrorHandling<Args extends undefined | ZodRawShape, OutputArgs extends undefined | ZodRawShape | ZodType = undefined>(
   tool: ToolDefinition<Args, OutputArgs>
 ): ToolDefinition<Args, OutputArgs> {
+  assertSchemasConvertible(tool);
   const originalHandler = tool.handler;
 
   return {

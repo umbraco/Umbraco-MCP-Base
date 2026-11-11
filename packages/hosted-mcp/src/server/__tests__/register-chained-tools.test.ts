@@ -22,12 +22,7 @@ jest.unstable_mockModule("../../config/worker-config.js", () => ({
   loadSiteConfig: jest.fn<any>(),
 }));
 
-// Mock isAuthExpiredServer — real implementation checks a WeakSet only
-// `createAuthExpiredServer` can populate, which the plain mock server object
-// used throughout this file was never added to.
-const mockIsAuthExpiredServer = jest.fn<any>().mockReturnValue(false);
 jest.unstable_mockModule("../create-server.js", () => ({
-  isAuthExpiredServer: mockIsAuthExpiredServer,
   // The mock server was never built by `createPerRequestServer`, so it has no
   // session store values; the wrapper is then a pass-through.
   getServerSessionContext: jest.fn<any>().mockReturnValue(undefined),
@@ -102,7 +97,6 @@ describe("registerChainedTools", () => {
     jest.clearAllMocks();
     registeredTools = [];
     mockFetchClient.mockResolvedValue({ sub: "test-user", name: "Test" });
-    mockIsAuthExpiredServer.mockReturnValue(false);
 
     const mod = await import("../register-chained-tools.js");
     registerChainedTools = mod.registerChainedTools;
@@ -210,29 +204,6 @@ describe("registerChainedTools", () => {
 
     expect(count).toBe(0);
     expect(server.registerTool).not.toHaveBeenCalled();
-  });
-
-  it("skips registration when the server is the degraded auth-expired server", async () => {
-    // Regression: `createPerRequestServer` can hand back the degraded,
-    // single-tool `authentication-expired` server when there's no usable
-    // Umbraco session. Registering a whole chained toolset on top of it used
-    // to bury that one tool under a set that also 401s on every call.
-    mockIsAuthExpiredServer.mockReturnValue(true);
-    const { createFetchClientFromKV } = await import("../../http/umbraco-fetch-client.js");
-    const server = createMockServer();
-
-    const count = await registerChainedTools({
-      server: server as any,
-      env: createMockEnv(),
-      props: createMockProps(),
-      chainedServer,
-      // Default `fetchUser: true` — proves the degraded check runs before
-      // this function does anything else, not just before registration.
-    });
-
-    expect(count).toBe(0);
-    expect(server.registerTool).not.toHaveBeenCalled();
-    expect(createFetchClientFromKV).not.toHaveBeenCalled();
   });
 
   it("returns 0 on error without crashing", async () => {

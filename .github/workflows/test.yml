@@ -117,6 +117,9 @@ jobs:
       - name: CLI unit tests
         run: npm test -w packages/create-mcp-server
 
+      - name: Skills plugin script tests
+        run: npm test -w plugins/umbraco-mcp-skills
+
       - name: Template tool handler tests
         run: npm run test:template
         env:

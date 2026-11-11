@@ -22,6 +22,7 @@
  */
 
 import { siteRef } from "../telemetry/request-telemetry.js";
+import { normalizeBaseUrl } from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv, OAuthAuthRequest } from "../types/env.js";
 import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { ConsentChoices, UmbracoUserInfo, UmbracoAuthHandlerOptions } from "../types/auth.js";
@@ -32,7 +33,17 @@ import {
   extractSiteIdFromResource,
 } from "../site-routing/path-prefix.js";
 import { getClientTenant } from "../tenant-oauth/binding-store.js";
+import {
+  FlowBindingError,
+  clearFlowCookieHeader,
+  hasMatchingFlowCookie,
+  isCrossSiteSubmission,
+  redirectResponse,
+  setFlowCookieHeader,
+  withSetCookies,
+} from "./flow-cookies.js";
 import { toHex } from "../crypto/hex.js";
+import { toBase64Url } from "../crypto/base64url.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -83,6 +94,104 @@ function checkAllResourceAliasesMatchClient(
 }
 
 // ============================================================================
+// Grant user
+// ============================================================================
+
+const CURRENT_USER_PATH = "/umbraco/management/api/v1/user/current";
+const CURRENT_USER_TIMEOUT_MS = 5000;
+
+/**
+ * The OAuth provider's user id for a grant: a hash of the site's base URL and
+ * the Umbraco user's id. Scoped to the site because user ids (e.g. the default
+ * administrator's) can repeat across Umbraco installs, hashed so the Umbraco
+ * user id isn't embedded in MCP access tokens (`{userId}:{grantId}:{secret}`),
+ * and hex so it never contains the `:` the provider forbids.
+ */
+async function grantUserId(siteBaseUrl: string, umbracoUserId: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${normalizeBaseUrl(siteBaseUrl)}\n${umbracoUserId}`)
+  );
+  return toHex(new Uint8Array(digest)).slice(0, 32);
+}
+
+/**
+ * Looks up the signed-in Umbraco user with the new access token. If that
+ * fails, falls back to an id unique to this sign-in: the grant then never
+ * matches (or revokes) anyone else's, at the cost of not replacing the same
+ * user's earlier grant for this client.
+ */
+async function resolveGrantUser(
+  accessToken: string,
+  siteBaseUrl: string,
+  siteServerUrl: string | undefined
+): Promise<UmbracoUserInfo> {
+  try {
+    const serverBase = normalizeBaseUrl(siteServerUrl ?? siteBaseUrl);
+    const response = await fetch(`${serverBase}${CURRENT_USER_PATH}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(CURRENT_USER_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const user = (await response.json()) as { id?: unknown; name?: unknown; email?: unknown };
+      if (typeof user.id === "string" && user.id) {
+        return {
+          sub: await grantUserId(siteBaseUrl, user.id),
+          name: typeof user.name === "string" ? user.name : undefined,
+          email: typeof user.email === "string" ? user.email : undefined,
+        };
+      }
+    }
+    console.warn(`[mcp-hosted] could not identify the Umbraco user after sign-in (status=${response.status})`);
+  } catch (error) {
+    console.warn(
+      `[mcp-hosted] could not identify the Umbraco user after sign-in (error=${
+        error instanceof Error ? error.name : "unknown"
+      })`
+    );
+  }
+  return { sub: `login-${generateSecureRandom(16)}` };
+}
+
+// ============================================================================
+// Upstream authorization errors
+// ============================================================================
+
+/** Upstream errors passed to the MCP client unchanged; anything else becomes `server_error`. */
+const PASSTHROUGH_UPSTREAM_ERRORS = new Set(["access_denied", "temporarily_unavailable"]);
+
+/**
+ * Raised by the callback handler when Umbraco ended the sign-in with an
+ * error and the flow belongs to this browser. `redirectTo` is the MCP
+ * client's redirect URI (validated at /authorize) carrying the OAuth error.
+ */
+export class UpstreamAuthorizationError extends Error {
+  constructor(readonly redirectTo: string) {
+    super("Umbraco ended the sign-in with an error");
+    this.name = "UpstreamAuthorizationError";
+  }
+}
+
+/**
+ * Builds the MCP client redirect for an upstream error. Only a known error
+ * code is passed on, with a fixed description: Umbraco's own description is
+ * never forwarded.
+ */
+function clientErrorRedirect(authRequest: OAuthAuthRequest, upstreamError: string): string {
+  const code = PASSTHROUGH_UPSTREAM_ERRORS.has(upstreamError) ? upstreamError : "server_error";
+  const redirectUrl = new URL(authRequest.redirectUri);
+  redirectUrl.searchParams.set("error", code);
+  redirectUrl.searchParams.set(
+    "error_description",
+    code === "access_denied" ? "The sign-in to Umbraco was not completed" : "The sign-in to Umbraco failed"
+  );
+  if (authRequest.state) {
+    redirectUrl.searchParams.set("state", authRequest.state);
+  }
+  return redirectUrl.toString();
+}
+
+// ============================================================================
 // Crypto Helpers
 // ============================================================================
 
@@ -106,10 +215,7 @@ async function generatePkce(): Promise<{
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
   const digest = await crypto.subtle.digest("SHA-256", data);
-  const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const codeChallenge = toBase64Url(new Uint8Array(digest));
   return { codeVerifier, codeChallenge };
 }
 
@@ -320,15 +426,55 @@ export function createAuthorizeHandler(
   ): Promise<Response> => {
     const url = new URL(request.url);
 
+    // OAuthProvider only validates redirect_uri against the client's
+    // registration when both values are present, so require both here.
+    if (!authRequest.clientId || !authRequest.redirectUri) {
+      return invalidRequest("client_id and redirect_uri are required");
+    }
+
+    // PKCE with S256 is mandatory (OAuth 2.1; MCP authorization spec).
+    // OAuthProvider accepts requests without PKCE, or with "plain", unless
+    // configured otherwise, so enforce it here for every deployment.
+    if (!authRequest.codeChallenge || authRequest.codeChallengeMethod !== "S256") {
+      return invalidRequest("PKCE with code_challenge_method=S256 is required");
+    }
+
     // Handle POST (consent form submission)
     if (request.method === "POST") {
+      // The consent form only ever posts to its own origin.
+      if (isCrossSiteSubmission(request, url.origin)) {
+        return new Response("Consent must be submitted from the consent screen", { status: 403 });
+      }
+
       const formData = await request.formData();
 
-      // Validate CSRF state token (generated on GET, embedded as hidden field)
+      // Validate the consent state (generated on GET, embedded as a hidden
+      // field) and require that it was issued to this browser.
       const submittedState = formData.get("state")?.toString();
       if (!submittedState) {
         return new Response("Missing consent state", { status: 400 });
       }
+      const clearConsentCookie = clearFlowCookieHeader("consent", submittedState);
+      if (!hasMatchingFlowCookie(request, "consent", submittedState)) {
+        return withSetCookies(
+          new Response(
+            "This consent screen was not opened in this browser. Start the connection again from your AI client.",
+            { status: 403 }
+          ),
+          [clearConsentCookie]
+        );
+      }
+
+      const response = await handleConsentSubmission(formData, submittedState);
+      return withSetCookies(response, [clearConsentCookie]);
+    }
+
+    return renderConsent();
+
+    async function handleConsentSubmission(
+      formData: FormData,
+      submittedState: string
+    ): Promise<Response> {
       const consentStateData = await consumeOAuthState(env.OAUTH_KV, `consent:${submittedState}`);
       if (!consentStateData || consentStateData.clientId !== authRequest.clientId) {
         return new Response("Invalid or expired consent state", { status: 403 });
@@ -416,8 +562,16 @@ export function createAuthorizeHandler(
       // Generate state for Umbraco redirect
       const umbracoState = generateSecureRandom();
 
+      // For multi-site, callback includes siteId so the Worker routes it correctly.
+      // callbackId overrides siteId when the site config carries addressing
+      // metadata (e.g. a region) that Umbraco's own OAuth client registration
+      // doesn't know about — see `SiteConfig.callbackId`.
+      const callbackPath = site ? `/callback/${site.callbackId ?? site.id}` : "/callback";
+
       // Store full OAuthAuthRequest + PKCE verifier + consent choices + site credentials
-      // (site credentials needed by callback handler for token exchange)
+      // (site credentials needed by callback handler for token exchange). The
+      // callback path is stored so /callback can check the code came back on
+      // this site's redirect URI.
       await storeOAuthState(env.OAUTH_KV, umbracoState, {
         authRequest,
         codeVerifier,
@@ -426,14 +580,10 @@ export function createAuthorizeHandler(
         siteClientSecret,
         siteBaseUrl,
         siteServerUrl,
+        callbackPath,
       });
 
       // Build Umbraco authorization URL
-      // For multi-site, callback includes siteId so the Worker routes it correctly.
-      // callbackId overrides siteId when the site config carries addressing
-      // metadata (e.g. a region) that Umbraco's own OAuth client registration
-      // doesn't know about — see `SiteConfig.callbackId`.
-      const callbackPath = site ? `/callback/${site.callbackId ?? site.id}` : "/callback";
       const callbackUrl = new URL(callbackPath, url.origin).toString();
       const authUrl = new URL(endpoints.authorization_endpoint);
       authUrl.searchParams.set("response_type", "code");
@@ -457,89 +607,128 @@ export function createAuthorizeHandler(
         );
         signoutUrl.searchParams.set("state", umbracoState);
         signoutUrl.searchParams.set("client_id", siteClientId);
-        return Response.redirect(signoutUrl.toString(), 302);
+        return redirectResponse(signoutUrl.toString(), [
+          setFlowCookieHeader("state", umbracoState),
+        ]);
       }
 
-      // Approve: redirect directly to Umbraco authorize
-      return Response.redirect(authUrl.toString(), 302);
+      // Approve: redirect directly to Umbraco authorize. The state cookie is
+      // set immediately before leaving for Umbraco and checked at /callback.
+      return redirectResponse(authUrl.toString(), [setFlowCookieHeader("state", umbracoState)]);
     }
 
-    // GET - show consent screen
-    const consentState = generateSecureRandom();
-    await storeOAuthState(env.OAUTH_KV, `consent:${consentState}`, {
-      clientId: authRequest.clientId,
-    });
+    async function renderConsent(): Promise<Response> {
+      // GET - show consent screen
+      const consentState = generateSecureRandom();
+      await storeOAuthState(env.OAUTH_KV, `consent:${consentState}`, {
+        clientId: authRequest.clientId,
+      });
 
-    // Resolve the site at consent-render time when URL-based site routing is on.
-    // This both validates the resource parameter early and lets us show the
-    // resolved site's display name + base URL on the consent screen.
-    let routedSite: SiteConfig | undefined;
-    if (siteRouting) {
-      const result = await resolveSiteFromResource(authRequest.resource);
-      if (!result.ok) return result.response;
-      routedSite = result.site;
+      // Resolve the site at consent-render time when URL-based site routing is on.
+      // This both validates the resource parameter early and lets us show the
+      // resolved site's display name + base URL on the consent screen.
+      let routedSite: SiteConfig | undefined;
+      if (siteRouting) {
+        const result = await resolveSiteFromResource(authRequest.resource);
+        if (!result.ok) return result.response;
+        routedSite = result.site;
 
-      // Confused-deputy defence (issue #100). Same check as the POST branch
-      // — also enforced on consent-screen render so the user never sees a
-      // consent prompt for a tenant the client isn't registered against.
-      // Defence-in-depth: every extractable resource alias must match.
-      if (
-        !checkAllResourceAliasesMatchClient(
-          authRequest.resource,
-          sitePrefixRegex!,
-          await getClientTenant(env.OAUTH_KV, authRequest.clientId),
-          routedSite.id
-        )
-      ) {
-        return new Response(
-          JSON.stringify({
-            error: "invalid_client",
-            error_description: "Client not registered for this site",
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
+        // Confused-deputy defence (issue #100). Same check as the POST branch
+        // — also enforced on consent-screen render so the user never sees a
+        // consent prompt for a tenant the client isn't registered against.
+        // Defence-in-depth: every extractable resource alias must match.
+        if (
+          !checkAllResourceAliasesMatchClient(
+            authRequest.resource,
+            sitePrefixRegex!,
+            await getClientTenant(env.OAUTH_KV, authRequest.clientId),
+            routedSite.id
+          )
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: "invalid_client",
+              error_description: "Client not registered for this site",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
       }
+
+      // Build sites list for consent screen.
+      // - URL-based routing: single resolved site (renders as a hidden input, no picker).
+      // - Static multi-site: the configured list (renders as a radio picker).
+      const consentSites = routedSite
+        ? [
+            {
+              id: routedSite.id,
+              displayName: routedSite.displayName,
+              baseUrl: routedSite.baseUrl,
+            },
+          ]
+        : options?.sites?.map((s) => ({
+            id: s.id,
+            displayName: s.displayName,
+            baseUrl: s.baseUrl,
+          }));
+
+      // Show reauth button only when the operator enabled it AND this client
+      // has completed at least one auth flow before (KV marker exists)
+      let showReauthButton = false;
+      if (options?.showReauthButton) {
+        showReauthButton = await isClientAuthed(env.OAUTH_KV, authRequest.clientId);
+      }
+
+      // The consent cookie binds this consent state to the browser shown the screen.
+      return withSetCookies(
+        consentResponse({
+          clientName: await lookupClientName(env, authRequest.clientId),
+          clientId: authRequest.clientId,
+          umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
+          scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
+          redirectUri: authRequest.redirectUri,
+          actionUrl: url.toString(),
+          state: consentState,
+          toolConfig: options?.consentToolConfig,
+          serverName: options?.serverName,
+          customCss: options?.customCss,
+          renderConsent: options?.renderConsent,
+          sites: consentSites,
+          showReauthButton,
+        }),
+        [setFlowCookieHeader("consent", consentState)]
+      );
     }
-
-    // Build sites list for consent screen.
-    // - URL-based routing: single resolved site (renders as a hidden input, no picker).
-    // - Static multi-site: the configured list (renders as a radio picker).
-    const consentSites = routedSite
-      ? [
-          {
-            id: routedSite.id,
-            displayName: routedSite.displayName,
-            baseUrl: routedSite.baseUrl,
-          },
-        ]
-      : options?.sites?.map((s) => ({
-          id: s.id,
-          displayName: s.displayName,
-          baseUrl: s.baseUrl,
-        }));
-
-    // Show reauth button only when the operator enabled it AND this client
-    // has completed at least one auth flow before (KV marker exists)
-    let showReauthButton = false;
-    if (options?.showReauthButton) {
-      showReauthButton = await isClientAuthed(env.OAUTH_KV, authRequest.clientId);
-    }
-
-    return consentResponse({
-      clientName: authRequest.clientId,
-      umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
-      scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
-      redirectUri: authRequest.redirectUri,
-      actionUrl: url.toString(),
-      state: consentState,
-      toolConfig: options?.consentToolConfig,
-      serverName: options?.serverName,
-      customCss: options?.customCss,
-      renderConsent: options?.renderConsent,
-      sites: consentSites,
-      showReauthButton,
-    });
   };
+}
+
+function invalidRequest(description: string): Response {
+  return new Response(
+    JSON.stringify({ error: "invalid_request", error_description: description }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
+
+/**
+ * Returns the client's registered `client_name`, or `undefined` when the
+ * client registered without one (or can't be looked up).
+ */
+async function lookupClientName(
+  env: HostedMcpEnv,
+  clientId: string
+): Promise<string | undefined> {
+  if (typeof env.OAUTH_PROVIDER?.lookupClient !== "function") return undefined;
+  try {
+    const client = (await env.OAUTH_PROVIDER.lookupClient(clientId)) as
+      | { clientName?: unknown }
+      | null
+      | undefined;
+    return typeof client?.clientName === "string" && client.clientName.trim()
+      ? client.clientName.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ============================================================================
@@ -568,6 +757,18 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     const error = url.searchParams.get("error");
 
     if (error) {
+      // Umbraco ended the sign-in with an error (e.g. the user cancelled). When
+      // the callback comes back to the browser that started the flow, end the
+      // flow and tell the MCP client, so it isn't left waiting. Otherwise the
+      // client's redirect URI isn't a safe destination, so the caller shows an
+      // error page instead.
+      if (state && hasMatchingFlowCookie(request, "state", state)) {
+        const stateData = await consumeOAuthState(env.OAUTH_KV, state);
+        const authRequest = stateData?.authRequest as OAuthAuthRequest | undefined;
+        if (authRequest?.redirectUri) {
+          throw new UpstreamAuthorizationError(clientErrorRedirect(authRequest, error));
+        }
+      }
       throw new Error(
         `Umbraco authorization error: ${error} - ${url.searchParams.get("error_description") ?? ""}`
       );
@@ -575,6 +776,13 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     if (!code || !state) {
       throw new Error("Missing code or state parameter in callback");
+    }
+
+    // The state must come back to the browser that approved the consent
+    // screen. Checked before consuming state or exchanging the code, so a
+    // rejected callback never touches Umbraco tokens.
+    if (!hasMatchingFlowCookie(request, "state", state)) {
+      throw new FlowBindingError();
     }
 
     // Consume state (single-use)
@@ -597,6 +805,18 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Extract consent choices if present
     const consentChoices = stateData.consentChoices as ConsentChoices | undefined;
 
+    // The callback must arrive on the redirect URI this flow sent to Umbraco.
+    // Each site has its own callback path, so a code that comes back on
+    // another site's path was issued by a different authorization server
+    // than the one this state belongs to (OAuth mix-up, RFC 9700 §4.4) and
+    // must not be sent to this site's token endpoint.
+    // A state stored before the path was recorded (a sign-in in progress
+    // during an upgrade) has none and is rejected; the user starts again.
+    const callbackPath = stateData.callbackPath;
+    if (typeof callbackPath !== "string" || url.pathname !== callbackPath) {
+      throw new Error("Callback does not match the site this sign-in was started for");
+    }
+
     // Use site-specific credentials from state if available (multi-site),
     // falling back to global env credentials (single-site)
     const effectiveClientId = (stateData.siteClientId as string) ?? env.UMBRACO_OAUTH_CLIENT_ID;
@@ -607,11 +827,7 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Exchange authorization code for tokens
     const endpoints = getBackofficeEndpoints(effectiveBaseUrl, effectiveServerUrl);
 
-    // Callback URL must match what was sent to Umbraco during authorize —
-    // reconstruct with the same callbackId-over-siteId precedence.
-    const callbackPath = consentChoices?.siteId
-      ? `/callback/${consentChoices.callbackId ?? consentChoices.siteId}`
-      : "/callback";
+    // Callback URL must match what was sent to Umbraco during authorize.
     const callbackUrl = new URL(callbackPath, url.origin).toString();
 
     const tokenParams = new URLSearchParams({
@@ -642,12 +858,23 @@ export function createCallbackHandler(env: HostedMcpEnv) {
 
     const tokens = (await tokenResp.json()) as TokenResponse;
 
+    // Identify the Umbraco user the grant belongs to, alongside the KV writes
+    // below. The OAuth provider revokes a user's earlier grants for the same
+    // client when a new one is issued, so this must be per user — never a
+    // shared value.
+    const userInfoPromise = resolveGrantUser(
+      tokens.access_token,
+      effectiveBaseUrl,
+      effectiveServerUrl
+    );
+
     // Generate a unique key for this token set
     const tokenKey = generateSecureRandom();
 
-    // Store Umbraco tokens in KV (encrypted at rest by KV) along with the
-    // per-tenant OAuth context, so refresh can use the correct client_id /
-    // base URL even from call sites that don't have the site resolved.
+    // Store Umbraco tokens in KV (encrypted, see storeUmbracoToken) along
+    // with the per-tenant OAuth context, so refresh can use the correct
+    // client_id / base URL even from call sites that don't have the site
+    // resolved.
     await storeUmbracoToken(
       env.OAUTH_KV,
       tokenKey,
@@ -664,9 +891,7 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Mark this MCP client as having completed auth (for reauth button visibility)
     await markClientAuthed(env.OAUTH_KV, authRequest.clientId);
 
-    // Extract user info from the token response if available,
-    // or default to the subject from the access token
-    const userInfo: UmbracoUserInfo = { sub: "unknown" };
+    const userInfo = await userInfoPromise;
 
     return {
       props: {

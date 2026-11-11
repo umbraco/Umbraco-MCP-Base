@@ -236,6 +236,7 @@ describe("runDiscover", () => {
       expect(manifest.baseUrl).toBe(BASE_URL);
       expect(manifest.collections).toContain("product");
       expect(manifest.collections).toContain("order");
+      expect(manifest.collectionTags).toMatchObject({ product: "product", order: "order" });
     });
   });
 

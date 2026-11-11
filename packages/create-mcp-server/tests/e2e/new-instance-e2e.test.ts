@@ -527,7 +527,7 @@ describeOrSkip("new-instance E2E", () => {
   test("Step 6: discover — swagger discovery and .discover.json", async () => {
     const { discoverSwaggerEndpoints } = await import("../../src/discover/discover-swagger.js");
     const { analyzeApi } = await import("../../src/discover/analyze-api.js");
-    const { groupsToCollectionNames } = await import("../../src/discover/suggest-modes.js");
+    const { groupsToCollectionNames, groupsToCollectionTags } = await import("../../src/discover/suggest-modes.js");
     const { updateEnvBaseUrl, updateEnvVar } = await import("../../src/discover/index.js");
 
     // Discover swagger endpoints from the running instance
@@ -566,6 +566,7 @@ describeOrSkip("new-instance E2E", () => {
       swaggerUrl: managementApi.url,
       baseUrl,
       collections: groupsToCollectionNames(analysis.groups),
+      collectionTags: groupsToCollectionTags(analysis.groups),
     };
 
     const manifestPath = path.join(projectDir, ".discover.json");

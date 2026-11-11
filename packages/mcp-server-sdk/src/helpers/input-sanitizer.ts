@@ -5,6 +5,12 @@
  * Agents hallucinate differently than humans typo — they produce control characters,
  * path traversals, embedded query params, and pre-encoded strings.
  *
+ * `withInputSanitization` rejects control characters in every string input.
+ * The URL-shaped checks are not applied to tool inputs: whether a value reaches
+ * a URL is decided later, by the handler, so the HTTP client checks the request
+ * path it is given instead (`assertSafeRequestPath`). The individual `reject*`
+ * functions stay available for handlers that want to check a specific field.
+ *
  * All functions throw ToolValidationError with clear messages for agent self-correction.
  */
 
@@ -143,94 +149,9 @@ export function sanitizeStringInput(
  * Honored on any field at any depth — strings, objects, arrays. Marking an
  * object or array opts the whole subtree out (useful for host-injected payloads
  * like ChatGPT's `openai/fileParams` file references, where the wire shape is
- * the host's contract and must pass through verbatim). Also the escape hatch
- * for secret-like string fields whose names don't match the end-anchored
- * `password` / `secret` name rule. Prefer `[text]` for free text: `[raw]`
- * also drops the control-character check.
+ * the host's contract and must pass through verbatim).
  */
 export const RAW_FIELD_MARKER = "[raw]";
-
-/**
- * Marker that can appear in a Zod field's `.describe()` to mark it as free
- * text: its strings get only the control-character check. Use it on top-level
- * free-text params (e.g. a `name` spread from a request body) that would
- * otherwise get the URL-shaped checks. On an object or array it applies to the
- * subtree, but nested id-, path- or name-named fields below keep their checks.
- */
-export const TEXT_FIELD_MARKER = "[text]";
-
-/**
- * How strictly a string leaf is checked. The control-character check always
- * runs; higher levels add the URL-shaped checks.
- */
-const CONTROL_ONLY = 0;
-const TRAVERSAL = 1;
-const FULL = 2;
-type CheckLevel = typeof CONTROL_ONLY | typeof TRAVERSAL | typeof FULL;
-
-const LEVEL_OPTIONS: Record<CheckLevel, SanitizeStringOptions | undefined> = {
-  [CONTROL_ONLY]: { allowPathTraversal: true, allowQueryParams: true, allowPreEncoded: true },
-  [TRAVERSAL]: { allowQueryParams: true, allowPreEncoded: true },
-  [FULL]: undefined,
-};
-
-/**
- * Name rule for secret-bearing string fields: a key ending in `password` or
- * `secret` (case-insensitive) holds free text, not a URL fragment, so the
- * path-traversal, query-param and pre-encoded checks are skipped. The
- * control-character check still runs. Anchored at the end of the key, so
- * `passwordHint` is still fully checked. Use `[raw]` for secret fields whose
- * names don't match.
- */
-const SECRET_FIELD_NAME = /(password|secret)$/i;
-
-/**
- * Name rule for free-text fields (`description`, `translation`, `pageTitle`,
- * `filterText`, `meta_description`, …): never a path parameter, so only the
- * control-character check runs, even at the top level. The word must be the
- * whole key (case-insensitive), follow `_`, or be a capitalised camelCase
- * suffix after a lowercase letter or digit — so `context`, `subtitle` and
- * `ciphertext` are not free text. Anchored at the end of the key, so `textId`
- * is not free text either.
- */
-const FREE_TEXT_FIELD_NAME =
-  /^(description|translation|text|message|comment|title|label)$|_(description|translation|text|message|comment|title|label)$/i;
-const FREE_TEXT_FIELD_SUFFIX = /[a-z0-9](Description|Translation|Text|Message|Comment|Title|Label)$/;
-
-/**
- * Identifier-named keys: `id`, `ids`, `parentId`, `parentID`, `parent_id`,
- * `documentTypeIds`, `mediaUUID`, `guid`, `key`, `keys`, `documentTypeKeys`,
- * `unique`, `alias`, `aliases`, `path`, `paths`, `folderPath`, …. These are what a handler routes into a URL path, and a real
- * identifier never contains `?`, `&`, `%xx` or `../`, so they keep every check
- * at any depth. A camelCase suffix must follow a lowercase letter or digit, so
- * `valid`, `android`, `PAID` and `BIDs` don't match.
- */
-const ID_FIELD_NAME =
-  /^(ids?|uuids?|guids?|keys?|uniques?|alias(es)?|paths?)$|_(ids?|uuids?|guids?|keys?|alias(es)?|paths?)$/i;
-const ID_FIELD_SUFFIX = /[a-z0-9](Ids?|IDs?|Uuids?|UUIDs?|Guids?|GUIDs?|Keys?|Alias(es)?|Paths?)$/;
-
-/**
- * Name-named keys (`name`, `fileName`, `folderName`, `parent_name`, …). File
- * entities build filesystem paths from these, so they keep the path-traversal
- * check at any depth; `?` / `&` / `%xx` are allowed (`Q&A` is a valid name).
- */
-const NAME_FIELD_NAME = /name$/i;
-
-function isIdFieldName(key: string): boolean {
-  return ID_FIELD_NAME.test(key) || ID_FIELD_SUFFIX.test(key);
-}
-
-/** True when a declared key's name says its value is a secret or free text. */
-function isRelaxedFieldName(key: string): boolean {
-  return SECRET_FIELD_NAME.test(key) || FREE_TEXT_FIELD_NAME.test(key) || FREE_TEXT_FIELD_SUFFIX.test(key);
-}
-
-/** The check level a declared key's name implies, independent of depth. */
-function checkLevelForKey(key: string): CheckLevel {
-  if (isIdFieldName(key)) return FULL;
-  if (NAME_FIELD_NAME.test(key)) return TRAVERSAL;
-  return CONTROL_ONLY;
-}
 
 /**
  * Walks past wrappers like `ZodOptional` / `ZodDefault` / `ZodNullable` to the
@@ -262,15 +183,15 @@ function getZodTypeTag(schema: any): string | undefined {
 }
 
 /**
- * A marker may appear on the user-facing schema OR on the unwrapped inner
+ * `[raw]` may appear on the user-facing schema OR on the unwrapped inner
  * schema — check both. Avoids surprises like `.optional().describe("[raw]")`
  * vs `.describe("[raw]").optional()`.
  */
-function hasMarker(schema: any, inner: any, marker: string): boolean {
+function hasRawMarker(schema: any, inner: any): boolean {
   const outerDesc = schema?.description;
-  if (typeof outerDesc === "string" && outerDesc.includes(marker)) return true;
+  if (typeof outerDesc === "string" && outerDesc.includes(RAW_FIELD_MARKER)) return true;
   const innerDesc = inner?.description;
-  if (typeof innerDesc === "string" && innerDesc.includes(marker)) return true;
+  if (typeof innerDesc === "string" && innerDesc.includes(RAW_FIELD_MARKER)) return true;
   return false;
 }
 
@@ -302,18 +223,12 @@ const PASSTHROUGH_SCALAR_TAGS = new Set([
  * sanitiser only needs to sanitise string content where the runtime
  * value tells it where strings live.
  */
-function sanitizeUnion(
-  value: unknown,
-  inner: any,
-  fieldPath: string,
-  level: CheckLevel,
-  floor: CheckLevel
-): void {
+function sanitizeUnion(value: unknown, inner: any, fieldPath: string): void {
   const options = inner?._def?.options;
   if (!Array.isArray(options)) return;
   for (const option of options) {
     const optInner = unwrapSchema(option);
-    if (hasMarker(option, optInner, RAW_FIELD_MARKER)) return;
+    if (hasRawMarker(option, optInner)) return;
     const optTag = getZodTypeTag(optInner);
     const compatible =
       (optTag === "string" && typeof value === "string") ||
@@ -326,53 +241,35 @@ function sanitizeUnion(
       (optTag === "undefined" && value === undefined) ||
       (optTag && PASSTHROUGH_SCALAR_TAGS.has(optTag));
     if (compatible) {
-      sanitizeAgainstSchema(value, option, fieldPath, level, floor);
+      sanitizeAgainstSchema(value, option, fieldPath);
       return;
     }
   }
 }
 
 /**
- * Recursively sanitises terminal `ZodString` leaves within `value`,
+ * Recursively checks terminal `ZodString` leaves within `value` for control
+ * characters,
  * descending through `z.object()`, `z.array()`, `z.record()` and
  * `z.union()` / `z.discriminatedUnion()` containers along the way. Never
  * reshapes the input — only throws on bad string content. A subtree
  * marked `[raw]` is skipped wholesale.
- *
- * `level` is how strictly string leaves at this node are checked; array
- * elements and record values inherit it. A child of an object gets the level
- * its declared key implies (`checkLevelForKey`), raised to `floor`. `floor` is
- * the strictest level an ancestor's key implied, so everything under an
- * id-named key (`ids: [{ value }]`, `parentId: { value }`) stays fully
- * checked — except keys matching the secret / free-text name rule, which get
- * only the control-character check even under an id-named ancestor. A
- * `[text]`-marked node also drops to control characters only.
  *
  * Truly unknown schema kinds (`z.tuple`, `z.lazy`, `z.intersection`,
  * `z.map`, `z.set`) throw — silent fall-through would leave nested string
  * content un-sanitised. Authors hitting the error can mark the field
  * `[raw]` after deciding how to validate its contents.
  */
-function sanitizeAgainstSchema(
-  value: unknown,
-  schema: any,
-  fieldPath: string,
-  level: CheckLevel,
-  floor: CheckLevel
-): void {
+function sanitizeAgainstSchema(value: unknown, schema: any, fieldPath: string): void {
   if (!schema) return;
   const inner = unwrapSchema(schema);
-  if (hasMarker(schema, inner, RAW_FIELD_MARKER)) return;
-  if (hasMarker(schema, inner, TEXT_FIELD_MARKER)) {
-    level = CONTROL_ONLY;
-    floor = CONTROL_ONLY;
-  }
+  if (hasRawMarker(schema, inner)) return;
   const tag = getZodTypeTag(inner);
 
   if (!tag) return;
 
   if (tag === "string") {
-    if (typeof value === "string") sanitizeStringInput(value, fieldPath, LEVEL_OPTIONS[level]);
+    if (typeof value === "string") rejectControlCharacters(value, fieldPath);
     return;
   }
 
@@ -380,9 +277,7 @@ function sanitizeAgainstSchema(
     if (!Array.isArray(value)) return;
     const element = inner._def?.element;
     if (element) {
-      value.forEach((item, idx) =>
-        sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`, level, floor)
-      );
+      value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`));
     }
     return;
   }
@@ -394,13 +289,7 @@ function sanitizeAgainstSchema(
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         if (!Object.prototype.hasOwnProperty.call(shape, k)) continue;
         const child = shape[k];
-        if (!child) continue;
-        if (isRelaxedFieldName(k)) {
-          sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`, CONTROL_ONLY, floor);
-        } else {
-          const childLevel = Math.max(checkLevelForKey(k), floor) as CheckLevel;
-          sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`, childLevel, childLevel);
-        }
+        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`);
       }
     }
     return;
@@ -409,20 +298,18 @@ function sanitizeAgainstSchema(
   if (tag === "record") {
     // `z.record(keySchema, valueSchema)` — every value in the runtime
     // object is sanitised under the value schema. Orval emits this for
-    // free-form maps like webhook headers. Values inherit the record's own
-    // level (a top-level map may be forwarded as query params). The keys are
-    // caller-chosen, so their names never raise or relax the checks.
+    // free-form maps like webhook headers.
     if (value === null || typeof value !== "object") return;
     const valueSchema = inner._def?.valueType;
     if (!valueSchema) return;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`, level, floor);
+      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`);
     }
     return;
   }
 
   if (tag === "union" || tag === "discriminatedUnion") {
-    sanitizeUnion(value, inner, fieldPath, level, floor);
+    sanitizeUnion(value, inner, fieldPath);
     return;
   }
 
@@ -440,38 +327,16 @@ function sanitizeAgainstSchema(
 }
 
 /**
- * Decorator that sanitises terminal string inputs against agent hallucinations.
+ * Decorator that rejects control characters in string inputs.
  *
  * Walks the tool's `inputSchema` recursively. Terminal `ZodString` leaves at
- * any depth are checked. Nested `ZodObject` and `ZodArray` containers are
- * descended into structurally — the handler receives the input verbatim (no
- * reshaping, no key reordering, no copies).
+ * any depth are passed through `rejectControlCharacters`. Nested `ZodObject` and
+ * `ZodArray` containers are descended into structurally — the handler receives
+ * the input verbatim (no reshaping, no key reordering, no copies).
  *
- * The control-character check runs on every string. The URL-shaped checks
- * (path traversal `../`, query characters `?` / `&`, pre-encoding `%xx`)
- * depend on where the string sits and what its key is called:
- * - Top-level params (strings on the input object, in a top-level array or in
- *   a top-level record) can be used to build a URL path or query, so they get
- *   every check.
- * - Nested fields with an identifier name (`id`, `ids`, `parentId`,
- *   `parent_id`, `mediaUUID`, `guid`, `key`, `keys`, `unique`, `alias`,
- *   `aliases`, `path`, `paths`, `folderPath`, …) get every check, and so does
- *   everything below them — except keys matching the secret / free-text name
- *   rule below, which get only the control-character check.
- * - Nested fields whose name ends in `name` (`name`, `fileName`) keep the
- *   path-traversal check, since file entities build paths from them.
- * - Any other nested string (request-body text such as
- *   `data.properties[0].description`) gets only the control-character check,
- *   so free text like `Wat zoek je?` round-trips.
- *
- * Fields whose name ends in `password` / `secret` (case-insensitive), or
- * whose name is, ends in `_` plus, or has a camelCase suffix of `description`,
- * `translation`, `text`, `message`, `comment`, `title` / `label` (`pageTitle`,
- * `meta_description`; not `context` or `subtitle`), get only the
- * control-character check at any depth, even under an id-named ancestor. Mark
- * other free-text fields `[text]` for the same effect — for example a
- * top-level `name` spread from a request body. Don't route a relaxed field
- * into a URL path.
+ * Free text such as `Wat zoek je?`, `Tom & Jerry` or `see ../readme` passes:
+ * `?`, `&`, `%xx` and `../` only matter once a value is put into a URL path,
+ * and the HTTP client rejects them there (`assertSafeRequestPath`).
  *
  * Fields whose `.describe()` contains the `[raw]` marker are skipped:
  * - On a `ZodString` field → that string passes through unsanitised.
@@ -505,19 +370,14 @@ export function withInputSanitization<
         const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
           if (Object.prototype.hasOwnProperty.call(schema, key)) {
-            // Every top-level param may reach a URL; only its own key's
-            // level carries down into nested objects.
-            const relaxed = isRelaxedFieldName(key);
-            const keyFloor = relaxed ? CONTROL_ONLY : checkLevelForKey(key);
-            sanitizeAgainstSchema(value, schema[key], key, relaxed ? CONTROL_ONLY : FULL, keyFloor);
+            sanitizeAgainstSchema(value, schema[key], key);
           } else if (typeof value === "string") {
             // Top-level string not in the declared shape — the upstream MCP
             // SDK strips unknown keys via Zod parse, but the decorator is
             // standalone-consumable (in-process MCP, tests). Fall back to
-            // string sanitisation so a path-traversal/control-char value
-            // can't reach the handler if the caller didn't run validation.
-            // The key is caller-chosen, so it never relaxes the checks.
-            sanitizeStringInput(value, key);
+            // string sanitisation so a control-char value can't reach the
+            // handler if the caller didn't run validation.
+            rejectControlCharacters(value, key);
           }
         }
       }

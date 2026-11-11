@@ -64,7 +64,6 @@ export {
   validateUUID,
   withInputSanitization,
   RAW_FIELD_MARKER,
-  TEXT_FIELD_MARKER,
   type SanitizeStringOptions,
 } from "./helpers/input-sanitizer.js";
 
@@ -392,6 +391,10 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
+  // Request building, shared with other Umbraco fetch clients (e.g. hosted)
+  buildFetchBody,
+  assertSafeRequestPath,
+  serializeParams,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,

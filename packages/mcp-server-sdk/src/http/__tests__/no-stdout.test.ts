@@ -1,10 +1,10 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
-import { EventEmitter } from "node:events";
 import {
   createUmbracoFetchClient,
   initializeUmbracoFetch,
   UmbracoManagementClient,
 } from "../umbraco-fetch-client.js";
+import { streamFormData } from "./stream-form-data.js";
 
 // Regression for #416: in a stdio MCP server stdout carries the protocol, so
 // the fetch client must never write to it (console.log / process.stdout).
@@ -40,21 +40,6 @@ function webFormData(): FormData {
   const fd = new FormData();
   fd.append("name", "value");
   fd.append("file", new Blob(["abc"]), "a.txt");
-  return fd;
-}
-
-// Minimal stand-in for the `form-data` package: getHeaders()/pipe() mark it as
-// stream FormData, and resume() emits the body the client collects.
-function streamFormData() {
-  const fd = Object.assign(new EventEmitter(), {
-    getHeaders: () => ({ "content-type": "multipart/form-data; boundary=x" }),
-    pipe: () => fd,
-    resume: () => {
-      fd.emit("data", "--x\r\n");
-      fd.emit("data", Buffer.from("body\r\n--x--\r\n"));
-      fd.emit("end");
-    },
-  });
   return fd;
 }
 

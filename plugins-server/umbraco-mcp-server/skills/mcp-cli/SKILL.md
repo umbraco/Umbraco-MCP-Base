@@ -172,11 +172,10 @@ See [local-dev-testing.md](local-dev-testing.md) for SDK contributor guidance on
 
 ## Input Sanitization
 
-The SDK automatically validates all string inputs before tool handlers run:
+The SDK automatically validates inputs before they reach Umbraco:
 - Rejects control characters in every string
-- Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in top-level params and identifier fields (`id`, `parentId`, `path`, …), and `../` in nested `name` fields
-- Top-level params with a secret or free-text name (`password`, `secret`, `description`, `pageTitle`, …) and fields marked `[text]` only get the control-character check
-- Allows `?`, `&`, `%` and `../` in nested request-body text and in description-like fields (`description`, `translation`, `title`, …)
+- Allows `?`, `&`, `%` and `../` in free text (descriptions, translations, names)
+- Rejects an `id` or `path` argument that would change the request URL: `?`, `#` or a `../` segment
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages
 
