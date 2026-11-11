@@ -1,4 +1,4 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -146,6 +146,22 @@ describe("useDraft202012ToolSchemas", () => {
     });
 
     expect(result.tools.map((t) => t.name)).toEqual([]);
+  });
+
+  it("leaves out a tool whose schema can't be converted, listing the rest (#417)", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await listToolsOverTheWire((server) => {
+        server.registerTool("good-tool", { inputSchema: { id: z.string() } }, noopHandler);
+        server.registerTool("date-tool", { inputSchema: { when: z.date() } }, noopHandler);
+        useDraft202012ToolSchemas(server);
+      });
+
+      expect(result.tools.map((t) => t.name)).toEqual(["good-tool"]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Tool "date-tool" left out of tools/list'));
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("is a no-op when no tool was ever registered", () => {

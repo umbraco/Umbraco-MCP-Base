@@ -72,8 +72,11 @@ function logToolError(toolName: string, error: unknown): void {
  * `tools/list` handler and breaks the listing for every tool, not just the
  * offending one (#417). Uses the same conversion as `tools/list`.
  *
- * The guarantee covers tools wrapped by the SDK decorators
- * (`withErrorHandling` / `withStandardDecorators`).
+ * Lives in `withErrorHandling` (not only `withStandardDecorators`) because
+ * it is the one wrapper every decorated tool passes through, including tools
+ * that call it directly. Tools registered without the SDK decorators are not
+ * checked here; `useDraft202012ToolSchemas` leaves such a tool out of
+ * `tools/list` instead of failing the whole listing.
  */
 function assertSchemasConvertible(tool: ToolDefinition<any, any>): void {
   for (const [kind, schema, io] of [
@@ -85,10 +88,13 @@ function assertSchemasConvertible(tool: ToolDefinition<any, any>): void {
       toJsonSchema(schema, io);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // A raw shape is a plain { key: ZodType } object: find the failing field.
+      // Find the failing top-level field: a raw shape is a plain
+      // { key: ZodType } object; a z.object keeps its shape on _zod.def.
+      const zod = (schema as { _zod?: { def?: { shape?: Record<string, unknown> } } })._zod;
+      const shape = zod ? zod.def?.shape : (schema as Record<string, unknown>);
       let field = "";
-      if (!(schema as { _zod?: unknown })._zod) {
-        for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+      if (shape) {
+        for (const [key, value] of Object.entries(shape)) {
           try {
             toJsonSchema({ [key]: value }, io);
           } catch {

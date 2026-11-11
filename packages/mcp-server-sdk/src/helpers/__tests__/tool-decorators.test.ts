@@ -237,7 +237,7 @@ describe("withErrorHandling schema conversion check (#417)", () => {
     const tool = make({ outputSchema: { at: z.date() } });
     expect(() => withErrorHandling(tool)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
     const full = make({ outputSchema: z.object({ at: z.date() }) });
-    expect(() => withErrorHandling(full)).toThrow(/Tool "bad-tool": outputSchema cannot be converted/);
+    expect(() => withErrorHandling(full)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
   });
 
   it("still wraps a normal tool", () => {
