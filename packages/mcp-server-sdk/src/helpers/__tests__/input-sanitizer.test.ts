@@ -332,10 +332,10 @@ describe("withInputSanitization", () => {
       expect(run({ secretary: z.string() }, { secretary: "a?b" }).call).toThrow(ToolValidationError);
     });
 
-    it("does not let caller-chosen z.record keys opt out of the checks", () => {
+    it("does not let caller-chosen z.record keys opt out of the control-character check", () => {
       const schema = { headers: z.record(z.string(), z.string()) };
-      expect(run(schema, { headers: { password: "a?b" } }).call).toThrow(ToolValidationError);
-      expect(run(schema, { headers: { "x.secret": "../x" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { headers: { password: "a\x00b" } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { headers: { "x.secret": "a\x01b" } }).call).toThrow(ToolValidationError);
     });
 
     it("still relaxes a declared secret field nested under a record value", () => {
@@ -450,7 +450,7 @@ describe("withInputSanitization", () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it("rejects bad strings inside array element objects", () => {
+    it("rejects control characters inside array element objects", () => {
       const handler = jest.fn().mockReturnValue({ content: [] });
       const inputSchema = {
         items: z.array(z.object({ name: z.string() })),
@@ -460,7 +460,7 @@ describe("withInputSanitization", () => {
 
       expect(() =>
         sanitized.handler(
-          { items: [{ name: "ok" }, { name: "../bad" }] } as any,
+          { items: [{ name: "ok" }, { name: "bad\x00name" }] } as any,
           {} as any,
         ),
       ).toThrow(ToolValidationError);
@@ -648,6 +648,141 @@ describe("withInputSanitization", () => {
         {} as any,
       );
       expect(handler).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // URL-shaped checks apply only where a value can reach a URL (issue #447)
+  //
+  // Top-level params and nested id-named fields get every check. Other nested
+  // request-body text (descriptions, translations) gets only the
+  // control-character check, so ordinary `?` / `&` text round-trips.
+  // ---------------------------------------------------------------------------
+
+  describe("URL-shaped checks scope", () => {
+    const run = (schema: any, input: any) => {
+      const handler = jest.fn().mockReturnValue({ content: [] });
+      const tool = { name: "t", description: "t", inputSchema: schema, handler, slices: [] } as any;
+      const call = () => withInputSanitization(tool).handler(input, {} as any);
+      return { handler, call };
+    };
+
+    const updateDocumentTypeSchema = {
+      id: z.string().uuid(),
+      data: z.object({
+        alias: z.string(),
+        parent: z.object({ id: z.string() }).nullable(),
+        properties: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            description: z.string().nullable(),
+            dataType: z.object({ id: z.string() }),
+          })
+        ),
+      }),
+    };
+    const docTypeInput = (description: string) => ({
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      data: {
+        alias: "page",
+        parent: null,
+        properties: [
+          {
+            id: "11111111-2222-3333-4444-555555555555",
+            name: "Title",
+            description,
+            dataType: { id: "0cc0eba1-9960-42c9-bf9b-60e150b429ae" },
+          },
+        ],
+      },
+    });
+
+    const updateDictionaryItemSchema = {
+      id: z.string(),
+      data: z.object({
+        name: z.string(),
+        translations: z.array(z.object({ isoCode: z.string(), translation: z.string() })),
+      }),
+    };
+
+    it("accepts '?' in a nested property description (update-document-type)", () => {
+      const input = docTypeInput("Leeg? Dan gebruiken we de paginanaam.");
+      const { handler, call } = run(updateDocumentTypeSchema, input);
+      expect(call).not.toThrow();
+      expect(handler.mock.calls[0][0]).toBe(input);
+    });
+
+    it("accepts '?' in a nested translation (update-dictionary-item)", () => {
+      const input = {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        data: { name: "search", translations: [{ isoCode: "nl-NL", translation: "Wat zoek je?" }] },
+      };
+      expect(run(updateDictionaryItemSchema, input).call).not.toThrow();
+    });
+
+    it.each(["Tom & Jerry", "50%20off", "see ../readme", "a?b&c"])(
+      "accepts %s in nested free text",
+      (text) => {
+        expect(run(updateDocumentTypeSchema, docTypeInput(text)).call).not.toThrow();
+        const schema = { data: z.record(z.string(), z.string()) };
+        expect(run(schema, { data: { note: text } }).call).not.toThrow();
+      }
+    );
+
+    it.each(["a?b", "a&b", "a%2Fb", "../x"])("still rejects %s in top-level params", (bad) => {
+      expect(run({ id: z.string() }, { id: bad }).call).toThrow(ToolValidationError);
+      expect(run({ path: z.string() }, { path: bad }).call).toThrow(ToolValidationError);
+      expect(run({ filter: z.string().optional() }, { filter: bad }).call).toThrow(ToolValidationError);
+      expect(run({ ids: z.array(z.string()) }, { ids: ["ok", bad] }).call).toThrow(ToolValidationError);
+      expect(run({ other: z.string() }, { undeclared: bad }).call).toThrow(ToolValidationError);
+    });
+
+    it.each(["a?b", "a&b", "a%2Fb", "../x"])("still rejects %s in nested id-named fields", (bad) => {
+      const parent = docTypeInput("ok") as any;
+      parent.data.parent = { id: bad };
+      expect(run(updateDocumentTypeSchema, parent).call).toThrow(ToolValidationError);
+
+      const dataType = docTypeInput("ok") as any;
+      dataType.data.properties[0].dataType.id = bad;
+      expect(run(updateDocumentTypeSchema, dataType).call).toThrow(ToolValidationError);
+
+      const schema = {
+        data: z.object({ parentId: z.string(), documentTypeIds: z.array(z.string()), mediaUUID: z.string() }),
+      };
+      const ok = { parentId: "p", documentTypeIds: ["d"], mediaUUID: "m" };
+      expect(run(schema, { data: { ...ok, parentId: bad } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { data: { ...ok, documentTypeIds: [bad] } }).call).toThrow(ToolValidationError);
+      expect(run(schema, { data: { ...ok, mediaUUID: bad } }).call).toThrow(ToolValidationError);
+    });
+
+    it("does not treat words ending in lowercase 'id' as ids", () => {
+      const schema = { data: z.object({ valid: z.string(), android: z.string() }) };
+      expect(run(schema, { data: { valid: "a?b", android: "a&b" } }).call).not.toThrow();
+    });
+
+    it("does not let caller-chosen z.record keys make a value id-checked", () => {
+      const schema = { data: z.record(z.string(), z.string()) };
+      expect(run(schema, { data: { id: "a?b" } }).call).not.toThrow();
+    });
+
+    it("still rejects control characters everywhere", () => {
+      expect(run({ id: z.string() }, { id: "a\x00b" }).call).toThrow(ToolValidationError);
+      expect(run(updateDocumentTypeSchema, docTypeInput("Leeg?\x00")).call).toThrow(ToolValidationError);
+      const dict = {
+        id: "x",
+        data: { name: "n", translations: [{ isoCode: "nl-NL", translation: "Wat\x1F zoek je?" }] },
+      };
+      expect(run(updateDictionaryItemSchema, dict).call).toThrow(ToolValidationError);
+      const rec = { data: z.record(z.string(), z.string()) };
+      expect(run(rec, { data: { note: "a\x0Bb" } }).call).toThrow(ToolValidationError);
+    });
+
+    it("keeps the top-level secret-name rule and [raw] marker", () => {
+      expect(run({ password: z.string() }, { password: "a?b&c%4a../x" }).call).not.toThrow();
+      expect(run({ id: z.string().describe(RAW_FIELD_MARKER) }, { id: "a?b" }).call).not.toThrow();
+      const rawNested = { data: z.object({ id: z.string() }).describe(RAW_FIELD_MARKER) };
+      expect(run(rawNested, { data: { id: "a\x00?b" } }).call).not.toThrow();
     });
   });
 });

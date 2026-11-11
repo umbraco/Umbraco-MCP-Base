@@ -251,7 +251,9 @@ UMBRACO_READONLY=true UMBRACO_INCLUDE_SLICES=read node dist/index.js --debug-con
 ## Input Sanitization
 
 The SDK automatically validates all string inputs before tool handlers run:
-- Rejects control characters, path traversal (`../`), embedded query params, percent-encoded strings
+- Rejects control characters in every string field
+- Rejects path traversal (`../`), embedded query params (`?` / `&`) and percent-encoded strings in values that can reach a URL: top-level params (and strings in top-level arrays) plus nested id-named fields (`id`, `ids`, `*Id`, `*Ids`, `*ID`). Other nested request-body text (e.g. `data.properties[0].description`) only gets the control-character check
+- Fields marked `[raw]` in their `.describe()` are skipped; fields whose name ends in `password` / `secret` skip the URL-shaped checks
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages
 

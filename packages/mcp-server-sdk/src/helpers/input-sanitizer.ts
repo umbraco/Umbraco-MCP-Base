@@ -145,7 +145,8 @@ export function sanitizeStringInput(
  * like ChatGPT's `openai/fileParams` file references, where the wire shape is
  * the host's contract and must pass through verbatim). Also the escape hatch
  * for secret-like string fields whose names don't match the end-anchored
- * `password` / `secret` name rule, which relaxes URL-shaped checks automatically.
+ * `password` / `secret` name rule, which relaxes URL-shaped checks automatically,
+ * and for top-level free-text params (which get the URL-shaped checks).
  * The name rule never applies to `z.record` keys, which the caller chooses.
  */
 export const RAW_FIELD_MARKER = "[raw]";
@@ -160,21 +161,41 @@ export const RAW_FIELD_MARKER = "[raw]";
  */
 const SECRET_FIELD_NAME = /(password|secret)$/i;
 
-const SECRET_FIELD_OPTIONS: SanitizeStringOptions = {
+/**
+ * Options that skip the URL-shaped checks (path traversal, query params,
+ * pre-encoding) and keep only the control-character check.
+ */
+const CONTROL_CHARS_ONLY_OPTIONS: SanitizeStringOptions = {
   allowPathTraversal: true,
   allowQueryParams: true,
   allowPreEncoded: true,
 };
 
 /**
- * Sanitises a string leaf, relaxing the URL-shaped checks when the
- * schema-declared key it sits under matches the secret-name rule. `declaredKey`
- * is `undefined` under a `z.record`, whose keys are caller-chosen and so must
+ * Id-named schema keys (`id`, `ids`, `parentId`, `documentTypeIds`, `UUID`, …).
+ * A nested field with such a name keeps the URL-shaped checks, because it is
+ * the one kind of nested value a handler plausibly routes into a URL path
+ * (e.g. `data.parent.id`), and a real id never contains `?`, `&`, `%xx` or `../`.
+ * Case-sensitive on the suffix so words like `valid` or `paid` don't match.
+ */
+const ID_FIELD_NAME = /^ids?$|I[dD]s?$/;
+
+/**
+ * Sanitises a string leaf. The control-character check always runs. The
+ * URL-shaped checks run only when `urlChecked` is set (top-level params and
+ * nested id-named fields — see `withInputSanitization`), and are skipped when
+ * the schema-declared key matches the secret-name rule. `declaredKey` is
+ * `undefined` under a `z.record`, whose keys are caller-chosen and so must
  * never opt a value out of the checks.
  */
-function sanitizeStringLeaf(value: string, fieldPath: string, declaredKey: string | undefined): void {
-  const relaxed = declaredKey !== undefined && SECRET_FIELD_NAME.test(declaredKey);
-  sanitizeStringInput(value, fieldPath, relaxed ? SECRET_FIELD_OPTIONS : undefined);
+function sanitizeStringLeaf(
+  value: string,
+  fieldPath: string,
+  declaredKey: string | undefined,
+  urlChecked: boolean
+): void {
+  const secret = declaredKey !== undefined && SECRET_FIELD_NAME.test(declaredKey);
+  sanitizeStringInput(value, fieldPath, urlChecked && !secret ? undefined : CONTROL_CHARS_ONLY_OPTIONS);
 }
 
 /**
@@ -247,7 +268,13 @@ const PASSTHROUGH_SCALAR_TAGS = new Set([
  * sanitiser only needs to sanitise string content where the runtime
  * value tells it where strings live.
  */
-function sanitizeUnion(value: unknown, inner: any, fieldPath: string, declaredKey: string | undefined): void {
+function sanitizeUnion(
+  value: unknown,
+  inner: any,
+  fieldPath: string,
+  declaredKey: string | undefined,
+  urlChecked: boolean
+): void {
   const options = inner?._def?.options;
   if (!Array.isArray(options)) return;
   for (const option of options) {
@@ -265,7 +292,7 @@ function sanitizeUnion(value: unknown, inner: any, fieldPath: string, declaredKe
       (optTag === "undefined" && value === undefined) ||
       (optTag && PASSTHROUGH_SCALAR_TAGS.has(optTag));
     if (compatible) {
-      sanitizeAgainstSchema(value, option, fieldPath, declaredKey);
+      sanitizeAgainstSchema(value, option, fieldPath, declaredKey, urlChecked);
       return;
     }
   }
@@ -278,6 +305,11 @@ function sanitizeUnion(value: unknown, inner: any, fieldPath: string, declaredKe
  * reshapes the input — only throws on bad string content. A subtree
  * marked `[raw]` is skipped wholesale.
  *
+ * `urlChecked` says whether string leaves get the URL-shaped checks. Array
+ * elements inherit it from the array; children of an object or record are
+ * free text (control characters only) unless the child's declared key is
+ * id-named (`ID_FIELD_NAME`).
+ *
  * Truly unknown schema kinds (`z.tuple`, `z.lazy`, `z.intersection`,
  * `z.map`, `z.set`) throw — silent fall-through would leave nested string
  * content un-sanitised. Authors hitting the error can mark the field
@@ -287,7 +319,8 @@ function sanitizeAgainstSchema(
   value: unknown,
   schema: any,
   fieldPath: string,
-  declaredKey: string | undefined
+  declaredKey: string | undefined,
+  urlChecked: boolean
 ): void {
   if (!schema) return;
   const inner = unwrapSchema(schema);
@@ -297,7 +330,7 @@ function sanitizeAgainstSchema(
   if (!tag) return;
 
   if (tag === "string") {
-    if (typeof value === "string") sanitizeStringLeaf(value, fieldPath, declaredKey);
+    if (typeof value === "string") sanitizeStringLeaf(value, fieldPath, declaredKey, urlChecked);
     return;
   }
 
@@ -305,7 +338,9 @@ function sanitizeAgainstSchema(
     if (!Array.isArray(value)) return;
     const element = inner._def?.element;
     if (element) {
-      value.forEach((item, idx) => sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`, declaredKey));
+      value.forEach((item, idx) =>
+        sanitizeAgainstSchema(item, element, `${fieldPath}[${idx}]`, declaredKey, urlChecked)
+      );
     }
     return;
   }
@@ -317,7 +352,7 @@ function sanitizeAgainstSchema(
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         if (!Object.prototype.hasOwnProperty.call(shape, k)) continue;
         const child = shape[k];
-        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`, k);
+        if (child) sanitizeAgainstSchema(v, child, `${fieldPath}.${k}`, k, ID_FIELD_NAME.test(k));
       }
     }
     return;
@@ -326,18 +361,19 @@ function sanitizeAgainstSchema(
   if (tag === "record") {
     // `z.record(keySchema, valueSchema)` — every value in the runtime
     // object is sanitised under the value schema. Orval emits this for
-    // free-form maps like webhook headers.
+    // free-form maps like webhook headers. Values are free text: the keys
+    // are caller-chosen, so they never make a value id-checked or secret.
     if (value === null || typeof value !== "object") return;
     const valueSchema = inner._def?.valueType;
     if (!valueSchema) return;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`, undefined);
+      sanitizeAgainstSchema(v, valueSchema, `${fieldPath}.${k}`, undefined, false);
     }
     return;
   }
 
   if (tag === "union" || tag === "discriminatedUnion") {
-    sanitizeUnion(value, inner, fieldPath, declaredKey);
+    sanitizeUnion(value, inner, fieldPath, declaredKey, urlChecked);
     return;
   }
 
@@ -358,14 +394,27 @@ function sanitizeAgainstSchema(
  * Decorator that sanitises terminal string inputs against agent hallucinations.
  *
  * Walks the tool's `inputSchema` recursively. Terminal `ZodString` leaves at
- * any depth are passed through `sanitizeStringInput`. Nested `ZodObject` and
- * `ZodArray` containers are descended into structurally — the handler receives
- * the input verbatim (no reshaping, no key reordering, no copies).
+ * any depth are checked. Nested `ZodObject` and `ZodArray` containers are
+ * descended into structurally — the handler receives the input verbatim (no
+ * reshaping, no key reordering, no copies).
+ *
+ * Which checks a string leaf gets depends on where it sits:
+ * - Top-level params (strings directly on the input object, and strings in a
+ *   top-level array) are the values used to build a URL path or query, so they
+ *   get every check: control characters, path traversal (`../`), query
+ *   characters (`?` / `&`) and pre-encoding (`%xx`).
+ * - Strings nested inside an object or record (request-body text such as
+ *   `data.properties[0].description`) get only the control-character check, so
+ *   free text like `Wat zoek je?` round-trips.
+ * - Exception: a nested field whose key is id-named (`id`, `ids`, `*Id`,
+ *   `*Ids`, `*ID`) keeps every check, since ids are what a handler may route
+ *   into a URL path.
  *
  * String leaves whose key ends in `password` or `secret` (case-insensitive)
  * skip the path-traversal, query-param and pre-encoded checks but still get the
  * control-character check. Use `[raw]` for secret fields the name rule misses.
- * Don't route such a field into a URL path — it would lose the URL-shaped checks.
+ * Don't route such a field, or a nested non-id field, into a URL path — it
+ * would lose the URL-shaped checks.
  *
  * Fields whose `.describe()` contains the `[raw]` marker are skipped:
  * - On a `ZodString` field → that string passes through unsanitised.
@@ -399,7 +448,7 @@ export function withInputSanitization<
         const schema = tool.inputSchema as Record<string, any>;
         for (const [key, value] of Object.entries(args)) {
           if (Object.prototype.hasOwnProperty.call(schema, key)) {
-            sanitizeAgainstSchema(value, schema[key], key, key);
+            sanitizeAgainstSchema(value, schema[key], key, key, true);
           } else if (typeof value === "string") {
             // Top-level string not in the declared shape — the upstream MCP
             // SDK strips unknown keys via Zod parse, but the decorator is
@@ -407,7 +456,7 @@ export function withInputSanitization<
             // string sanitisation so a path-traversal/control-char value
             // can't reach the handler if the caller didn't run validation.
             // The key is caller-chosen, so it never relaxes the checks.
-            sanitizeStringLeaf(value, key, undefined);
+            sanitizeStringLeaf(value, key, undefined, true);
           }
         }
       }
