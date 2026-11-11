@@ -37,6 +37,11 @@ import {
 } from "../auth/umbraco-handler.js";
 import type { ConsentModeOption, ConsentToolConfig } from "../auth/consent.js";
 import {
+  FlowBindingError,
+  clearFlowCookieHeader,
+  redirectResponse,
+} from "../auth/flow-cookies.js";
+import {
   type CreateServerOptions,
   type InstructionsResolver,
   type SiteResolver,
@@ -735,6 +740,10 @@ async function handleCallback(
   request: Request,
   env: HostedMcpEnv,
 ): Promise<Response> {
+  // The state cookie is single-use: clear it whatever the outcome.
+  const state = new URL(request.url).searchParams.get("state");
+  const clearStateCookie = state ? clearFlowCookieHeader("state", state) : null;
+
   try {
     const callbackHandler = createCallbackHandler(env);
     const result = await callbackHandler(request);
@@ -751,16 +760,51 @@ async function handleCallback(
       props: result.props,
     });
 
-    return Response.redirect(redirectTo, 302);
+    return redirectResponse(redirectTo, [clearStateCookie]);
   } catch (error) {
+    const headers = new Headers();
+    if (clearStateCookie) headers.append("Set-Cookie", clearStateCookie);
+
+    // Never redirect to the client here: the request may not have come from
+    // the browser that started the flow, so the client's redirect_uri is not
+    // a safe destination.
+    if (error instanceof FlowBindingError) {
+      headers.set("Content-Type", "text/html; charset=utf-8");
+      headers.set("X-Frame-Options", "DENY");
+      headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+      return new Response(SIGN_IN_LINK_REJECTED_HTML, { status: 403, headers });
+    }
+
     const message =
       error instanceof Error ? error.message : "Authentication failed";
+    headers.set("Content-Type", "application/json");
     return new Response(JSON.stringify({ error: message }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers,
     });
   }
 }
+
+const SIGN_IN_LINK_REJECTED_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign-in link can't be used</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; margin: 0; padding: 2rem 1rem; color: #333; }
+  main { max-width: 32rem; margin: 0 auto; background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  h1 { font-size: 1.25rem; margin-top: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>This sign-in link can't be used here</h1>
+  <p>It was started in a different browser, or it has expired.</p>
+  <p>Start the connection again from your AI client.</p>
+</main>
+</body>
+</html>`;
 
 // ============================================================================
 // Landing Pages

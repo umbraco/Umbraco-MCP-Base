@@ -100,6 +100,8 @@ export {
   createLogoutCallbackHandler,
 } from "./auth/umbraco-handler.js";
 
+export { FlowBindingError } from "./auth/flow-cookies.js";
+
 export {
   getStoredUmbracoToken,
   refreshUmbracoToken,

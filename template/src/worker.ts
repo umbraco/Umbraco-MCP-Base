@@ -252,6 +252,8 @@ const provider = new OAuthProvider({
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
+  // Advertise and accept S256 only (the authorize handler also enforces it).
+  allowPlainPKCE: false,
 });
 
 export default createWorkerExport(provider, options);
