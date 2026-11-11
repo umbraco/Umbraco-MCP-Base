@@ -85,7 +85,8 @@ Then find, in the generated files:
 
 **Grep the generated files — don't read them whole.** One file of each kind exists per API
 (`{apiName}.ts` and `{apiName}.zod.ts`); against the Umbraco Management API they are tens of
-thousands of lines. Orval names everything after the camelCased `operationId` from Step 2 —
+thousands of lines. Orval names everything after the camelCased `operationId` from Step 2 (run Step 2's listing first
+if you don't have the operationIds yet) —
 `GetCulture` becomes the client method `getCulture` and the Zod exports `getCultureQueryParams`,
 `getCultureParams`, `getCultureBody` and `getCultureResponse` (whichever apply). So:
 
@@ -95,8 +96,9 @@ grep -n "export const get.*API = " src/umbraco-api/api/generated/*.ts           
 grep -n "export const getCulture[A-Z]" src/umbraco-api/api/generated/*.zod.ts   # Zod schemas for one operation
 ```
 
-The template's `example/` tools (`src/umbraco-api/tools/example/get/*.ts`) are complete, compiling
-examples of each pattern — read one of those rather than the generated client when you need a model.
+If the template's `example/` tools are still present (`src/umbraco-api/tools/example/get/*.ts`; `init`
+usually removes them), read one as a model. Otherwise use the code samples in Step 3b. Either way,
+don't fall back to reading the generated client whole.
 
 ### Step 2: Read Swagger Spec
 
@@ -255,8 +257,8 @@ npm run compile
 ```
 
 Fix any TypeScript errors in the files you created or edited before proceeding. Errors only in
-files you didn't touch (e.g. `src/worker.ts`) are pre-existing — note them in the report, don't
-try to fix them. Common issues:
+files you didn't touch (e.g. `src/worker.ts`) are pre-existing — unless they trace back to a file
+you edited (`src/worker.ts` imports `src/collections.ts`) — note them in the report, don't try to fix them. Common issues:
 - Wrong import paths to generated client
 - Mismatched Zod schema shapes
 - Missing `CAPTURE_RAW_HTTP_RESPONSE` parameter

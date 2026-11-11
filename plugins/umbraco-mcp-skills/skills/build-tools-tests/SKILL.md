@@ -30,10 +30,11 @@ tools for `culture`"), test exactly those. The rules below still apply, with the
 
 - **Read only what you need:** the collection's `index.ts` and its tool files. Don't read the generated
   client or Zod files — `setup.ts` needs only the client getter, which the tool files already import
-  (`import type { getXxxAPI } from ...`); copy that name and path.
+  (`import type { getXxxAPI } from ...`); copy that name and path, but import it as a value in `setup.ts`
+  (drop `type`), since `setup.ts` calls it.
 - **Read-only collections skip Steps 4-6** (builder, helper, builder tests) as described in Step 3.
 - **Skip Step 8 (validation) and Step 10's full `npm test` and `/count-mcp-tools`.** Run only this
-  collection's tests and report.
+  collection's tests (`node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --testPathPatterns=src/umbraco-api/tools/{collection}/__tests__`) and report.
 - **Only read `instance-management.md` if you actually hit an instance roadblock.**
 - **Don't ask for confirmation.** The request is the confirmation.
 
@@ -55,7 +56,7 @@ This skill orchestrates the following agents — use them for the relevant steps
 
 **ONE FILE AT A TIME.** This applies to ALL files — builders, helpers, builder tests, and tool tests. After creating any file:
 1. Compile: `npm run compile`
-2. If it has tests, run them: `npm test -- path/to/file.test.ts`
+2. If it has tests, run just that file: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand path/to/file.test.ts` (not `npm test -- <path>`: the `test` script already passes `--testPathPatterns=__tests__`, and Jest ORs a positional path with it, so that runs every `__tests__` file)
 3. Fix any failures
 4. Only then create the next file
 
@@ -154,7 +155,7 @@ import {
   createSnapshotResult,
 } from "@umbraco-cms/mcp-server-sdk/testing";
 import { configureApiClient, initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
-import { getYourAPI } from "../../../../api/generated/yourApi.js";
+import { getYourAPI } from "../../../api/generated/yourApi.js";
 import { EntityBuilder } from "./helpers/{entity}-builder.js";
 import { EntityTestHelper } from "./helpers/{entity}-test-helper.js";
 
@@ -350,7 +351,7 @@ describe("EntityBuilder", () => {
 
 **After creating:**
 1. Compile: `npm run compile`
-2. Run: `npm test -- src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.test.ts`
+2. Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.test.ts`
 3. Fix any failures before continuing
 
 ### Step 7: Per Collection — Create Integration Tests
@@ -528,11 +529,11 @@ This works for read-only collections too (cultures, languages, server info), whe
 For each test file:
 1. Write the test
 2. Compile: `npm run compile`
-3. Run: `npm test -- src/umbraco-api/tools/{collection}/__tests__/{test-file}.test.ts`
+3. Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand src/umbraco-api/tools/{collection}/__tests__/{test-file}.test.ts`
 4. Fix any failures before creating the next test file
 
-Compile errors only in files you didn't touch (e.g. `src/worker.ts`) are pre-existing — note them,
-don't try to fix them (this skill may not edit those files anyway).
+Compile errors only in files you didn't touch (e.g. `src/worker.ts`) are pre-existing — unless they
+trace back to a file you edited — note them, don't try to fix them (this skill may not edit those files anyway).
 
 ### Step 8: Validate with `integration-test-validator`
 
