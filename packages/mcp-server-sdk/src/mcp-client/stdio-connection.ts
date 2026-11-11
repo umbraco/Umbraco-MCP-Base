@@ -9,6 +9,7 @@
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Readable } from "node:stream";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection, McpStdioServerConfig, FilterConfig } from "./types.js";
@@ -29,6 +30,11 @@ function baseUrlFromArgs(args: readonly string[]): string | undefined {
   return value;
 }
 
+/** Whether `args` passes an explicit `--env <file>` / `--env=<file>`. */
+function hasEnvFileArg(args: readonly string[]): boolean {
+  return args.some((arg, i) => (arg === "--env" && i + 1 < args.length) || arg.startsWith("--env="));
+}
+
 /**
  * Build the env for a chained stdio child.
  *
@@ -38,15 +44,19 @@ function baseUrlFromArgs(args: readonly string[]): string | undefined {
  * refuses to start in that combination, so passing it on would only break
  * every chained call (umbraco/Umbraco-MCP-Base#449).
  *
- * The base URL is resolved the way the child's SDK config does: the
- * `--umbraco-base-url` CLI flag in `args` first, then UMBRACO_BASE_URL. When
- * neither is known here (the child may load it from its own `.env`, or not be
+ * The base URL is known here only when `args` has `--umbraco-base-url` (the
+ * child's config ranks the CLI flag first), or, failing that, from
+ * UMBRACO_BASE_URL in `configEnv` then the parent's env. An explicit
+ * `--env <file>` in `args` is loaded by the child with override, so a
+ * UMBRACO_BASE_URL inside it would beat the env this sees: with `--env` and
+ * no `--umbraco-base-url`, the base URL is treated as unknown. When it is
+ * unknown (also when the child loads it from its own default `.env`, or is not
  * an Umbraco server at all) the flag is passed on: the child's own guard is
  * the authority, and dropping it could break a local self-signed setup.
  *
  * Only the config's override is dropped: a value the operator set on the
- * parent's own env is theirs to own, and the child's refusal names the cause
- * in its stderr.
+ * parent's own env is theirs to own and still reaches the child, which then
+ * refuses to start and names the cause in its stderr. The warning says so.
  */
 export function buildChildEnv(
   serverName: string,
@@ -55,14 +65,22 @@ export function buildChildEnv(
   args: readonly string[] = [],
 ): Record<string, string> {
   const overrides = { ...configEnv };
+  const argBaseUrl = baseUrlFromArgs(args);
   const baseUrl =
-    baseUrlFromArgs(args) || overrides.UMBRACO_BASE_URL || parentEnv.UMBRACO_BASE_URL;
+    argBaseUrl ||
+    (hasEnvFileArg(args) ? undefined : overrides.UMBRACO_BASE_URL || parentEnv.UMBRACO_BASE_URL);
   if (overrides.NODE_TLS_REJECT_UNAUTHORIZED === "0" && baseUrl && !isLoopbackUrl(baseUrl)) {
     delete overrides.NODE_TLS_REJECT_UNAUTHORIZED;
-    console.error(
+    const prefix =
       `[mcp-client] Chained server "${serverName}" sets NODE_TLS_REJECT_UNAUTHORIZED=0 ` +
-        `but its base URL (${baseUrl}) is not a local URL. ` +
-        `Dropping it: TLS verification may only be disabled for a local instance.`,
+      `but its base URL (${baseUrl}) is not a local URL. `;
+    console.error(
+      parentEnv.NODE_TLS_REJECT_UNAUTHORIZED === "0"
+        ? prefix +
+            `This process's own env also sets NODE_TLS_REJECT_UNAUTHORIZED=0, so the child ` +
+            `inherits it and will refuse to start against that URL. Unset it for this process, ` +
+            `or trust the server's certificate instead (e.g. NODE_EXTRA_CA_CERTS).`
+        : prefix + `Dropping it: TLS verification may only be disabled for a local instance.`,
     );
   }
   return { ...parentEnv, ...overrides } as Record<string, string>;
@@ -103,6 +121,9 @@ export class StdioConnection implements McpConnection {
       stderr: "pipe",
     });
 
+    // Decode as UTF-8 so a multibyte character split across chunks stays
+    // whole. Typed as Stream, it is a PassThrough when stderr is "pipe".
+    (transport.stderr as Readable | null)?.setEncoding?.("utf8");
     transport.stderr?.on("data", (chunk: Buffer | string) => {
       process.stderr.write(chunk);
       this.stderrTail = (this.stderrTail + chunk.toString()).slice(-STDERR_TAIL_BYTES);
@@ -195,8 +216,10 @@ export class StdioConnection implements McpConnection {
               (tail ? ` Its stderr (tail):\n${tail}` : " It wrote nothing to stderr."),
           );
         }
-        error.message +=
-          `\nChained server "${this.config.name}" exited. See the MCP server's logs for its stderr.`;
+        // The SDK rejects every pending request with one shared error object,
+        // so only extend it once.
+        const pointer = `Chained server "${this.config.name}" exited. See the MCP server's logs for its stderr.`;
+        if (!error.message.includes(pointer)) error.message += `\n${pointer}`;
       }
       throw error;
     }
