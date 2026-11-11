@@ -17,6 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Options for creating a CLI test client.
  */
 export interface CliClientOptions {
+  /** Command-line flags to pass to the server (e.g. `["--umbraco-readonly"]`) */
+  args?: string[];
   /** Additional environment variables to set */
   env?: Record<string, string>;
   /**
@@ -67,7 +69,7 @@ export async function createCliTestClient(options?: CliClientOptions): Promise<C
 
   const transport = new StdioClientTransport({
     command: "node",
-    args: [entryPoint],
+    args: [entryPoint, ...(options?.args ?? [])],
     env: {
       ...parentEnv,
       USE_MOCK_API: "true",

@@ -756,6 +756,15 @@ const configLoader = createCollectionConfigLoader({
 // Load filtering configuration from server config
 const filterConfig: CollectionConfiguration = configLoader.loadFromConfig(serverConfig.umbraco);
 
+// Pass readonly mode and slice filters to chained MCP servers. Taken from the
+// resolved config so a CLI flag counts too: a chained server inherits this
+// process's environment, but not its command line.
+mcpClientManager.setFilterConfig({
+  readOnly: serverConfig.umbraco.readonly,
+  slices: serverConfig.umbraco.includeSlices,
+  excludeSlices: serverConfig.umbraco.excludeSlices,
+});
+
 // ============================================================================
 // CLI Introspection (runs before server start, exits immediately)
 // ============================================================================

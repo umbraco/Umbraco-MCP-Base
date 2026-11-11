@@ -59,7 +59,7 @@ export interface ConfigFieldDefinition {
   isSecret?: boolean;
 }
 
-const CONFIG_FIELDS: ConfigFieldDefinition[] = [
+export const CONFIG_FIELDS: ConfigFieldDefinition[] = [
   // Auth fields (required) — no cliFlag for credentials to prevent secret leakage in terminal/logs
   { name: "clientId", envVar: "UMBRACO_CLIENT_ID", type: "string", required: true, isAuth: true },
   { name: "clientSecret", envVar: "UMBRACO_CLIENT_SECRET", type: "string", required: true, isAuth: true, isSecret: true },
