@@ -65,7 +65,7 @@ describe("fetch client stdout hygiene", () => {
   it("sends enableLogging output to stderr, not stdout", async () => {
     await makeClient(true).mutator({ method: "get", url: "/logged" });
     expectNoStdout();
-    const lines = errorSpy.mock.calls.map((c) => String(c[0]));
+    const lines = errorSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(lines).toEqual(expect.arrayContaining(["Request:", "Response:"]));
   });
 });
