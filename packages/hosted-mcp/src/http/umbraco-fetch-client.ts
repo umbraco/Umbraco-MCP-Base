@@ -7,7 +7,12 @@
  * compatible with api-call-helpers' validation logic.
  */
 
-import { buildFetchBody, normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
+import {
+  buildFetchBody,
+  normalizeBaseUrl,
+  serializeParams,
+  type HttpResponse,
+} from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import {
   getRejectedRefreshToken,
@@ -41,32 +46,6 @@ export const CAPTURE_RAW_HTTP_RESPONSE = {
   returnFullResponse: true,
   validateStatus: () => true,
 } as const;
-
-/**
- * Serializes params for Umbraco API calls.
- * Handles array params in repeat format (e.g., id=1&id=2).
- */
-function serializeParams(
-  params: Record<string, unknown> | undefined
-): string {
-  if (!params) return "";
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        parts.push(
-          `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
-        );
-      }
-    } else {
-      parts.push(
-        `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
-      );
-    }
-  }
-  return parts.length > 0 ? `?${parts.join("&")}` : "";
-}
 
 /**
  * Configuration for creating a fetch client instance.

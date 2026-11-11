@@ -39,6 +39,7 @@ import type {
 export { assertTlsNotDisabledForRemote };
 export { DEFAULT_TOKEN_PATH, requestClientCredentialsToken } from "./token.js";
 export { buildFetchBody } from "./fetch-body.js";
+export { serializeParams } from "./request.js";
 export {
   createUmbracoFetchClient,
   type CreateUmbracoFetchClientOptions,

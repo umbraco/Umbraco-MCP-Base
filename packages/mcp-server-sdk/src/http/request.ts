@@ -12,6 +12,8 @@ import type { UmbracoManagementClientOptions, UmbracoRequestConfig } from "./typ
  * Serializes params for Umbraco API calls.
  * Handles array params in repeat format (e.g., id=1&id=2).
  * Replaces the `qs` library.
+ * @internal Exported for `@umbraco-cms/mcp-hosted` (released in lockstep); not a
+ *   supported public API, so its shape may change in any release.
  */
 export function serializeParams(params: Record<string, unknown> | undefined): string {
   if (!params) return "";
