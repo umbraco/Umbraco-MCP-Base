@@ -816,25 +816,39 @@ if (errors.length > 0) {
 
 Well-known Umbraco IDs for common operations.
 
-```typescript
-import {
-  BLANK_UUID,
-  FOLDER_MEDIA_TYPE_ID,
-  IMAGE_MEDIA_TYPE_ID,
-  FILE_MEDIA_TYPE_ID,
-  STANDARD_MEDIA_TYPES,
-} from '@umbraco-cms/mcp-server-sdk';
+> **The media type and data type ID constants are fresh-install keys only.**
+> Sites upgraded from older Umbraco versions use different keys for the same
+> built-in types (e.g. the File media type is `0de4a970-…` on an upgraded site
+> but `4c52d8ab-…` on a fresh one), so sending a hard-coded key to such a site
+> fails with a 404. Use them for tests and fixtures against a fresh install, and
+> resolve the id at runtime for anything that runs against a real site.
 
-// Use in tool implementations
-if (STANDARD_MEDIA_TYPES.includes(mediaTypeId)) {
-  // Handle standard media type
+### Resolving media type ids
+
+`resolveMediaTypeId(alias)` looks a media type up on the connected site by its
+alias, which is stable across installs even when the key is not. It returns the
+site's id, or `undefined` when no media type has that alias.
+
+```typescript
+import { resolveMediaTypeId, MEDIA_TYPE_ALIASES } from '@umbraco-cms/mcp-server-sdk';
+
+const folderTypeId = await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder);
+if (!folderTypeId) {
+  throw new Error('This site has no Folder media type');
 }
 ```
 
-Available constants:
+- Uses `UmbracoManagementClient`, so it works on stdio (after `initializeUmbracoFetch()`), with `setCustomTransport()` and inside hosted sessions. Pass `{ client }` to use another Orval-style mutator.
+- Looks candidates up with `GET /umbraco/management/api/v1/item/media-type/search` (which matches names), checks each candidate's alias with `GET /media-type/{id}`, and falls back to walking `GET /tree/media-type/root` / `children` if the type was renamed.
+- Found ids are cached per base URL (the hosted session's, else the one given to `initializeUmbracoFetch()`, or `{ baseUrl }`). Misses and errors are not cached. `clearMediaTypeIdCache()` empties the cache.
+- `MEDIA_TYPE_ALIASES` holds the built-in aliases: `Folder`, `Image`, `File`, `umbracoMediaVideo`, `umbracoMediaAudio`, `umbracoMediaArticle`, `umbracoMediaVectorGraphics`.
+
+### Available constants
+
 - `BLANK_UUID` - Empty UUID for testing/snapshots
-- Media type IDs: `FOLDER_MEDIA_TYPE_ID`, `IMAGE_MEDIA_TYPE_ID`, `FILE_MEDIA_TYPE_ID`, `VIDEO_MEDIA_TYPE_ID`, `AUDIO_MEDIA_TYPE_ID`, `ARTICLE_MEDIA_TYPE_ID`, `VECTOR_GRAPHICS_MEDIA_TYPE_ID`
-- Data type IDs: `TextString_DATA_TYPE_ID`, `MEDIA_PICKER_DATA_TYPE_ID`, `MEMBER_PICKER_DATA_TYPE_ID`, `TAG_DATA_TYPE_ID`
+- Media type aliases: `MEDIA_TYPE_ALIASES` (stable across installs; use with `resolveMediaTypeId`)
+- Media type IDs (**deprecated, fresh install only**): `FOLDER_MEDIA_TYPE_ID`, `IMAGE_MEDIA_TYPE_ID`, `FILE_MEDIA_TYPE_ID`, `VIDEO_MEDIA_TYPE_ID`, `AUDIO_MEDIA_TYPE_ID`, `ARTICLE_MEDIA_TYPE_ID`, `VECTOR_GRAPHICS_MEDIA_TYPE_ID`, and the name-keyed `STANDARD_MEDIA_TYPES` map
+- Data type IDs (**fresh install only**): `TextString_DATA_TYPE_ID`, `MEDIA_PICKER_DATA_TYPE_ID`, `MEMBER_PICKER_DATA_TYPE_ID`, `TAG_DATA_TYPE_ID`. Data types have no alias; on an arbitrary site look them up via the Management API (e.g. `GET /umbraco/management/api/v1/item/data-type/search`)
 - User group IDs: `TRANSLATORS_USER_GROUP_ID`, `WRITERS_USER_GROUP_ID`
 
 ## File Utilities

@@ -135,6 +135,12 @@ export {
 
 // URL helpers
 export { normalizeBaseUrl, isLoopbackUrl } from "./helpers/url.js";
+export {
+  resolveMediaTypeId,
+  clearMediaTypeIdCache,
+  type ResolveMediaTypeIdOptions,
+  type MediaTypeResolverClient,
+} from "./helpers/resolve-media-type-id.js";
 
 // ============================================================================
 // Telemetry
@@ -366,6 +372,7 @@ export {
   MEDIA_TYPE_AUDIO,
   MEDIA_TYPE_ARTICLE,
   MEDIA_TYPE_VECTOR_GRAPHICS,
+  MEDIA_TYPE_ALIASES,
   STANDARD_MEDIA_TYPES,
 } from "./constants/constants.js";
 

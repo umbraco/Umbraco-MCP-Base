@@ -295,6 +295,17 @@ export function isUmbracoFetchInitialized(): boolean {
 }
 
 /**
+ * The normalized base URL the singleton client was initialized with, or
+ * `undefined` before `initializeUmbracoFetch()`.
+ *
+ * @internal Used to key per-site caches (e.g. `resolveMediaTypeId`); not part
+ * of the public barrels.
+ */
+export function getUmbracoFetchBaseUrl(): string | undefined {
+  return authConfig?.baseUrl;
+}
+
+/**
  * Clear the current access token (forces re-authentication on next request).
  */
 export function clearUmbracoFetchToken(): void {

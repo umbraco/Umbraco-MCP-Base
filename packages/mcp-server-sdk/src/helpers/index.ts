@@ -33,6 +33,14 @@ export {
   type ClientProvider,
 } from "./api-call-helpers.js";
 
+// Media type id resolution (replaces the fresh-install-only *_MEDIA_TYPE_ID constants)
+export {
+  resolveMediaTypeId,
+  clearMediaTypeIdCache,
+  type ResolveMediaTypeIdOptions,
+  type MediaTypeResolverClient,
+} from "./resolve-media-type-id.js";
+
 // Tool result helpers
 export {
   configureToolResultMode,
