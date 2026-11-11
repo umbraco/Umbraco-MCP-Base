@@ -83,6 +83,8 @@ export default {
       authorizeEndpoint: "/authorize",
       tokenEndpoint: "/token",
       clientRegistrationEndpoint: "/register",
+      // Advertise and accept S256 only (the authorize handler also enforces it).
+      allowPlainPKCE: false,
     });
 
     return createWorkerExport(provider as any, options).fetch(request, env, ctx);

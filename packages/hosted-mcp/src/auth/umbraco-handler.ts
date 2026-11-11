@@ -332,13 +332,14 @@ export function createAuthorizeHandler(
     // OAuthProvider only validates redirect_uri against the client's
     // registration when both values are present, so require both here.
     if (!authRequest.clientId || !authRequest.redirectUri) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_request",
-          error_description: "client_id and redirect_uri are required",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return invalidRequest("client_id and redirect_uri are required");
+    }
+
+    // PKCE with S256 is mandatory (OAuth 2.1; MCP authorization spec).
+    // OAuthProvider accepts requests without PKCE, or with "plain", unless
+    // configured otherwise, so enforce it here for every deployment.
+    if (!authRequest.codeChallenge || authRequest.codeChallengeMethod !== "S256") {
+      return invalidRequest("PKCE with code_challenge_method=S256 is required");
     }
 
     // Handle POST (consent form submission)
@@ -598,6 +599,13 @@ export function createAuthorizeHandler(
       );
     }
   };
+}
+
+function invalidRequest(description: string): Response {
+  return new Response(
+    JSON.stringify({ error: "invalid_request", error_description: description }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
 }
 
 /**

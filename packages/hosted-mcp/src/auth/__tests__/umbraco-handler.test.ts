@@ -83,6 +83,8 @@ function createMockAuthRequest(
     redirectUri: "https://client.example.com/callback",
     scope: ["openid", "offline_access"],
     state: "client-state-abc",
+    codeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    codeChallengeMethod: "S256",
     ...overrides,
   };
 }
@@ -2072,6 +2074,20 @@ describe("browser-bound authorization flow", () => {
       expect(response.status).toBe(400);
       expect(mockConsentResponse).not.toHaveBeenCalled();
       expect(mockStoreOAuthState).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no code_challenge", { codeChallenge: undefined }],
+      ["plain method", { codeChallengeMethod: "plain" }],
+      ["no method", { codeChallengeMethod: undefined }],
+    ])("rejects a request with %s before showing consent", async (_name, override) => {
+      const response = await createAuthorizeHandler(createMockEnv())(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest(override)
+      );
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain("S256");
+      expect(mockConsentResponse).not.toHaveBeenCalled();
     });
 
     it("rejects a consent submission without redirect_uri", async () => {
