@@ -13,6 +13,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals
 import type { HostedMcpEnv } from "../../types/env.js";
 import type { AuthProps } from "../../types/auth.js";
 import type { RefreshFailure } from "../../auth/token-storage.js";
+import { umbracoTokenKvKey } from "../../auth/token-storage.js";
 
 // The fetch client is what reports the refresh failure, so it's the seam.
 let refreshFailure: RefreshFailure | undefined;
@@ -36,8 +37,9 @@ jest.unstable_mockModule("../../http/umbraco-fetch-client.js", () => ({
 const kvDelete = jest.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
 /** What KV holds for this login when the server re-reads it before deleting. */
 let storedRefreshToken: string | undefined;
-const kvGet = jest.fn(async () =>
-  storedRefreshToken === undefined
+/** Serves a plaintext entry from before encryption at rest (legacy key only). */
+const kvGet = jest.fn(async (key: string) =>
+  storedRefreshToken === undefined || !key.startsWith("umbraco_token:")
     ? null
     : JSON.stringify({ tokens: { access_token: "a", refresh_token: storedRefreshToken } })
 );
@@ -412,7 +414,9 @@ describe("createPerRequestServer with a rejected refresh token", () => {
 
     await expectSignInUnavailable((await start()).error);
 
-    expect(kvDelete).toHaveBeenCalledTimes(1);
+    // Both the encrypted entry and any legacy plaintext entry are removed.
+    expect(kvDelete).toHaveBeenCalledTimes(2);
+    expect(kvDelete).toHaveBeenCalledWith(await umbracoTokenKvKey(props.umbracoTokenKey));
     expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
   });
 
@@ -454,7 +458,9 @@ describe("createPerRequestServer with a rejected refresh token", () => {
 
       expect(server).toBeUndefined();
       expect((await expectSignInUnavailable(error)).reason).toBe(cause);
-      expect(kvDelete).toHaveBeenCalledTimes(1);
+      // Both the encrypted entry and any legacy plaintext entry are removed.
+      expect(kvDelete).toHaveBeenCalledTimes(2);
+      expect(kvDelete).toHaveBeenCalledWith(await umbracoTokenKvKey(props.umbracoTokenKey));
       expect(kvDelete).toHaveBeenCalledWith(`umbraco_token:${props.umbracoTokenKey}`);
     }
   );

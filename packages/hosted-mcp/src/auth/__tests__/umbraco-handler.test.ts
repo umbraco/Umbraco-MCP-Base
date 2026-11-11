@@ -776,6 +776,23 @@ describe("createAuthorizeHandler", () => {
       },
     ];
 
+    it("records the site's callback path in state, matching the redirect_uri sent to Umbraco", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env, { sites });
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        headers: { Cookie: consentCookie() },
+        body: createApproveFormBody({ siteId: "prod" }),
+      });
+
+      const response = await handler(request, createMockAuthRequest());
+
+      const [, , data] = mockStoreOAuthState.mock.calls[0] as [unknown, string, Record<string, unknown>];
+      expect(data.callbackPath).toBe("/callback/prod");
+      const location = new URL(response.headers.get("Location")!);
+      expect(location.searchParams.get("redirect_uri")).toBe("https://worker.example.com/callback/prod");
+    });
+
     it("uses site-specific baseUrl in redirect", async () => {
       const env = createMockEnv();
       const handler = createAuthorizeHandler(env, { sites });
@@ -878,6 +895,7 @@ describe("createCallbackHandler", () => {
       siteClientId: "test-client-id",
       siteClientSecret: "test-client-secret",
       siteBaseUrl: "https://umbraco.example.com",
+      callbackPath: "/callback",
       ...overrides,
     };
   }
@@ -903,7 +921,9 @@ describe("createCallbackHandler", () => {
       const result = await handler(request);
 
       expect(result.props.umbracoTokenKey).toBeTruthy();
-      expect(result.props.userId).toBe("unknown");
+      // The mocked current-user lookup returns no id, so the grant gets an id
+      // unique to this sign-in (never a shared value).
+      expect(result.props.userId).toMatch(/^login-[0-9a-f]{32}$/);
       expect(result.authRequest.clientId).toBe("mcp-client-1");
     });
 
@@ -947,7 +967,8 @@ describe("createCallbackHandler", () => {
         )
       );
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // The token exchange, then the current-user lookup.
+      expect(mockFetch).toHaveBeenCalledTimes(2);
       const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
       expect(url).toBe(
         "https://umbraco.example.com/umbraco/management/api/v1/security/back-office/token"
@@ -989,6 +1010,71 @@ describe("createCallbackHandler", () => {
       expect(typeof tokenKey).toBe("string");
       expect((tokenKey as string).length).toBeGreaterThan(0);
       expect(storedTokens).toEqual(tokens);
+    });
+  });
+
+  describe("grant user", () => {
+    /** Token endpoint returns tokens; /user/current returns `user` (or `status`). */
+    function umbracoResponds(user: Record<string, unknown> | null, status = 200) {
+      mockFetch.mockImplementation((async (input: unknown, init?: RequestInit) => {
+        if (String(input).endsWith("/user/current")) {
+          expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer umbraco-access");
+          return createJsonResponse(status, user ?? {});
+        }
+        return createJsonResponse(200, { access_token: "umbraco-access", token_type: "Bearer" });
+      }) as typeof fetch);
+    }
+
+    async function signIn(siteBaseUrl?: string) {
+      mockConsumeOAuthState.mockResolvedValue(
+        makeStoredState(siteBaseUrl ? { siteBaseUrl } : {})
+      );
+      const handler = createCallbackHandler(createMockEnv());
+      return handler(callbackRequest("https://worker.example.com/callback?code=c&state=s"));
+    }
+
+    it("identifies the grant by the signed-in Umbraco user, without embedding their id", async () => {
+      umbracoResponds({ id: "user-guid-1", name: "Ada", email: "ada@example.com" });
+      const result = await signIn();
+      expect(result.props.userId).toMatch(/^[0-9a-f]{32}$/);
+      expect(result.props.userId).not.toContain("user-guid-1");
+      expect(result.props.userName).toBe("Ada");
+      expect(result.props.userEmail).toBe("ada@example.com");
+    });
+
+    it("gives the same user the same id on each sign-in, so a new grant replaces their old one", async () => {
+      umbracoResponds({ id: "user-guid-1" });
+      const first = await signIn();
+      const second = await signIn();
+      expect(second.props.userId).toBe(first.props.userId);
+    });
+
+    it("gives different users different ids", async () => {
+      umbracoResponds({ id: "user-guid-1" });
+      const first = await signIn();
+      umbracoResponds({ id: "user-guid-2" });
+      const second = await signIn();
+      expect(second.props.userId).not.toBe(first.props.userId);
+    });
+
+    it("scopes the id to the site, since Umbraco user ids can repeat across installs", async () => {
+      umbracoResponds({ id: "same-default-admin-id" });
+      const siteA = await signIn("https://site-a.example.com");
+      const siteB = await signIn("https://site-b.example.com");
+      expect(siteB.props.userId).not.toBe(siteA.props.userId);
+    });
+
+    it("falls back to an id unique to the sign-in when the user can't be looked up", async () => {
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        umbracoResponds(null, 500);
+        const first = await signIn();
+        const second = await signIn();
+        expect(first.props.userId).toMatch(/^login-[0-9a-f]{32}$/);
+        expect(second.props.userId).not.toBe(first.props.userId);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 
@@ -1105,6 +1191,7 @@ describe("createCallbackHandler", () => {
           siteClientSecret: "prod-secret",
           siteBaseUrl: "https://prod.umbraco.com",
           consentChoices: { siteId: "prod" } as ConsentChoices,
+          callbackPath: "/callback/prod",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1138,6 +1225,7 @@ describe("createCallbackHandler", () => {
       mockConsumeOAuthState.mockResolvedValue(
         makeStoredState({
           consentChoices: { siteId: "staging" } as ConsentChoices,
+          callbackPath: "/callback/staging",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1170,6 +1258,7 @@ describe("createCallbackHandler", () => {
             siteId: "my-project.uksouth01",
             callbackId: "my-project",
           } as ConsentChoices,
+          callbackPath: "/callback/my-project",
         })
       );
       mockFetch.mockResolvedValue(
@@ -1192,6 +1281,76 @@ describe("createCallbackHandler", () => {
       expect(params.get("redirect_uri")).toBe(
         "https://worker.example.com/callback/my-project"
       );
+    });
+  });
+
+  describe("callback path must match the site the sign-in started for", () => {
+    function stateFor(callbackPath: string | undefined, siteId?: string) {
+      return makeStoredState({
+        ...(callbackPath ? { callbackPath } : {}),
+        ...(siteId ? { consentChoices: { siteId } as ConsentChoices } : {}),
+      });
+    }
+
+    it("rejects a code that comes back on another site's callback path, before any token exchange", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(stateFor("/callback/tenant-a", "tenant-a"));
+
+      const handler = createCallbackHandler(env);
+      await expect(
+        handler(callbackRequest("https://worker.example.com/callback/tenant-b?code=c&state=s"))
+      ).rejects.toThrow("does not match the site");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects the plain /callback when the sign-in was started for a site", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(stateFor("/callback/tenant-a", "tenant-a"));
+
+      const handler = createCallbackHandler(env);
+      await expect(
+        handler(callbackRequest("https://worker.example.com/callback?code=c&state=s"))
+      ).rejects.toThrow("does not match the site");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects a site path when the sign-in was single-site", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(stateFor("/callback"));
+
+      const handler = createCallbackHandler(env);
+      await expect(
+        handler(callbackRequest("https://worker.example.com/callback/tenant-a?code=c&state=s"))
+      ).rejects.toThrow("does not match the site");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("uses the stored callback path as the token exchange redirect_uri", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue(stateFor("/callback/region-qualified", "tenant-a"));
+      mockFetch.mockResolvedValue(createJsonResponse(200, { access_token: "tok", token_type: "Bearer" }));
+
+      const handler = createCallbackHandler(env);
+      await handler(callbackRequest("https://worker.example.com/callback/region-qualified?code=c&state=s"));
+
+      const body = (mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string;
+      expect(new URLSearchParams(body).get("redirect_uri")).toBe(
+        "https://worker.example.com/callback/region-qualified"
+      );
+    });
+
+    it("rejects a state stored before the callback path was recorded, even on the matching path", async () => {
+      const env = createMockEnv();
+      mockConsumeOAuthState.mockResolvedValue({
+        ...makeStoredState({ consentChoices: { siteId: "tenant-a" } as ConsentChoices }),
+        callbackPath: undefined,
+      });
+
+      const handler = createCallbackHandler(env);
+      await expect(
+        handler(callbackRequest("https://worker.example.com/callback/tenant-a?code=c&state=s"))
+      ).rejects.toThrow("does not match the site");
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -2106,6 +2265,7 @@ describe("browser-bound authorization flow", () => {
       codeVerifier: "verifier",
       siteClientId: "test-client-id",
       siteBaseUrl: "https://umbraco.example.com",
+      callbackPath: "/callback",
     });
 
     it("rejects a callback without the state cookie before touching state or tokens", async () => {

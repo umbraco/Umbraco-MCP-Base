@@ -15,6 +15,9 @@ import {
   storeUmbracoToken,
   getRejectedRefreshToken,
   getStoredUmbracoToken,
+  sealUmbracoTokenEntry,
+  tokenLogRef,
+  umbracoTokenKvKey,
   type RefreshFailure,
 } from "../token-storage.js";
 import type { HostedMcpEnv } from "../../types/env.js";
@@ -31,6 +34,12 @@ let postedRefreshTokens: string[] = [];
 function createKv(options: {
   /** JSON payloads for successive `get` calls; the last one repeats. */
   entries?: (string | null)[];
+  /**
+   * Serve `entries` encrypted, as the current store writes them, for this
+   * token key. Without it they're served as plaintext entries from before
+   * encryption at rest (legacy key only).
+   */
+  tokenKey?: string;
   /** Throws from `get` instead of resolving. */
   getThrows?: boolean;
   /** Throws from `put`, simulating a KV outage on the write-back. */
@@ -39,11 +48,16 @@ function createKv(options: {
   const entries = options.entries ?? [null];
   let reads = 0;
   return {
-    get: async () => {
+    get: async (key: string) => {
       if (options.getThrows) throw new Error("kv unavailable");
+      const encrypted = options.tokenKey !== undefined;
+      if (encrypted ? key !== (await umbracoTokenKvKey(options.tokenKey!)) : !key.startsWith("umbraco_token:")) {
+        return null;
+      }
       const entry = entries[Math.min(reads, entries.length - 1)];
       reads += 1;
-      return entry;
+      if (!encrypted || entry === null) return entry;
+      return (await sealUmbracoTokenEntry(options.tokenKey!, JSON.parse(entry))).value;
     },
     put: async () => {
       if (options.putThrows) throw new Error("kv write quota exceeded");
@@ -56,6 +70,17 @@ function createKv(options: {
 /** A stored-token envelope holding a single refresh token. */
 function storedEntry(refreshToken: string): string {
   return JSON.stringify({ tokens: { access_token: "stored-access", refresh_token: refreshToken } });
+}
+
+/**
+ * Writes an encrypted entry straight into a map-backed KV, standing in for
+ * another isolate's write (bypasses this module's store path and its cache).
+ */
+async function writeDirectly(data: Map<string, string>, tokenKey: string, refreshToken: string) {
+  const { kvKey, value } = await sealUmbracoTokenEntry(tokenKey, {
+    tokens: { access_token: "stored-access", token_type: "Bearer", refresh_token: refreshToken },
+  });
+  data.set(kvKey, value);
 }
 
 function createEnv(kv: ReturnType<typeof createKv>): HostedMcpEnv {
@@ -256,7 +281,7 @@ describe("refreshUmbracoToken with a refresh token that was rotated underneath i
       json({ error: "invalid_grant" }, 400),
       json({ access_token: "fresh-access", refresh_token: "newest" }, 200)
     );
-    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")] }));
+    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")], tokenKey: "key-rotated" }));
 
     const result = await refreshUmbracoToken(env, "key-rotated", "caller-snapshot");
 
@@ -264,9 +289,22 @@ describe("refreshUmbracoToken with a refresh token that was rotated underneath i
     expect(postedRefreshTokens).toEqual(["stale", "rotated"]);
   });
 
+  it("retries with a newer token from a plaintext entry written before encryption at rest", async () => {
+    respondWith(
+      json({ error: "invalid_grant" }, 400),
+      json({ access_token: "fresh-access", refresh_token: "newest" }, 200)
+    );
+    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")] }));
+
+    const result = await refreshUmbracoToken(env, "key-rotated-legacy", "caller-snapshot");
+
+    expect(result).toMatchObject({ ok: true, accessToken: "fresh-access" });
+    expect(postedRefreshTokens).toEqual(["stale", "rotated"]);
+  });
+
   it("returns expired without retrying when KV still holds the token just tried", async () => {
     respondWith(json({ error: "invalid_grant" }, 400));
-    const env = createEnv(createKv({ entries: [storedEntry("same"), storedEntry("same")] }));
+    const env = createEnv(createKv({ entries: [storedEntry("same"), storedEntry("same")], tokenKey: "key-same-token" }));
 
     const result = await refreshUmbracoToken(env, "key-same-token", "caller-snapshot");
 
@@ -278,7 +316,7 @@ describe("refreshUmbracoToken with a refresh token that was rotated underneath i
 
   it("gives up after the single retry when the newer token is also rejected", async () => {
     respondWith(json({ error: "invalid_grant" }, 400));
-    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")] }));
+    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")], tokenKey: "key-both-rejected" }));
 
     const result = await refreshUmbracoToken(env, "key-both-rejected", "caller-snapshot");
 
@@ -334,15 +372,17 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     // `invalid_grant` with nothing newer in KV either, and reported a
     // definitive `expired` over what was really a one-time KV write blip.
     let putAttempts = 0;
-    let stored: string | null = null;
+    const data = new Map<string, string>();
     const kv = {
-      get: async () => stored,
-      put: async (_key: string, value: string) => {
+      get: async (key: string) => data.get(key) ?? null,
+      put: async (key: string, value: string) => {
         putAttempts += 1;
         if (putAttempts === 1) throw new Error("kv write quota exceeded");
-        stored = value;
+        data.set(key, value);
       },
-      delete: async () => undefined,
+      delete: async (key: string) => {
+        data.delete(key);
+      },
     };
     const env = createEnv(kv as unknown as ReturnType<typeof createKv>);
 
@@ -367,7 +407,7 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     // (bypassing this module's own store path, standing in for an unrelated
     // write to the same key) and check the next call picks that up instead
     // of a leftover cached value shadowing it.
-    stored = storedEntry("rotated-external");
+    await writeDirectly(data, "key-cache-recovery", "rotated-external");
     await refreshUmbracoToken(env, "key-cache-recovery", "some-other-snapshot");
     expect(postedRefreshTokens[2]).toEqual("rotated-external");
   });
@@ -381,14 +421,16 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
     // accepted limitation). That starved the retry of the one case it exists
     // for, turning a recoverable situation into a false `expired`.
     let putShouldThrow = true;
-    let stored: string | null = null;
+    const data = new Map<string, string>();
     const kv = {
-      get: async () => stored,
-      put: async (_key: string, value: string) => {
+      get: async (key: string) => data.get(key) ?? null,
+      put: async (key: string, value: string) => {
         if (putShouldThrow) throw new Error("kv write quota exceeded");
-        stored = value;
+        data.set(key, value);
       },
-      delete: async () => undefined,
+      delete: async (key: string) => {
+        data.delete(key);
+      },
     };
     const env = createEnv(kv as unknown as ReturnType<typeof createKv>);
 
@@ -403,7 +445,7 @@ describe("refreshUmbracoToken when the new tokens cannot be persisted", () => {
 
     // Simulate another isolate persisting a genuinely newer token while this
     // isolate's cache still holds the one from its own failed write above.
-    stored = storedEntry("kv-newer");
+    await writeDirectly(data, "key-cross-isolate", "kv-newer");
     putShouldThrow = false;
 
     const second = await refreshUmbracoToken(env, "key-cross-isolate", "rt");
@@ -442,7 +484,7 @@ describe("getRejectedRefreshToken", () => {
 
   it("reports the token actually posted for an expired failure", async () => {
     respondWith(json({ error: "invalid_grant" }, 400));
-    const env = createEnv(createKv({ entries: [storedEntry("same")] }));
+    const env = createEnv(createKv({ entries: [storedEntry("same")], tokenKey: "key-rejected-same" }));
 
     const result = await refreshUmbracoToken(env, "key-rejected-same", "caller-snapshot");
 
@@ -454,7 +496,7 @@ describe("getRejectedRefreshToken", () => {
 
   it("reports the retried token when the bounded retry was also rejected", async () => {
     respondWith(json({ error: "invalid_grant" }, 400));
-    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")] }));
+    const env = createEnv(createKv({ entries: [storedEntry("stale"), storedEntry("rotated")], tokenKey: "key-rejected-retry" }));
 
     const result = await refreshUmbracoToken(env, "key-rejected-retry", "caller-snapshot");
 
@@ -552,7 +594,10 @@ describe("deleteStoredUmbracoToken", () => {
 describe("getStoredUmbracoToken with a corrupt entry", () => {
   it("returns null and logs without echoing the stored value", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-    const kv = { get: async () => "{not json s3cr3t" } as unknown as KVNamespace;
+    // A corrupt plaintext entry from before encryption at rest.
+    const kv = {
+      get: async (key: string) => (key.startsWith("umbraco_token:") ? "{not json s3cr3t" : null),
+    } as unknown as KVNamespace;
 
     try {
       expect(await getStoredUmbracoToken(kv, "corrupt-key")).toBeNull();
@@ -570,30 +615,109 @@ describe("getStoredUmbracoToken with a corrupt entry", () => {
 // Umbraco-MCP-Base#383: `expires_in` alone can't say whether a stored token is
 // still valid (there's no issue time), so storing stamps an absolute expiry.
 describe("storeUmbracoToken expires_at", () => {
-  function captureKv() {
-    const puts: string[] = [];
-    return {
-      puts,
-      kv: {
-        put: async (_key: string, value: string) => {
-          puts.push(value);
-        },
-      } as unknown as KVNamespace,
-    };
-  }
-
   it("stamps an absolute expires_at from expires_in", async () => {
-    const { kv, puts } = captureKv();
+    const kv = mapKv();
     const before = Date.now();
     await storeUmbracoToken(kv, "key", { access_token: "a", token_type: "Bearer", expires_in: 600 });
-    const stored = JSON.parse(puts[0]);
-    expect(stored.tokens.expires_at).toBeGreaterThanOrEqual(before + 600_000);
-    expect(stored.tokens.expires_at).toBeLessThanOrEqual(Date.now() + 600_000);
+    const stored = await getStoredUmbracoToken(kv, "key");
+    expect(stored!.tokens.expires_at).toBeGreaterThanOrEqual(before + 600_000);
+    expect(stored!.tokens.expires_at).toBeLessThanOrEqual(Date.now() + 600_000);
   });
 
   it("leaves expires_at absent when Umbraco sent no expires_in", async () => {
-    const { kv, puts } = captureKv();
+    const kv = mapKv();
     await storeUmbracoToken(kv, "key", { access_token: "a", token_type: "Bearer" });
-    expect(JSON.parse(puts[0]).tokens).not.toHaveProperty("expires_at");
+    expect((await getStoredUmbracoToken(kv, "key"))!.tokens).not.toHaveProperty("expires_at");
+  });
+});
+
+/** Map-backed KV with real reads, writes and deletes. */
+function mapKv(data = new Map<string, string>()): KVNamespace & { data: Map<string, string> } {
+  return {
+    data,
+    get: async (key: string) => data.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      data.set(key, value);
+    },
+    delete: async (key: string) => {
+      data.delete(key);
+    },
+  } as unknown as KVNamespace & { data: Map<string, string> };
+}
+
+describe("Umbraco token entries are encrypted at rest", () => {
+  const tokens = {
+    access_token: "secret-access-token",
+    token_type: "Bearer",
+    refresh_token: "secret-refresh-token",
+  };
+  const site = { oauthClientId: "site-client", oauthClientSecret: "site-client-secret", baseUrl: "https://site.example" };
+  const tokenKey = "a".repeat(64);
+
+  it("round-trips through store and read", async () => {
+    const kv = mapKv();
+    await storeUmbracoToken(kv, tokenKey, tokens, site);
+    const stored = await getStoredUmbracoToken(kv, tokenKey);
+    expect(stored?.tokens.refresh_token).toBe("secret-refresh-token");
+    expect(stored?.site).toEqual(site);
+  });
+
+  it("stores neither the tokens, the client secret nor the token key in readable form", async () => {
+    const kv = mapKv();
+    await storeUmbracoToken(kv, tokenKey, tokens, site);
+    expect(kv.data.size).toBe(1);
+    const [[name, value]] = [...kv.data.entries()];
+    expect(name).toBe(await umbracoTokenKvKey(tokenKey));
+    expect(name).not.toContain(tokenKey);
+    for (const secret of ["secret-access-token", "secret-refresh-token", "site-client-secret", tokenKey]) {
+      expect(value).not.toContain(secret);
+    }
+  });
+
+  it("can't be read with another token key, even if moved into its slot", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const kv = mapKv();
+      await storeUmbracoToken(kv, tokenKey, tokens);
+      const otherKey = "b".repeat(64);
+      kv.data.set(await umbracoTokenKvKey(otherKey), kv.data.get(await umbracoTokenKvKey(tokenKey))!);
+      expect(await getStoredUmbracoToken(kv, otherKey)).toBeNull();
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain("could not be decrypted");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("still reads a plaintext entry from before encryption, and prefers the encrypted entry once stored", async () => {
+    const kv = mapKv(new Map([[`umbraco_token:${tokenKey}`, JSON.stringify({ tokens, site })]]));
+    expect((await getStoredUmbracoToken(kv, tokenKey))?.tokens.refresh_token).toBe("secret-refresh-token");
+
+    await storeUmbracoToken(kv, tokenKey, { ...tokens, refresh_token: "rotated" }, site);
+    expect((await getStoredUmbracoToken(kv, tokenKey))?.tokens.refresh_token).toBe("rotated");
+  });
+
+  it("leaves the plaintext entry to expire rather than deleting it on store", async () => {
+    // A second write that could fail after the tokens were saved, could be
+    // seen before the new entry elsewhere, and would break a rollback.
+    const kv = mapKv(new Map([[`umbraco_token:${tokenKey}`, JSON.stringify({ tokens })]]));
+    const deleteSpy = jest.spyOn(kv, "delete");
+    await storeUmbracoToken(kv, tokenKey, tokens);
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(kv.data.has(`umbraco_token:${tokenKey}`)).toBe(true);
+  });
+
+  it("logs a login reference that is neither the token key nor reversible to it", async () => {
+    const ref = await tokenLogRef(tokenKey);
+    expect(ref).toMatch(/^[A-Za-z0-9_-]{12}$/);
+    expect(tokenKey).not.toContain(ref);
+    expect((await umbracoTokenKvKey(tokenKey))).toContain(ref);
+  });
+
+  it("deleting removes both the encrypted and any plaintext entry", async () => {
+    const kv = mapKv();
+    await storeUmbracoToken(kv, tokenKey, tokens);
+    kv.data.set(`umbraco_token:${tokenKey}`, JSON.stringify({ tokens }));
+    expect(await deleteStoredUmbracoToken(kv, tokenKey, "secret-refresh-token")).toBe(true);
+    expect(kv.data.size).toBe(0);
   });
 });

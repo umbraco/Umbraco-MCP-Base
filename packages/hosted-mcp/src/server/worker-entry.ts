@@ -33,6 +33,7 @@ import {
 import {
   createAuthorizeHandler,
   createCallbackHandler,
+  UpstreamAuthorizationError,
   createLogoutCallbackHandler,
 } from "../auth/umbraco-handler.js";
 import type { ConsentModeOption, ConsentToolConfig } from "../auth/consent.js";
@@ -755,17 +756,25 @@ async function handleCallback(
     const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
       request: result.authRequest,
       userId: result.props.userId,
-      metadata: { userName: result.props.userName },
+      // Grant metadata is stored unencrypted; the user's name and email stay
+      // in props, which the provider encrypts.
+      metadata: {},
       scope: result.authRequest.scope,
       props: result.props,
     });
 
     return redirectResponse(redirectTo, [clearStateCookie]);
   } catch (error) {
+    // Umbraco ended the sign-in with an error, in the browser that started
+    // it: tell the MCP client (redirectTo is its validated redirect_uri).
+    if (error instanceof UpstreamAuthorizationError) {
+      return redirectResponse(error.redirectTo, [clearStateCookie]);
+    }
+
     const headers = new Headers();
     if (clearStateCookie) headers.append("Set-Cookie", clearStateCookie);
 
-    // Never redirect to the client here: the request may not have come from
+    // Otherwise never redirect to the client here: the request may not have come from
     // the browser that started the flow, so the client's redirect_uri is not
     // a safe destination.
     if (error instanceof FlowBindingError) {

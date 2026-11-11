@@ -18,8 +18,13 @@ const CLIENT_REDIRECT = "http://localhost:9999/callback";
 const CLIENT_STATE = "client-state-123";
 const CREDENTIALS = { email: "admin@admin.com", password: "1234567890" };
 
+// PKCE pair: CODE_CHALLENGE is the S256 (base64url SHA-256) of CODE_VERIFIER.
+const CODE_VERIFIER = "browser-binding-e2e-code-verifier-0123456789abcdef";
+const CODE_CHALLENGE = "Gl4j-eUZgNOTBvMm7mQIQYKTDCZ-WyIglhZRJ1nqeLk";
+
 let workerUrl: string;
 let authorizeUrl: string;
+let clientId: string;
 
 const isUmbracoAuthorize = (url: URL) =>
   url.pathname.endsWith("/security/back-office/authorize");
@@ -32,17 +37,23 @@ test.describe("Browser-bound sign-in", () => {
     workerUrl = await startWorker();
 
     const registration = await request.post(`${workerUrl}/register`, {
-      data: { redirect_uris: [CLIENT_REDIRECT], client_name: "Browser Binding E2E" },
+      data: {
+        redirect_uris: [CLIENT_REDIRECT],
+        client_name: "Browser Binding E2E",
+        // A public client with PKCE, like real MCP clients.
+        token_endpoint_auth_method: "none",
+      },
     });
     expect(registration.status()).toBe(201);
     const { client_id } = await registration.json();
+    clientId = client_id;
 
     authorizeUrl = `${workerUrl}/authorize?${new URLSearchParams({
       client_id,
       redirect_uri: CLIENT_REDIRECT,
       response_type: "code",
       state: CLIENT_STATE,
-      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      code_challenge: CODE_CHALLENGE,
       code_challenge_method: "S256",
     })}`;
   });
@@ -95,8 +106,45 @@ test.describe("Browser-bound sign-in", () => {
 
     await expect.poll(clientRedirect, { timeout: 30000 }).toBeDefined();
     const redirect = new URL(clientRedirect()!);
-    expect(redirect.searchParams.get("code")).toBeTruthy();
+    const code = redirect.searchParams.get("code");
+    expect(code).toBeTruthy();
     expect(redirect.searchParams.get("state")).toBe(CLIENT_STATE);
+
+    // Redeem the code. The access token is `{userId}:{grantId}:{secret}`; the
+    // grant belongs to the signed-in Umbraco user (a 32-hex hash), not a
+    // shared or per-sign-in fallback id.
+    const tokenResponse = await context.request.post(`${workerUrl}/token`, {
+      form: {
+        grant_type: "authorization_code",
+        code: code!,
+        redirect_uri: CLIENT_REDIRECT,
+        client_id: clientId,
+        code_verifier: CODE_VERIFIER,
+      },
+    });
+    expect(tokenResponse.status(), await tokenResponse.text()).toBe(200);
+    const { access_token } = await tokenResponse.json();
+    expect(access_token.split(":")[0]).toMatch(/^[0-9a-f]{32}$/);
+
+    // The token (audience-bound to this Worker) is accepted for MCP requests.
+    const mcp = await context.request.post(`${workerUrl}/mcp`, {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      data: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "browser-binding-e2e", version: "0.0.0" },
+        },
+      },
+    });
+    expect(mcp.status(), await mcp.text()).toBe(200);
 
     await context.close();
   });

@@ -18,6 +18,7 @@ import {
   getRejectedRefreshToken,
   getStoredUmbracoToken,
   refreshUmbracoToken,
+  tokenLogRef,
   type RefreshFailure,
   type RefreshTokenResult,
   type StoredSiteContext,
@@ -260,12 +261,12 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
       return false;
     }
     const { env, tokenKey } = config.refreshContext;
-    const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch((error) => {
+    const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch(async (error) => {
       // Logged, not swallowed: a KV outage here would otherwise read as
       // "nothing newer to adopt" and kill a session that is still healthy.
       logAuth(
         env,
-        `adoptStoredToken KV READ FAILED key=${tokenKey} error=${sanitizeForLog(
+        `adoptStoredToken KV READ FAILED login=${await tokenLogRef(tokenKey)} error=${sanitizeForLog(
           error instanceof Error ? error.message : "unknown error"
         )}`
       );
@@ -279,7 +280,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     if (typeof stored.expires_at !== "number" || Date.now() >= stored.expires_at) {
       return false;
     }
-    logAuth(env, `adopting a token refreshed by another client (key=${tokenKey})`);
+    logAuth(env, `adopting a token refreshed by another client (login=${await tokenLogRef(tokenKey)})`);
     currentToken = stored.access_token;
     currentExpiresAt = stored.expires_at;
     if (stored.refresh_token) {
@@ -480,7 +481,7 @@ export async function createFetchClientFromKV(
 ): Promise<UmbracoFetchClient | null> {
   const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
   if (!entry) {
-    logAuth(env, `createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
+    logAuth(env, `createFetchClientFromKV login=${await tokenLogRef(tokenKey)} no_tokens_in_kv`);
     return null;
   }
 
@@ -489,7 +490,7 @@ export async function createFetchClientFromKV(
   if (!tokens.refresh_token) {
     logAuth(
       env,
-      `createFetchClientFromKV key=${tokenKey} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
+      `createFetchClientFromKV login=${await tokenLogRef(tokenKey)} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
     );
   }
 

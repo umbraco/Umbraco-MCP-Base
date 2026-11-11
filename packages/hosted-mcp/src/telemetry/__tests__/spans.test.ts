@@ -61,7 +61,11 @@ const expiredEnv = {
 const fullEnv = {
   ...expiredEnv,
   OAUTH_KV: {
-    get: async () => JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } }),
+    // A plaintext entry from before encryption at rest (legacy key only).
+    get: async (key: string) =>
+      key.startsWith("umbraco_token:")
+        ? JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } })
+        : null,
     put: async () => undefined,
     delete: async () => undefined,
   },
@@ -281,7 +285,9 @@ describe("mcp.auth.refresh span", () => {
     const rotatedEnv = {
       ...refreshEnv,
       OAUTH_KV: {
-        get: async () => {
+        // Plaintext entries from before encryption at rest (legacy key only).
+        get: async (key: string) => {
+          if (!key.startsWith("umbraco_token:")) return null;
           const entry = entries[Math.min(reads, entries.length - 1)];
           reads += 1;
           return entry;
