@@ -184,6 +184,31 @@ describe("resolveMediaTypeId", () => {
     expect(requests.length).toBeGreaterThan(afterFirst);
   });
 
+  it("returns undefined to every concurrent caller on a miss", async () => {
+    const results = await Promise.all([resolveMediaTypeId("doesNotExist"), resolveMediaTypeId("doesNotExist")]);
+    expect(results).toEqual([undefined, undefined]);
+  });
+
+  it("does not cache a custom client's result under another site's key", async () => {
+    // The module client points at the upgraded site; this client talks to the other one.
+    const client = <T>(config: { url: string; params?: Record<string, unknown> }): Promise<T> => {
+      const query = new URLSearchParams(
+        Object.entries(config.params ?? {}).map(([k, v]) => [k, String(v)])
+      ).toString();
+      return fetch(`${OTHER_SITE}${config.url}${query ? `?${query}` : ""}`).then((r) => r.json() as Promise<T>);
+    };
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder, { client })).toBe("44444444-4444-4444-8444-444444444444");
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder)).toBe("c5ed92a2-8233-35f0-963d-60c3caf1e7e1");
+
+    // With baseUrl the custom client's result is cached under that site.
+    await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder, { client, baseUrl: OTHER_SITE });
+    const before = requests.length;
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder, { client, baseUrl: `${OTHER_SITE}/` })).toBe(
+      "44444444-4444-4444-8444-444444444444"
+    );
+    expect(requests.length).toBe(before);
+  });
+
   it("propagates API errors without caching them", async () => {
     server.use(
       http.get(`${UPGRADED_SITE}${API}/item/media-type/search`, () =>

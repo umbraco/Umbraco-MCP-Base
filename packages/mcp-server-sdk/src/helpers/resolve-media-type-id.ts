@@ -43,6 +43,8 @@ export interface ResolveMediaTypeIdOptions {
   /**
    * Request function to use. Defaults to `UmbracoManagementClient`, which
    * honours the hosted session transport and `setCustomTransport()`.
+   * A custom client's results are only cached when `baseUrl` is also given,
+   * since the resolver can't tell which site the client talks to.
    */
   client?: MediaTypeResolverClient;
 }
@@ -111,7 +113,10 @@ export async function resolveMediaTypeId(
   options: ResolveMediaTypeIdOptions = {}
 ): Promise<string | undefined> {
   const client = options.client ?? (UmbracoManagementClient as MediaTypeResolverClient);
-  const baseUrl = await resolveCacheKey(options.baseUrl);
+  // A caller-supplied client may target any site, so only cache its results
+  // when the caller says which site that is.
+  const baseUrl =
+    options.client && !options.baseUrl ? undefined : await resolveCacheKey(options.baseUrl);
 
   const lookup = () => findMediaTypeId(client, alias, options.searchName ?? BUILT_IN_NAMES[alias] ?? alias);
 
@@ -126,7 +131,7 @@ export async function resolveMediaTypeId(
   }
   const cached = site.get(alias);
   if (cached) {
-    return cached;
+    return settle(cached);
   }
 
   const siteCache = site;
@@ -137,12 +142,20 @@ export async function resolveMediaTypeId(
     return id;
   });
   siteCache.set(alias, pending);
-  try {
-    return await pending;
-  } catch (error) {
+  // Drop misses and errors from the cache so the next call retries.
+  pending.catch(() => {
     if (siteCache.get(alias) === pending) {
       siteCache.delete(alias);
     }
+  });
+  return settle(pending);
+}
+
+/** Awaits a shared lookup, turning the internal miss marker into `undefined` for every caller. */
+async function settle(pending: Promise<string>): Promise<string | undefined> {
+  try {
+    return await pending;
+  } catch (error) {
     if (error instanceof NotFound) {
       return undefined;
     }

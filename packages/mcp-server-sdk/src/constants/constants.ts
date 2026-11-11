@@ -96,9 +96,10 @@ export const MEDIA_TYPE_ARTICLE = "Article";
 export const MEDIA_TYPE_VECTOR_GRAPHICS = "SVG";
 
 /**
- * Media type aliases Umbraco seeds on every install (mirrors
+ * Aliases of the media types a fresh Umbraco install seeds (mirrors
  * `Umbraco.Cms.Core.Constants.Conventions.MediaTypes`). Unlike the keys above,
- * these are the same on fresh and upgraded sites. Note the built-in Video,
+ * an alias doesn't change between fresh and upgraded sites, though an upgraded
+ * site may not have every type (`resolveMediaTypeId()` then returns `undefined`). Note the built-in Video,
  * Audio, Article and SVG types have `umbracoMedia…` aliases that differ from
  * their names.
  *

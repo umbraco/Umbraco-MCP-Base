@@ -838,9 +838,9 @@ if (!folderTypeId) {
 }
 ```
 
-- Uses `UmbracoManagementClient`, so it works on stdio (after `initializeUmbracoFetch()`), with `setCustomTransport()` and inside hosted sessions. Pass `{ client }` to use another Orval-style mutator.
+- Uses `UmbracoManagementClient`, so it works on stdio (after `initializeUmbracoFetch()`), with `setCustomTransport()` and inside hosted sessions. Pass `{ client }` to use another Orval-style mutator; also pass `{ baseUrl }` (the site that client talks to) or its results are not cached.
 - Looks candidates up with `GET /umbraco/management/api/v1/item/media-type/search` (which matches names), checks each candidate's alias with `GET /media-type/{id}`, and falls back to walking `GET /tree/media-type/root` / `children` if the type was renamed.
-- Found ids are cached per base URL (the hosted session's, else the one given to `initializeUmbracoFetch()`, or `{ baseUrl }`). Misses and errors are not cached. `clearMediaTypeIdCache()` empties the cache.
+- Found ids are cached per base URL: `{ baseUrl }` if given, else the hosted session's, else the one passed to `initializeUmbracoFetch()`. If none is known, the result is not cached. Misses and errors are never cached. `clearMediaTypeIdCache()` empties the cache.
 - `MEDIA_TYPE_ALIASES` holds the built-in aliases: `Folder`, `Image`, `File`, `umbracoMediaVideo`, `umbracoMediaAudio`, `umbracoMediaArticle`, `umbracoMediaVectorGraphics`.
 
 ### Available constants
