@@ -24,6 +24,9 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
   worker = await unstable_dev("tests/hosted-chained-mcp-e2e/worker/worker.ts", {
     config: "tests/hosted-chained-mcp-e2e/wrangler.chaining.toml",
     port: 8788,
+    // Serve over https (self-signed) so the sign-in flow matches production:
+    // __Host- cookies, Secure, and https redirect URIs.
+    localProtocol: "https",
     experimental: { disableExperimentalWarning: true },
     vars: { ...BASE_VARS, ...varsOverride },
     logLevel: "error",
@@ -31,7 +34,7 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
 
   const address = worker.address;
   const port = worker.port;
-  workerUrl = `http://${address}:${port}`;
+  workerUrl = `https://${address}:${port}`;
   return workerUrl;
 }
 

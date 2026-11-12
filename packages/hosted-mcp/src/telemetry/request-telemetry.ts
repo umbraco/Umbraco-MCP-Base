@@ -15,11 +15,11 @@
  *    *whole* siteId is hashed, region included, so two regions of one alias
  *    stay distinct tenants.
  * 2. **Neither does `umbracoTokenKey`, for a different reason.** It's opaque
- *    from birth (not identifying on its own), but it's also the KV key the
- *    Worker uses to look up that login's stored Umbraco access/refresh
- *    tokens (`token-storage.ts`'s `umbraco_token:${tokenKey}`). Forwarding it
- *    unhashed would export a live credential-store key to whatever reads the
- *    tracing backend. It rides the same `TENANT_HASH_KEY`-keyed hash as
+ *    from birth (not identifying on its own), but it's also the secret the
+ *    Worker derives that login's stored Umbraco token entry from: both its
+ *    KV key and its encryption key (`token-storage.ts`). Forwarding it
+ *    unhashed would export the means to find and decrypt those tokens to
+ *    whatever reads the tracing backend. It rides the same `TENANT_HASH_KEY`-keyed hash as
  *    tenant, so the exported `login_session` attribute stays stable and
  *    distinct per login without being usable as that key outside the Worker.
  * 3. **Absent means absent — for tenant and login-session.** No consent

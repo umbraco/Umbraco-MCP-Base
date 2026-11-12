@@ -924,19 +924,35 @@ describe("createPerRequestServer with instructions", () => {
   const getInstructions = (server: { server: unknown }): string | undefined =>
     (server.server as { _instructions?: string })._instructions;
 
-  // Stub OAUTH_KV.get to return null so createFetchClientFromKV returns null
-  // and we get the early "degraded server" path. The McpServer is constructed
-  // before that early-return, so its _instructions field is observable.
+  // A stored, unexpired token drives the full path; every Umbraco round-trip
+  // (current user, server information) is answered by the `fetch` stub below.
   const mockEnv = {
     UMBRACO_BASE_URL: "https://example.com",
     UMBRACO_OAUTH_CLIENT_ID: "test-client",
     COOKIE_ENCRYPTION_KEY: "0".repeat(64),
     OAUTH_KV: {
-      get: async () => null,
+      // A plaintext entry from before encryption at rest (legacy key only).
+      get: async (key: string) =>
+        key.startsWith("umbraco_token:")
+          ? JSON.stringify({ tokens: { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000 } })
+          : null,
       put: async () => undefined,
       delete: async () => undefined,
     },
   } as unknown as HostedMcpEnv;
+
+  let originalFetch: typeof fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ version: "17.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   const mockProps: AuthProps = {
     userId: "user-1",
@@ -1017,7 +1033,9 @@ describe("createPerRequestServer — version check", () => {
       UMBRACO_OAUTH_CLIENT_ID: "test-client",
       COOKIE_ENCRYPTION_KEY: "0".repeat(64),
       OAUTH_KV: {
-        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: async (key: string) =>
+          key.startsWith("umbraco_token:") ? JSON.stringify({ tokens: { access_token: "test-access-token" } }) : null,
         put: async () => undefined,
         delete: async () => undefined,
       },
@@ -1146,13 +1164,17 @@ describe("createPerRequestServer — version check", () => {
       return jsonResponse({}, 404);
     }) as typeof fetch);
 
-    jest.useFakeTimers();
+    // setImmediate stays real so the test can wait for the request to start:
+    // reading the stored token involves Web Crypto, which resolves outside
+    // the fake clock, so the deadline timer doesn't exist until then.
+    jest.useFakeTimers({ doNotFake: ["setImmediate"] });
     try {
       const pending = createPerRequestServer(
         { ...baseOptions, expectedUmbracoMajor: "17" },
         makeMockEnv(),
         mockProps,
       );
+      while (!serverInfoSignal) await new Promise((resolve) => setImmediate(resolve));
       await jest.advanceTimersByTimeAsync(DEFAULT_VERSION_CHECK_TIMEOUT_MS);
       const server = await pending;
 
@@ -1164,6 +1186,22 @@ describe("createPerRequestServer — version check", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("refuses to start for a site that no longer resolves, instead of using the env-level config", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const multiSite = {
+      sites: [{ id: "prod", displayName: "Prod", baseUrl: "https://prod.example.com", oauthClientId: "c", readOnly: "true" }],
+    };
+
+    await expect(
+      createPerRequestServer(
+        { ...baseOptions, multiSite } as typeof baseOptions,
+        makeMockEnv(),
+        { ...mockProps, consentChoices: { siteId: "removed-site" } },
+      )
+    ).rejects.toThrow("no longer available");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
@@ -1236,7 +1274,9 @@ describe("createPerRequestServer — connected Umbraco version", () => {
       UMBRACO_OAUTH_CLIENT_ID: "test-client",
       COOKIE_ENCRYPTION_KEY: "0".repeat(64),
       OAUTH_KV: {
-        get: async () => JSON.stringify({ tokens: { access_token: "test-access-token" } }),
+        // A plaintext entry from before encryption at rest (legacy key only).
+        get: async (key: string) =>
+          key.startsWith("umbraco_token:") ? JSON.stringify({ tokens: { access_token: "test-access-token" } }) : null,
         put: async () => undefined,
         delete: async () => undefined,
       },

@@ -84,6 +84,14 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
       const dest = path.join(skillsDir, skill);
       if (fs.existsSync(src) && !fs.existsSync(dest)) {
         fs.cpSync(src, dest, { recursive: true });
+        // Skills are copied in rather than installed as a plugin, so ${CLAUDE_PLUGIN_ROOT}
+        // (used to run the skills' bundled scripts) is unset here. Point it at the plugin source.
+        const skillFile = path.join(dest, "SKILL.md");
+        const pluginRoot = path.dirname(pluginsDir);
+        fs.writeFileSync(
+          skillFile,
+          fs.readFileSync(skillFile, "utf-8").replaceAll("${CLAUDE_PLUGIN_ROOT}", pluginRoot),
+        );
       }
     }
 
@@ -106,6 +114,9 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
     let text = "";
     const tools: string[] = [];
+    // Turns (assistant messages) that used each tool — a turn with 5 parallel Reads counts once.
+    const turnsByTool = new Map<string, number>();
+    let toolTurns = 0;
     const abortController = new AbortController();
 
     try {
@@ -125,10 +136,16 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
           },
         })) {
           if (message.type === "assistant" && message.message.content) {
+            const turnTools = new Set<string>();
             for (const block of message.message.content) {
               if (block.type === "text") text += block.text + "\n";
-              if (block.type === "tool_use") tools.push(block.name);
+              if (block.type === "tool_use") {
+                tools.push(block.name);
+                turnTools.add(block.name);
+              }
             }
+            if (turnTools.size > 0) toolTurns++;
+            for (const name of turnTools) turnsByTool.set(name, (turnsByTool.get(name) ?? 0) + 1);
           }
           if (message.type === "result") {
             const r = message as unknown as { subtype?: string; num_turns?: number; total_cost_usd?: number };
@@ -150,6 +167,15 @@ describeOrSkip("Skill E2E — build tool and integration test", () => {
       }
     } finally {
       abortController.abort();
+      // Per-tool breakdown of turns, so turn-count drift shows where the turns went.
+      // Logged in finally so it is printed even when the run is cut off at the turn cap.
+      const breakdown = [...turnsByTool.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name}=${count}`)
+        .join(", ");
+      console.log(
+        `[Skill E2E] Tool turns: ${toolTurns}, tool calls: ${tools.length} (turns per tool: ${breakdown || "none"})`,
+      );
     }
 
     return { text, tools };

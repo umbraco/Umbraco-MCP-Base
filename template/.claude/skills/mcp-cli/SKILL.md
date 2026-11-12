@@ -125,7 +125,9 @@ Introspection respects all filtering. `--list-tools` with `UMBRACO_READONLY=true
 
 ## Input Sanitization
 
-The SDK validates all string inputs before tool handlers run:
-- Rejects control characters, path traversal (`../`), embedded query params, percent-encoded strings
+The SDK validates inputs before they reach Umbraco:
+- Rejects control characters in every string
+- Allows `?`, `&`, `%` and `../` in free text (descriptions, translations, names)
+- Rejects an `id` or `path` argument that would change the request URL: `?`, `#` or a `../` segment
 - Validates UUID format where expected
 - Returns clear error messages for agent self-correction

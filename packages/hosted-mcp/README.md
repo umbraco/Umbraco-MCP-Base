@@ -56,6 +56,7 @@ import {
   getServerOptions,
   type HostedMcpEnv,
   type AuthProps,
+  createSiteRoutingApiHandler,
 } from "@umbraco-cms/mcp-hosted";
 import myCollection from "./tools/my-collection/index.js";
 import { allModes, allModeNames, allSliceNames } from "./config/index.js";
@@ -80,7 +81,10 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
 
 const provider = new OAuthProvider({
   apiRoute: "/mcp",
-  apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
+  // Always wrap the agent: the wrapper ties each MCP session to the sign-in
+  // that started it and sends a client back to sign-in when its Umbraco
+  // session is gone.
+  apiHandler: createSiteRoutingApiHandler(UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" })),
   defaultHandler: createDefaultHandler(options),
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",

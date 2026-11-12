@@ -4,6 +4,7 @@ import {
   UmbracoManagementClient,
   createUmbracoFetchClient,
 } from "../umbraco-fetch-client.js";
+import { logHttpError } from "../request.js";
 
 const mockFetch = jest.fn<typeof fetch>();
 const originalFetch = globalThis.fetch;
@@ -58,13 +59,10 @@ describe("failed request logging", () => {
       expect(loggedText()).not.toContain("jane.doe@example.com");
     });
 
-    it("strips the query string from the logged path", async () => {
-      mockFetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(failure());
-      initializeUmbracoFetch(auth);
-
-      await expect(
-        UmbracoManagementClient({ method: "get", url: `${path}?email=jane.doe@example.com` })
-      ).rejects.toThrow();
+    it("strips the query string from the logged path", () => {
+      // The clients reject a `?` in `url` before sending (assertSafeRequestPath),
+      // so this guards logHttpError for any other caller.
+      logHttpError(400, "get", `${path}?email=jane.doe@example.com`, secretBody, false);
 
       expect(loggedText()).toContain(path);
       expect(loggedText()).not.toContain("jane.doe@example.com");
