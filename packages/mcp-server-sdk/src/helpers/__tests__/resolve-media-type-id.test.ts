@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { setupMswServer } from "../../testing/test-environment.js";
@@ -38,6 +38,8 @@ const UPGRADED_TYPES: MediaType[] = [
   // Renamed built-in: the name search can't find it, only the tree walk can.
   { id: "22222222-2222-4222-8222-222222222222", name: "Movies", alias: "umbracoMediaVideo", parentId: "33333333-3333-4333-8333-333333333333" },
   { id: "33333333-3333-4333-8333-333333333333", name: "Custom", alias: "", isFolder: true },
+  // Seeded name differs from the alias and from the old "SVG" name.
+  { id: "55555555-5555-4555-8555-555555555555", name: "Vector Graphics (SVG)", alias: "umbracoMediaVectorGraphics" },
 ];
 
 const OTHER_TYPES: MediaType[] = [
@@ -94,6 +96,10 @@ function handlersFor(site: string, types: MediaType[]) {
 
 const server = setupServer(...handlersFor(UPGRADED_SITE, UPGRADED_TYPES), ...handlersFor(OTHER_SITE, OTHER_TYPES));
 setupMswServer(server);
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 beforeEach(() => {
   clearMediaTypeIdCache();
@@ -176,12 +182,69 @@ describe("resolveMediaTypeId", () => {
     expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder)).toBe("c5ed92a2-8233-35f0-963d-60c3caf1e7e1");
   });
 
-  it("returns undefined when no media type has the alias, and does not cache the miss", async () => {
-    expect(await resolveMediaTypeId("doesNotExist")).toBeUndefined();
-    const afterFirst = requests.length;
+  it("returns undefined when no media type has the alias, and caches the miss for a minute", async () => {
+    const start = Date.now();
+    const now = jest.spyOn(Date, "now").mockReturnValue(start);
 
     expect(await resolveMediaTypeId("doesNotExist")).toBeUndefined();
+    const afterFirst = requests.length;
+    expect(requests.some((r) => r.includes("/tree/media-type/root"))).toBe(true);
+
+    // Within the minute: no second tree walk.
+    now.mockReturnValue(start + 59_000);
+    expect(await resolveMediaTypeId("doesNotExist")).toBeUndefined();
+    expect(requests.length).toBe(afterFirst);
+
+    // After it: looked up again, so a type created in the meantime is found.
+    now.mockReturnValue(start + 61_000);
+    expect(await resolveMediaTypeId("doesNotExist")).toBeUndefined();
     expect(requests.length).toBeGreaterThan(afterFirst);
+  });
+
+  it("searches for the seeded Vector Graphics name", async () => {
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.VectorGraphics)).toBe("55555555-5555-4555-8555-555555555555");
+    const search = requests.find((r) => r.includes("/item/media-type/search"));
+    expect(new URL(search!).searchParams.get("query")).toBe("Vector Graphics (SVG)");
+    expect(requests.some((r) => r.includes("/tree/media-type/"))).toBe(false);
+  });
+
+  it("returns undefined instead of a 403 when the user can't read the media type tree", async () => {
+    // Editors with Media access only: search and GET /media-type/{id} work, the tree doesn't.
+    server.use(
+      http.get(`${UPGRADED_SITE}${API}/tree/media-type/root`, () =>
+        HttpResponse.json({ title: "Forbidden" }, { status: 403 })
+      )
+    );
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)).toBeUndefined();
+    // The name search still resolves types it can find.
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder)).toBe("c5ed92a2-8233-35f0-963d-60c3caf1e7e1");
+  });
+
+  it("pages through a folder with more than 100 media types, even without a total", async () => {
+    const folderId = "66666666-6666-4666-8666-666666666666";
+    const bulk = Array.from({ length: 150 }, (_, i) => ({
+      id: `77777777-7777-4777-8777-${String(i).padStart(12, "0")}`,
+      alias: i === 120 ? "deepType" : `bulk${i}`,
+    }));
+    server.use(
+      http.get(`${UPGRADED_SITE}${API}/tree/media-type/root`, () =>
+        HttpResponse.json({ total: 1, items: [{ id: folderId, isFolder: true, hasChildren: true }] })
+      ),
+      http.get(`${UPGRADED_SITE}${API}/tree/media-type/children`, ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const skip = Number(params.get("skip"));
+        const take = Number(params.get("take"));
+        // No `total`: paging must continue until a short page.
+        return HttpResponse.json({
+          items: bulk.slice(skip, skip + take).map(({ id }) => ({ id, isFolder: false, hasChildren: false })),
+        });
+      }),
+      http.get(`${UPGRADED_SITE}${API}/media-type/:id`, ({ params }) => {
+        const type = bulk.find((t) => t.id === params.id);
+        return HttpResponse.json({ id: params.id, alias: type?.alias ?? "" });
+      })
+    );
+    expect(await resolveMediaTypeId("deepType")).toBe(bulk[120].id);
   });
 
   it("returns undefined to every concurrent caller on a miss", async () => {

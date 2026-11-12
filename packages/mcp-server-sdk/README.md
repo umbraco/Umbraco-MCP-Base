@@ -840,7 +840,8 @@ if (!folderTypeId) {
 
 - Uses `UmbracoManagementClient`, so it works on stdio (after `initializeUmbracoFetch()`), with `setCustomTransport()` and inside hosted sessions. Pass `{ client }` to use another Orval-style mutator; also pass `{ baseUrl }` (the site that client talks to) or its results are not cached.
 - Looks candidates up with `GET /umbraco/management/api/v1/item/media-type/search` (which matches names), checks each candidate's alias with `GET /media-type/{id}`, and falls back to walking `GET /tree/media-type/root` / `children` if the type was renamed.
-- Found ids are cached per base URL: `{ baseUrl }` if given, else the hosted session's, else the one passed to `initializeUmbracoFetch()`. If none is known, the result is not cached. Misses and errors are never cached. `clearMediaTypeIdCache()` empties the cache.
+- Found ids are cached per base URL: `{ baseUrl }` if given, else the hosted session's, else the one passed to `initializeUmbracoFetch()`. If none is known, the result is not cached. A miss is cached for one minute, so repeated calls for an alias the site lacks don't each walk the tree; errors are never cached. `clearMediaTypeIdCache()` empties the cache. In a hosted Worker the cache is shared by all sessions for the same site: media type ids are site-wide and not secret, so a user can get an id from the cache that their own permissions wouldn't have let them look up.
+- The tree-walk fallback needs access to the media type tree (Settings section). For a user without it, such as an editor with Media access only, the name search still runs. If that finds nothing, the result is `undefined` rather than a 403.
 - `MEDIA_TYPE_ALIASES` holds the built-in aliases: `Folder`, `Image`, `File`, `umbracoMediaVideo`, `umbracoMediaAudio`, `umbracoMediaArticle`, `umbracoMediaVectorGraphics`.
 
 ### Available constants

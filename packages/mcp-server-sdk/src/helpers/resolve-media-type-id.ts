@@ -68,11 +68,24 @@ const BUILT_IN_NAMES: Record<string, string> = {
   [MEDIA_TYPE_ALIASES.Video]: "Video",
   [MEDIA_TYPE_ALIASES.Audio]: "Audio",
   [MEDIA_TYPE_ALIASES.Article]: "Article",
-  [MEDIA_TYPE_ALIASES.VectorGraphics]: "Vector Graphics",
+  [MEDIA_TYPE_ALIASES.VectorGraphics]: "Vector Graphics (SVG)",
 };
 
-/** base URL → alias → pending or resolved id. */
-const cache = new Map<string, Map<string, Promise<string>>>();
+/**
+ * How long a miss stays cached. Long enough that a burst of tool calls for an
+ * alias the site lacks doesn't walk the whole media type tree each time,
+ * short enough that a media type created later is soon found.
+ */
+const MISS_TTL_MS = 60_000;
+
+interface CacheEntry {
+  pending: Promise<string | undefined>;
+  /** Set once the lookup settles as a miss; the entry is ignored after this time. */
+  expiresAt?: number;
+}
+
+/** base URL → alias → pending, found or recently missed lookup. */
+const cache = new Map<string, Map<string, CacheEntry>>();
 
 /**
  * Clears the per-base-URL cache used by {@link resolveMediaTypeId}. Useful in
@@ -101,8 +114,13 @@ export function clearMediaTypeIdCache(): void {
  *    `/tree/media-type/children` and checks every media type the same way.
  *
  * Found ids are cached per base URL, so each site is asked once per alias.
- * Misses and errors are not cached: a media type created later is found on
- * the next call, and a failed request is retried.
+ * Misses are cached for a minute, so repeated calls for an alias the site
+ * lacks don't each walk the tree; a media type created later is found once
+ * that expires (or after `clearMediaTypeIdCache()`). Errors are not cached.
+ *
+ * The tree walk needs access to the Settings section's media type tree.
+ * Users without it (e.g. editors with Media access only) still get the name
+ * search; if that finds nothing, the walk's 403 is treated as "not found".
  *
  * @param alias - Media type alias, e.g. `MEDIA_TYPE_ALIASES.Folder`
  * @returns The media type id, or `undefined` when the site has no media type with that alias
@@ -130,41 +148,28 @@ export async function resolveMediaTypeId(
     cache.set(baseUrl, site);
   }
   const cached = site.get(alias);
-  if (cached) {
-    return settle(cached);
+  if (cached && (cached.expiresAt === undefined || cached.expiresAt > Date.now())) {
+    return cached.pending;
   }
 
   const siteCache = site;
-  const pending = lookup().then((id) => {
-    if (id === undefined) {
-      throw new NotFound();
+  const entry: CacheEntry = { pending: lookup() };
+  siteCache.set(alias, entry);
+  entry.pending.then(
+    (id) => {
+      if (id === undefined) entry.expiresAt = Date.now() + MISS_TTL_MS;
+    },
+    // Drop errors from the cache so the next call retries.
+    () => {
+      if (siteCache.get(alias) === entry) siteCache.delete(alias);
     }
-    return id;
-  });
-  siteCache.set(alias, pending);
-  // Drop misses and errors from the cache so the next call retries.
-  pending.catch(() => {
-    if (siteCache.get(alias) === pending) {
-      siteCache.delete(alias);
-    }
-  });
-  return settle(pending);
+  );
+  return entry.pending;
 }
 
-/** Awaits a shared lookup, turning the internal miss marker into `undefined` for every caller. */
-async function settle(pending: Promise<string>): Promise<string | undefined> {
-  try {
-    return await pending;
-  } catch (error) {
-    if (error instanceof NotFound) {
-      return undefined;
-    }
-    throw error;
-  }
+function isForbidden(error: unknown): boolean {
+  return (error as { response?: { status?: number } } | undefined)?.response?.status === 403;
 }
-
-/** Internal marker so a miss rejects the shared promise and leaves the cache. */
-class NotFound extends Error {}
 
 async function resolveCacheKey(explicit: string | undefined): Promise<string | undefined> {
   if (explicit) {
@@ -204,7 +209,21 @@ async function findMediaTypeId(
     if (await matches(item.id)) return item.id;
   }
 
-  // 2. Fallback for renamed types: walk the whole media type tree.
+  // 2. Fallback for renamed types: walk the whole media type tree. The tree
+  // needs Settings access, so a user without it gets "not found" rather than
+  // a 403 for an alias the site may simply not have.
+  try {
+    return await walkTree(client, matches);
+  } catch (error) {
+    if (isForbidden(error)) return undefined;
+    throw error;
+  }
+}
+
+async function walkTree(
+  client: MediaTypeResolverClient,
+  matches: (id: string) => Promise<boolean>
+): Promise<string | undefined> {
   const parents: Array<string | undefined> = [undefined];
   while (parents.length > 0) {
     const parentId = parents.shift();
@@ -219,7 +238,8 @@ async function findMediaTypeId(
         if (item.hasChildren) parents.push(item.id);
         if (!item.isFolder && (await matches(item.id))) return item.id;
       }
-      if (items.length < PAGE_SIZE || skip + items.length >= (page?.total ?? 0)) break;
+      // A short page is the last one; `total` (when present) can end it sooner.
+      if (items.length < PAGE_SIZE || (page?.total !== undefined && skip + items.length >= page.total)) break;
     }
   }
 
