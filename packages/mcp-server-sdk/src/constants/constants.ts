@@ -21,17 +21,32 @@ export const Default_Memeber_TYPE_ID = "d59be02f-1df9-4228-aa1e-01917d806cda";
 // These are the keys a *fresh* Umbraco install seeds. They are not guaranteed
 // on every site: a site upgraded from an older Umbraco version (or one whose
 // data types were recreated) can carry different keys. Use them for tests and
-// fixtures against a fresh install; look the data type up via the Management
-// API (e.g. `GET /umbraco/management/api/v1/item/data-type/search`) when the
-// value has to be right on an arbitrary site.
+// fixtures against a fresh install only.
+//
+// Don't look data types up by name either. Data types have no alias, and their
+// names change between versions: on a site first installed before Umbraco 8.14,
+// "Media Picker" is the old picker (`135d60e0-…`) and the key below doesn't
+// exist. Fresh installs named that old picker "(Obsolete) Media Picker" in 8.14
+// and "Media Picker (legacy)" from 8.15 to 13.
+// The name search also matches substrings ("Media Picker" finds "Multiple Media
+// Picker" and "Image Media Picker").
+//
+// On an arbitrary site, filter by property editor alias instead:
+// `GET /umbraco/management/api/v1/filter/data-type?editorAlias=Umbraco.MediaPicker3`
+// then pick the match by its configuration (e.g. `multiple`, `filter`), since
+// several seeded data types share one editor.
 
-/** Textstring data type key — **fresh-install only**, see the note above. */
+/** Textstring data type key (editor `Umbraco.TextBox`) — **fresh-install only**, see the note above. */
 export const TextString_DATA_TYPE_ID = "0cc0eba1-9960-42c9-bf9b-60e150b429ae";
-/** Media Picker data type key — **fresh-install only**, see the note above. */
+/**
+ * Media Picker data type key (editor `Umbraco.MediaPicker3`, single item) —
+ * **fresh-install only**. Missing on sites first installed before Umbraco 8.14,
+ * where "Media Picker" is a different data type. See the note above.
+ */
 export const MEDIA_PICKER_DATA_TYPE_ID = "4309a3ea-0d78-4329-a06c-c80b036af19a";
-/** Member Picker data type key — **fresh-install only**, see the note above. */
+/** Member Picker data type key (editor `Umbraco.MemberPicker`) — **fresh-install only**, see the note above. */
 export const MEMBER_PICKER_DATA_TYPE_ID = "1ea2e01f-ebd8-4ce1-8d71-6b1149e63548";
-/** Tags data type key — **fresh-install only**, see the note above. */
+/** Tags data type key (editor `Umbraco.Tags`) — **fresh-install only**, see the note above. */
 export const TAG_DATA_TYPE_ID = "b6b73142-b9c1-4bf8-a16d-e1c23320b549";
 
 // Media Type IDs
@@ -98,8 +113,14 @@ export const MEDIA_TYPE_VECTOR_GRAPHICS = "SVG";
 /**
  * Aliases of the media types a fresh Umbraco install seeds (mirrors
  * `Umbraco.Cms.Core.Constants.Conventions.MediaTypes`). Unlike the keys above,
- * an alias doesn't change between fresh and upgraded sites, though an upgraded
- * site may not have every type (`resolveMediaTypeId()` then returns `undefined`). Note the built-in Video,
+ * an alias doesn't change between fresh and upgraded sites (`Folder`, `Image` and
+ * `File` date back to Umbraco 4). Video, Audio, Article and VectorGraphics were
+ * only added to fresh installs in Umbraco 8.14, and no migration adds them, so a
+ * site first installed earlier won't have them unless someone created them:
+ * `resolveMediaTypeId()` then returns `undefined`, so fall back to `File`.
+ * 8.14 itself seeded them as `Video`, `Audio`, `Article` and `VectorGraphics`
+ * (8.15 added the `umbracoMedia` prefix for new installs only);
+ * `resolveMediaTypeId()` accepts those when the current alias isn't found. Note the built-in Video,
  * Audio, Article and SVG types have `umbracoMedia…` aliases that differ from
  * their names.
  *

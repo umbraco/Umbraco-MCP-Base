@@ -72,6 +72,19 @@ const BUILT_IN_NAMES: Record<string, string> = {
 };
 
 /**
+ * Aliases Umbraco 8.14 seeded for these types. 8.15 prefixed them with
+ * `umbracoMedia` for new installs only (umbraco/Umbraco-CMS#10483) and no
+ * migration renamed existing ones, so a site first installed on 8.14 still uses
+ * these. Accepted only when the current alias isn't found.
+ */
+const LEGACY_ALIASES: Record<string, string> = {
+  [MEDIA_TYPE_ALIASES.Video]: "Video",
+  [MEDIA_TYPE_ALIASES.Audio]: "Audio",
+  [MEDIA_TYPE_ALIASES.Article]: "Article",
+  [MEDIA_TYPE_ALIASES.VectorGraphics]: "VectorGraphics",
+};
+
+/**
  * How long a miss stays cached. Long enough that a burst of tool calls for an
  * alias the site lacks doesn't walk the whole media type tree each time,
  * short enough that a media type created later is soon found.
@@ -107,7 +120,10 @@ export function clearMediaTypeIdCache(): void {
  * if (!folderTypeId) throw new Error("No Folder media type on this site");
  * ```
  *
- * Lookup (alias match is exact):
+ * Lookup (alias match is exact). For Video, Audio, Article and VectorGraphics
+ * the unprefixed alias Umbraco 8.14 seeded (`Video`, …) is accepted when the
+ * current one isn't found.
+ *
  * 1. `GET /item/media-type/search?query=<name>` for candidates (the search
  *    matches names), then `GET /media-type/{id}` on each to compare aliases.
  * 2. If that finds nothing, walks `GET /tree/media-type/root` and
@@ -187,7 +203,10 @@ async function findMediaTypeId(
   alias: string,
   searchName: string
 ): Promise<string | undefined> {
+  const legacyAlias = LEGACY_ALIASES[alias];
   const checked = new Set<string>();
+  // First media type with the 8.14 alias; returned only if the current alias isn't found.
+  let legacyMatch: string | undefined;
 
   const matches = async (id: string): Promise<boolean> => {
     if (checked.has(id)) return false;
@@ -196,6 +215,7 @@ async function findMediaTypeId(
       url: `${API}/media-type/${encodeURIComponent(id)}`,
       method: "GET",
     });
+    if (legacyAlias !== undefined && mediaType?.alias === legacyAlias) legacyMatch ??= id;
     return mediaType?.alias === alias;
   };
 
@@ -213,9 +233,9 @@ async function findMediaTypeId(
   // needs Settings access, so a user without it gets "not found" rather than
   // a 403 for an alias the site may simply not have.
   try {
-    return await walkTree(client, matches);
+    return (await walkTree(client, matches)) ?? legacyMatch;
   } catch (error) {
-    if (isForbidden(error)) return undefined;
+    if (isForbidden(error)) return legacyMatch;
     throw error;
   }
 }

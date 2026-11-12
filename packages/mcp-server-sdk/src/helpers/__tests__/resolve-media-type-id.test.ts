@@ -19,6 +19,7 @@ import { clearMediaTypeIdCache, resolveMediaTypeId } from "../resolve-media-type
 // refuses for non-local base URLs. Different ports are still different sites.
 const UPGRADED_SITE = "https://localhost:44301";
 const OTHER_SITE = "https://127.0.0.1:44302";
+const SITE_FROM_8_14 = "https://localhost:44303";
 const API = "/umbraco/management/api/v1";
 
 interface MediaType {
@@ -40,6 +41,15 @@ const UPGRADED_TYPES: MediaType[] = [
   { id: "33333333-3333-4333-8333-333333333333", name: "Custom", alias: "", isFolder: true },
   // Seeded name differs from the alias and from the old "SVG" name.
   { id: "55555555-5555-4555-8555-555555555555", name: "Vector Graphics (SVG)", alias: "umbracoMediaVectorGraphics" },
+  // A user type with the 8.14 alias: the current alias (the renamed "Movies") must win.
+  { id: "88888888-8888-4888-8888-888888888888", name: "Video", alias: "Video" },
+];
+
+// First installed on Umbraco 8.14, which seeded the unprefixed aliases (8.15
+// prefixed them for new installs only). Keys are the fresh-install ones.
+const TYPES_FROM_8_14: MediaType[] = [
+  { id: "f6c515bb-653c-4bdc-821c-987729ebe327", name: "Video", alias: "Video" },
+  { id: "c4b1efcf-a9d5-41c4-9621-e9d273b52a9c", name: "Vector Graphics (SVG)", alias: "VectorGraphics" },
 ];
 
 const OTHER_TYPES: MediaType[] = [
@@ -94,7 +104,11 @@ function handlersFor(site: string, types: MediaType[]) {
   ];
 }
 
-const server = setupServer(...handlersFor(UPGRADED_SITE, UPGRADED_TYPES), ...handlersFor(OTHER_SITE, OTHER_TYPES));
+const server = setupServer(
+  ...handlersFor(UPGRADED_SITE, UPGRADED_TYPES),
+  ...handlersFor(OTHER_SITE, OTHER_TYPES),
+  ...handlersFor(SITE_FROM_8_14, TYPES_FROM_8_14)
+);
 setupMswServer(server);
 
 afterEach(() => {
@@ -128,7 +142,15 @@ describe("resolveMediaTypeId", () => {
     );
   });
 
-  it("falls back to walking the tree when the type was renamed", async () => {
+  it("accepts the alias Umbraco 8.14 seeded when the current one isn't there", async () => {
+    initializeUmbracoFetch({ baseUrl: SITE_FROM_8_14, clientId: "id", clientSecret: "secret" });
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)).toBe("f6c515bb-653c-4bdc-821c-987729ebe327");
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.VectorGraphics)).toBe("c4b1efcf-a9d5-41c4-9621-e9d273b52a9c");
+    // No legacy alias for the types that never changed.
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Audio)).toBeUndefined();
+  });
+
+  it("prefers the current alias over the 8.14 one, even when the name search finds the 8.14 one first", async () => {
     expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)).toBe("22222222-2222-4222-8222-222222222222");
     expect(requests.some((r) => r.includes("/tree/media-type/children"))).toBe(true);
   });
@@ -215,7 +237,9 @@ describe("resolveMediaTypeId", () => {
         HttpResponse.json({ title: "Forbidden" }, { status: 403 })
       )
     );
-    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)).toBeUndefined();
+    expect(await resolveMediaTypeId("doesNotExist")).toBeUndefined();
+    // Without the tree, the 8.14 alias found by the name search is the best match.
+    expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)).toBe("88888888-8888-4888-8888-888888888888");
     // The name search still resolves types it can find.
     expect(await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder)).toBe("c5ed92a2-8233-35f0-963d-60c3caf1e7e1");
   });
