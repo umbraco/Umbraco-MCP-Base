@@ -1188,6 +1188,22 @@ describe("createPerRequestServer — version check", () => {
     }
   });
 
+  it("refuses to start for a site that no longer resolves, instead of using the env-level config", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const multiSite = {
+      sites: [{ id: "prod", displayName: "Prod", baseUrl: "https://prod.example.com", oauthClientId: "c", readOnly: "true" }],
+    };
+
+    await expect(
+      createPerRequestServer(
+        { ...baseOptions, multiSite } as typeof baseOptions,
+        makeMockEnv(),
+        { ...mockProps, consentChoices: { siteId: "removed-site" } },
+      )
+    ).rejects.toThrow("no longer available");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     await createPerRequestServer(

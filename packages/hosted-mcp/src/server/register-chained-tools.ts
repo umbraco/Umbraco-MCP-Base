@@ -13,7 +13,6 @@ import {
   createMcpClientManager,
   discoverProxiedTools,
   createProxyHandler,
-  expandModesToCollections,
   useDraft202012ToolSchemas,
   jsonSchemaObjectToZodObject,
   runWithRequestContext,
@@ -25,8 +24,10 @@ import type { AuthProps } from "../types/auth.js";
 import type { ChainedServerConsentConfig } from "./worker-entry.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
+import { resolveChainedFilter } from "./chained-filter.js";
 import {
   getServerSessionContext,
+  getServerAdminConfig,
   withRequestSessionContext,
 } from "./create-server.js";
 
@@ -92,52 +93,17 @@ export async function registerChainedTools(
       }
     }
 
-    // Build filter config from admin env vars + user consent choices
-    const workerConfig = loadWorkerConfig(env);
-    const consent = props.consentChoices;
-    const chainedFilterConfig: Record<string, unknown> = {
-      slices: workerConfig.includeSlices,
-      excludeSlices: workerConfig.excludeSlices,
-      modes: workerConfig.toolModes,
-      readOnly: workerConfig.readonly,
-    };
-
-    // Apply user consent mode/collection selections for this chained server
+    // The admin boundary for this session: env config plus the resolved
+    // site's overrides, exactly as the main server uses (falls back to the
+    // env config for a server `createPerRequestServer` didn't build), then
+    // narrowed by the user's consent choices.
     const serverName = chainedServer.name;
-    if (consent?.chainedModeSelections?.[serverName]) {
-      const selectedModes = consent.chainedModeSelections[serverName];
-      const modeCollections = expandModesToCollections(
-        selectedModes,
-        chainedServer.modeRegistry,
-      );
-
-      const selectedCollections = consent.chainedCollectionSelections?.[serverName];
-      if (selectedCollections) {
-        const effective = modeCollections.filter((c) =>
-          selectedCollections.includes(c),
-        );
-        chainedFilterConfig.toolCollections =
-          effective.length > 0 ? effective : ["__none__"];
-      } else {
-        chainedFilterConfig.toolCollections = modeCollections;
-      }
-    } else if (consent) {
-      // No chained modes selected for this server — disable all chained tools
-      chainedFilterConfig.toolCollections = ["__none__"];
-    }
-    if (consent?.readOnly) {
-      chainedFilterConfig.readOnly = true;
-    }
-    if (consent?.selectedSlices?.length) {
-      chainedFilterConfig.slices = consent.selectedSlices;
-    }
-
     const manager = createMcpClientManager({
-      filterConfig: Object.keys(chainedFilterConfig).some(
-        (k) => (chainedFilterConfig as any)[k] !== undefined,
-      )
-        ? (chainedFilterConfig as any)
-        : undefined,
+      filterConfig: resolveChainedFilter(
+        getServerAdminConfig(server) ?? loadWorkerConfig(env),
+        props.consentChoices,
+        chainedServer,
+      ) as any,
     });
 
     manager.registerServer({

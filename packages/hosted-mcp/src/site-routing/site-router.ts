@@ -13,6 +13,7 @@ import type { SiteConfig, SiteRoutingConfig } from "../types/multi-site.js";
 import type { AuthProps } from "../types/auth.js";
 import { buildPrefixRegex, extractSiteIdFromPath } from "./path-prefix.js";
 import { getStoredUmbracoToken } from "../auth/token-storage.js";
+import { constantTimeEqual } from "../crypto/constant-time.js";
 import { resourceMetadataUrlFor } from "../server/resource-metadata.js";
 import { hashWithKey, siteRef } from "../telemetry/request-telemetry.js";
 
@@ -110,6 +111,11 @@ export interface SiteRoutingApiHandlerOptions {
  * audience check has run on the original URL. Use as the OAuthProvider's
  * `apiHandler` when `apiRoute` includes the site-routing prefix.
  *
+ * Binds each MCP session to the sign-in that started it: the session id the
+ * client holds only works with that sign-in's access token (see "Session
+ * binding" below), and any other request for the session gets `404 Session
+ * not found`.
+ *
  * Also checks, on every authenticated request, that the login's inner Umbraco
  * token entry still exists in KV. The outer grant (issued by OAuthProvider)
  * outlives Umbraco's refresh token, and the Durable Object deletes the inner
@@ -136,14 +142,124 @@ export function createSiteRoutingApiHandler(
       const expired = await rejectIfUmbracoSignInGone(request, env, ctx);
       if (expired) return expired;
 
+      // An MCP session only accepts the sign-in that started it.
+      const session = await openSessionForSignIn(request, ctx);
+      if (session.rejected) return session.rejected;
+      request = session.request;
+
       const url = new URL(request.url);
       if (url.pathname.startsWith(externalPrefix)) {
         url.pathname = internalPath;
         request = new Request(url.toString(), request);
       }
-      return baseHandler.fetch(request, env, ctx);
+      return sealSessionForSignIn(
+        await baseHandler.fetch(request, env, ctx),
+        session.tokenKey,
+        session.sealed
+      );
     },
   };
+}
+
+// ============================================================================
+// Session binding
+// ============================================================================
+//
+// McpAgent finds a session's Durable Object by the `Mcp-Session-Id` header
+// alone, and the session's MCP server is built once, for the sign-in that
+// started it. Without a check here, any authenticated caller who learned
+// another session's id (it is not a secret: it appears in traces and client
+// logs) could send requests into that session and have them run as its user.
+//
+// So the id the client holds is `<session id>.<tag>`, where the tag is an
+// HMAC of the session id keyed by the sign-in's token key. That key exists
+// only inside the grant's encrypted props, so only requests carrying that
+// sign-in's access token produce the same tag. The Durable Object still sees
+// the bare session id. Nothing is stored, so there is no consistency window.
+
+const SESSION_HEADER = "mcp-session-id";
+const SESSION_TAG_SEPARATOR = ".";
+
+function sessionTag(tokenKey: string, sessionId: string): Promise<string> {
+  return hashWithKey(`mcp-session:${sessionId}`, tokenKey);
+}
+
+function sessionNotFound(): Response {
+  // 404 is what tells an MCP client to start a new session.
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }),
+    { status: 404, headers: { "Content-Type": "application/json" } }
+  );
+}
+
+/**
+ * Checks the request's session id against the caller's sign-in and swaps it
+ * for the bare id the Durable Object knows. A request with no session id
+ * (initialize) passes through. A request that names a session but carries no
+ * sign-in to check it against is refused: a session is never reachable
+ * without the sign-in that started it.
+ */
+async function openSessionForSignIn(
+  request: Request,
+  ctx: ExecutionContext
+): Promise<{ request: Request; tokenKey?: string; sealed?: SealedSession; rejected?: Response }> {
+  const props = (ctx as { props?: unknown }).props as Partial<AuthProps> | undefined;
+  const tokenKey =
+    typeof props?.umbracoTokenKey === "string" && props.umbracoTokenKey.length > 0
+      ? props.umbracoTokenKey
+      : undefined;
+
+  const presented = request.headers.get(SESSION_HEADER);
+  if (presented === null) return { request, tokenKey };
+  if (!tokenKey) return { request, rejected: sessionNotFound() };
+
+  const split = presented.lastIndexOf(SESSION_TAG_SEPARATOR);
+  const sessionId = split > 0 ? presented.slice(0, split) : "";
+  const tag = split > 0 ? presented.slice(split + 1) : "";
+  if (!sessionId || !tag || !constantTimeEqual(tag, await sessionTag(tokenKey, sessionId))) {
+    return { request, tokenKey, rejected: sessionNotFound() };
+  }
+
+  const headers = new Headers(request.headers);
+  headers.set(SESSION_HEADER, sessionId);
+  return {
+    request: new Request(request, { headers }),
+    tokenKey,
+    sealed: { sessionId, value: presented },
+  };
+}
+
+/** A session id that was verified for this sign-in, and the value the client holds for it. */
+interface SealedSession {
+  sessionId: string;
+  value: string;
+}
+
+/**
+ * Replaces the bare session id on a response with the one bound to this
+ * sign-in. `verified` is the id this request already proved, so its value is
+ * reused; only a newly started session needs a tag computed.
+ */
+async function sealSessionForSignIn(
+  response: Response,
+  tokenKey: string | undefined,
+  verified?: SealedSession
+): Promise<Response> {
+  const sessionId = response.headers.get(SESSION_HEADER);
+  if (!tokenKey || !sessionId) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set(
+    SESSION_HEADER,
+    verified?.sessionId === sessionId
+      ? verified.value
+      : `${sessionId}${SESSION_TAG_SEPARATOR}${await sessionTag(tokenKey, sessionId)}`
+  );
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /**

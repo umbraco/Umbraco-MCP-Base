@@ -21,6 +21,7 @@ import {
   type HostedMcpEnv,
   type AuthProps,
   type ChainedServerConsentConfig,
+  createSiteRoutingApiHandler,
 } from "@umbraco-cms/mcp-hosted";
 
 import { getExampleUmbracoAddOnAPI } from "../../../template/src/umbraco-api/api/generated/exampleApi.js";
@@ -97,7 +98,9 @@ export class UmbracoMcpAgent extends McpAgent<HostedMcpEnv, unknown, AuthProps> 
 
 const provider = new OAuthProvider({
   apiRoute: "/mcp",
-  apiHandler: UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }),
+  apiHandler: createSiteRoutingApiHandler(
+    UmbracoMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }) as any
+  ) as any,
   defaultHandler: createDefaultHandler(options) as any,
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/token",
