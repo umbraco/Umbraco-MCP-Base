@@ -25,7 +25,7 @@ describe("StdioConnection Filter Passthrough", () => {
     );
 
     expect(args).toContain("--base-arg");
-    expect(args).toContain("--tools");
+    expect(args).toContain("--umbraco-include-tools");
     expect(args).toContain("get-document,list-documents");
   });
 
@@ -35,7 +35,7 @@ describe("StdioConnection Filter Passthrough", () => {
       { slices: ["read", "list"] },
     );
 
-    expect(args).toContain("--slices");
+    expect(args).toContain("--umbraco-include-slices");
     expect(args).toContain("read,list");
   });
 
@@ -45,7 +45,7 @@ describe("StdioConnection Filter Passthrough", () => {
       { modes: ["content", "media"] },
     );
 
-    expect(args).toContain("--modes");
+    expect(args).toContain("--umbraco-tool-modes");
     expect(args).toContain("content,media");
   });
 
@@ -55,7 +55,7 @@ describe("StdioConnection Filter Passthrough", () => {
       { toolCollections: ["document", "media-management"] },
     );
 
-    expect(args).toContain("--tool-collections");
+    expect(args).toContain("--umbraco-include-tool-collections");
     expect(args).toContain("document,media-management");
   });
 
@@ -71,14 +71,68 @@ describe("StdioConnection Filter Passthrough", () => {
     );
 
     expect(args).toContain("--base");
-    expect(args).toContain("--tools");
+    expect(args).toContain("--umbraco-include-tools");
     expect(args).toContain("get-document");
-    expect(args).toContain("--tool-collections");
+    expect(args).toContain("--umbraco-include-tool-collections");
     expect(args).toContain("document");
-    expect(args).toContain("--slices");
+    expect(args).toContain("--umbraco-include-slices");
     expect(args).toContain("read");
-    expect(args).toContain("--modes");
+    expect(args).toContain("--umbraco-tool-modes");
     expect(args).toContain("content");
+  });
+
+  it("should build args with excluded slices", () => {
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { excludeSlices: ["delete", "update"] },
+    );
+
+    expect(args).toEqual(["--umbraco-exclude-slices", "delete,update"]);
+  });
+
+  it("should pass readonly mode as --umbraco-readonly", () => {
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: ["--base-arg"] },
+      { readOnly: true },
+    );
+
+    expect(args).toEqual(["--base-arg", "--umbraco-readonly"]);
+  });
+
+  it("should not pass --umbraco-readonly when readonly is off", () => {
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      { readOnly: false },
+    );
+
+    expect(args).toEqual([]);
+  });
+
+  it("should only use flags the SDK config accepts", async () => {
+    // A chained server built on this SDK parses its command line with
+    // CONFIG_FIELDS; a flag it does not define is silently ignored.
+    const { CONFIG_FIELDS } = await import("../../config/config.js");
+    const known = new Set(
+      CONFIG_FIELDS.filter((f) => f.cliFlag).map((f) => `--${f.cliFlag}`),
+    );
+
+    const args = getBuildArgs(
+      { name: "test", command: "test-cmd", args: [] },
+      {
+        tools: ["a"],
+        toolCollections: ["b"],
+        slices: ["read"],
+        excludeSlices: ["delete"],
+        modes: ["c"],
+        readOnly: true,
+      },
+    );
+
+    const flags = args.filter((a) => a.startsWith("--"));
+    expect(flags).toHaveLength(6);
+    for (const flag of flags) {
+      expect(known).toContain(flag);
+    }
   });
 
   it("should not add filter args when no filters configured", () => {
@@ -89,10 +143,10 @@ describe("StdioConnection Filter Passthrough", () => {
     });
 
     expect(args).toEqual(["--base-arg"]);
-    expect(args).not.toContain("--tools");
-    expect(args).not.toContain("--slices");
-    expect(args).not.toContain("--modes");
-    expect(args).not.toContain("--tool-collections");
+    expect(args).not.toContain("--umbraco-include-tools");
+    expect(args).not.toContain("--umbraco-include-slices");
+    expect(args).not.toContain("--umbraco-tool-modes");
+    expect(args).not.toContain("--umbraco-include-tool-collections");
   });
 
   it("should not add filter args for empty arrays", () => {
@@ -102,8 +156,8 @@ describe("StdioConnection Filter Passthrough", () => {
     );
 
     expect(args).toEqual([]);
-    expect(args).not.toContain("--tools");
-    expect(args).not.toContain("--slices");
+    expect(args).not.toContain("--umbraco-include-tools");
+    expect(args).not.toContain("--umbraco-include-slices");
   });
 
   it("should preserve base args order", () => {
@@ -116,6 +170,6 @@ describe("StdioConnection Filter Passthrough", () => {
     expect(args[0]).toBe("-y");
     expect(args[1]).toBe("@scope/package");
     // Filter args come after
-    expect(args.indexOf("--tools")).toBeGreaterThan(1);
+    expect(args.indexOf("--umbraco-include-tools")).toBeGreaterThan(1);
   });
 });

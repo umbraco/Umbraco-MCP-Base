@@ -23,7 +23,9 @@ plugins/umbraco-mcp-skills/
 │   ├── mcp-testing/
 │   │   └── SKILL.md       # Testing patterns reference
 │   ├── build-tools/
-│   │   └── SKILL.md       # Tool collection generator
+│   │   ├── SKILL.md       # Tool collection generator
+│   │   └── scripts/
+│   │       └── list-operations.ts  # Lists a collection's swagger operations (unit-tested in scripts/__tests__)
 │   ├── build-tools-tests/
 │   │   └── SKILL.md       # Integration test generator
 │   ├── build-evals/

@@ -92,14 +92,51 @@ function openPlainOutputObjects({
   }
 }
 
-function toJsonSchema(schema: unknown, io: "input" | "output"): Record<string, unknown> | undefined {
+/**
+ * Converts a tool's input or output schema (a full Zod schema — classic or
+ * Mini — or a raw `ZodRawShape`) to JSON Schema draft 2020-12. Output schemas
+ * are left open to additive fields (see `openPlainOutputObjects`) unless
+ * `openOutputObjects: false` is passed.
+ *
+ * `unrepresentable: "any"` renders types JSON Schema cannot express (e.g.
+ * `z.date()`) as `{}` instead of throwing — for callers that must not fail a
+ * whole listing over one tool, such as CLI introspection and in-process
+ * chaining. `ListTools` keeps Zod's default (throw).
+ *
+ * `openOutputObjects: false` keeps Zod's `additionalProperties: false` on
+ * output objects. Codegen uses it so generated `*Output` types stay closed
+ * (no `[k: string]: unknown` index signature) and typos still fail to compile.
+ *
+ * @throws If `schema` is neither a Zod schema nor a plain-object raw shape
+ */
+export function toJsonSchema(
+  schema: unknown,
+  io: "input" | "output",
+  options?: { unrepresentable?: "throw" | "any"; openOutputObjects?: boolean },
+): Record<string, unknown> | undefined {
   if (!schema) return undefined;
-  const zodSchema = isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
-  return z.toJSONSchema(zodSchema, {
+  const openOutput = io === "output" && options?.openOutputObjects !== false;
+  return z.toJSONSchema(toZodSchema(schema), {
     target: "draft-2020-12",
     io,
-    ...(io === "output" ? { override: openPlainOutputObjects } : {}),
+    ...(options?.unrepresentable ? { unrepresentable: options.unrepresentable } : {}),
+    ...(openOutput ? { override: openPlainOutputObjects } : {}),
   }) as Record<string, unknown>;
+}
+
+/**
+ * Normalises a tool schema — a full Zod schema (classic or Mini) or a raw
+ * `ZodRawShape` — to a Zod schema, wrapping a raw shape in `z.object`.
+ *
+ * @throws If `schema` is neither a Zod schema nor a plain-object raw shape
+ */
+export function toZodSchema(schema: unknown): z.ZodTypeAny {
+  if (typeof schema !== "object" || schema === null) {
+    throw new Error(
+      `Invalid schema: expected a ZodType or plain-object ZodRawShape, got ${schema === null ? "null" : typeof schema}`,
+    );
+  }
+  return isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
 }
 
 /**
@@ -130,16 +167,28 @@ export function useDraft202012ToolSchemas(server: McpServer): void {
       return {
         tools: Object.entries(registeredTools)
           .filter(([, tool]) => tool.enabled)
-          .map(([name, tool]) => ({
-            name,
-            title: tool.title,
-            description: tool.description,
-            inputSchema: toJsonSchema(tool.inputSchema, "input") ?? EMPTY_OBJECT_JSON_SCHEMA,
-            ...(tool.outputSchema ? { outputSchema: toJsonSchema(tool.outputSchema, "output") } : {}),
-            annotations: tool.annotations,
-            execution: tool.execution,
-            _meta: tool._meta,
-          })),
+          .flatMap(([name, tool]) => {
+            // A tool not wrapped by the SDK decorators skips their
+            // registration-time schema check (#417). If its schema can't
+            // be converted, leave that one tool out rather than failing
+            // the listing for every tool.
+            try {
+              return [{
+                name,
+                title: tool.title,
+                description: tool.description,
+                inputSchema: toJsonSchema(tool.inputSchema, "input") ?? EMPTY_OBJECT_JSON_SCHEMA,
+                ...(tool.outputSchema ? { outputSchema: toJsonSchema(tool.outputSchema, "output") } : {}),
+                annotations: tool.annotations,
+                execution: tool.execution,
+                _meta: tool._meta,
+              }];
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`Tool "${name}" left out of tools/list: its schema cannot be converted to JSON Schema: ${message}`);
+              return [];
+            }
+          }),
       };
     });
   } catch {

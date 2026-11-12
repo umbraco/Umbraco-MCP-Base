@@ -63,16 +63,15 @@ describe("createPerRequestServer with an expired token and the version check off
     errorSpy.mockRestore();
   });
 
-  it("refreshes exactly once and still degrades when the refresh is rejected", async () => {
+  it("refreshes exactly once and still fails the start when the refresh is rejected", async () => {
     mockFetch.mockImplementation((async () => new Response(null, { status: 401 })) as typeof fetch);
     mockRefresh.mockResolvedValue({ ok: false, reason: "expired", status: 400, error: "invalid_grant", message: "rejected" });
 
-    const { createPerRequestServer } = await import("../create-server.js");
+    const { createPerRequestServer, UmbracoSignInUnavailableError } = await import("../create-server.js");
     expect(options).not.toHaveProperty("expectedUmbracoMajor");
-    const server = await createPerRequestServer(options, env, props);
+    await expect(createPerRequestServer(options, env, props)).rejects.toBeInstanceOf(UmbracoSignInUnavailableError);
 
     expect(mockRefresh).toHaveBeenCalledTimes(1);
-    expect(toolNames(server)).toEqual(["authentication-expired"]);
   });
 
   it("refreshes exactly once and builds the full server when the refresh succeeds", async () => {
@@ -87,6 +86,6 @@ describe("createPerRequestServer with an expired token and the version check off
     const server = await createPerRequestServer(options, env, props);
 
     expect(mockRefresh).toHaveBeenCalledTimes(1);
-    expect(toolNames(server)).not.toContain("authentication-expired");
+    expect(toolNames(server)).toEqual([]);
   });
 });

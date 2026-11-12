@@ -6,7 +6,7 @@
  */
 
 import { analyzeSpec, type ApiAnalysis } from "../analyze-api.js";
-import { suggestFallbackModes, groupsToCollectionNames } from "../suggest-modes.js";
+import { suggestFallbackModes, groupsToCollectionNames, groupsToCollectionTags } from "../suggest-modes.js";
 import { extractPermissions } from "../extract-permissions.js";
 import { parseSwaggerUiHtml } from "../discover-swagger.js";
 
@@ -195,6 +195,20 @@ describe("suggestModes", () => {
     const names = groupsToCollectionNames(specAnalysis.groups);
 
     expect(names[0]).toBe("order-item");
+  });
+
+  it("should map each collection name to its original tag, including untagged operations", () => {
+    const spec = {
+      info: { title: "Test" },
+      paths: {
+        "/api/items": { get: { tags: ["OrderItem"], operationId: "list-order-items" } },
+        "/api/ping": { get: { tags: [], operationId: "ping" } },
+        "/api/health": { get: { operationId: "health" } },
+      },
+    };
+    const tags = groupsToCollectionTags(analyzeSpec(spec).groups);
+
+    expect(tags).toEqual({ "order-item": "OrderItem", default: "default" });
   });
 
   it("should create fallback mode with all collections", () => {

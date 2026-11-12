@@ -86,7 +86,7 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 | `@umbraco-cms/mcp-server-sdk/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
 | `@umbraco-cms/mcp-server-sdk/evals` | LLM eval framework: runScenarioTest, verification helpers |
 | `@umbraco-cms/mcp-server-sdk/config` | Configuration loading |
-| `@umbraco-cms/mcp-server-sdk/helpers` | API call helpers only |
+| `@umbraco-cms/mcp-server-sdk/helpers` | API call helpers, `resolveMediaTypeId` |
 | `@umbraco-cms/mcp-server-sdk/constants` | Umbraco well-known IDs |
 
 ## Core Concepts
@@ -240,6 +240,6 @@ The `create-mcp-server` scaffold tool (`src/scaffold.ts`) further rewrites these
 
 ## Requirements
 
-- Node.js 22+
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (CVE-2026-111497)
 - .NET 10 (for test Umbraco instance)
 - ESM modules (type: "module")

@@ -4,6 +4,8 @@ MCP server template for Umbraco add-ons using the @umbraco-cms/mcp-server-sdk.
 
 ## Getting Started
 
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (high: out-of-bounds write in the Brotli decoder bundled with Node.js), which Node's built-in `fetch` can reach when it decompresses a Brotli response. Upgrading Node.js is the only fix. Check your version with `node --version`.
+
 ### 1. Install Dependencies
 
 ```bash
@@ -176,6 +178,15 @@ automatically; add your deployed Worker's origin when you have one:
 ```
 
 The `ClientId` must match `UMBRACO_OAUTH_CLIENT_ID` in `.dev.vars`.
+
+**Running the Worker over https locally** — `npm run dev:worker` serves the
+Worker over http. To test the sign-in flow the way it runs in production
+(over https, with secure cookies), use `npm run dev:worker:https` instead.
+It needs `Umbraco.Mcp.HostedAuth` `17.0.0-beta.4` / `18.0.0-beta.4` or later,
+which registers the local callback over both http and https. Wrangler uses
+a self-signed certificate: accept it in the browser on first visit, and
+trust it before connecting Node-based MCP clients (Claude Code, Cursor, the
+MCP Inspector), or keep using `npm run dev:worker` for those.
 
 **Umbraco Cloud** (one Worker serving many projects via `siteRouting`) — no
 config needed. `HostedMcp:Mode` resolves to `Cloud` automatically from

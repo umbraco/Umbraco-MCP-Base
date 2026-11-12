@@ -3,8 +3,11 @@
  * Tool-types codegen — both a library function and a CLI binary.
  *
  * Library: {@link runCodegen} walks an array of `ToolCollectionExport`,
- * runs each tool's input/output Zod schema through `z.toJSONSchema()` and
- * `json-schema-to-typescript`, and returns a single `.d.ts` blob plus a
+ * runs each tool's input/output Zod schema through the shared `toJsonSchema`
+ * helper (the same conversion as `tools/list` and `--describe-tool`, so
+ * defaulted input fields are optional) and `json-schema-to-typescript`.
+ * Output objects are kept closed so generated `*Output` types have no index
+ * signature. Returns a single `.d.ts` blob plus a
  * list of any schemas that fell back to generic types.
  *
  * Binary: when invoked directly (`umbraco-mcp-generate-types`), the file
@@ -17,10 +20,10 @@
  * `17/umbraco-in-ai/mcp/base-mcp/sdk/tool-types.md` (UmbracoDocs) for
  * full usage, options, and consumer wiring.
  */
-import { z } from "zod";
 import { compile } from "json-schema-to-typescript";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { ToolDefinition } from "../types/tool-definition.js";
+import { toJsonSchema } from "../helpers/strict-json-schema-tools.js";
 import { createPermissiveCodegenUser } from "./permissive-user.js";
 
 /**
@@ -56,21 +59,6 @@ function pascal(name: string): string {
     .split(/[-_]/)
     .map((p) => (p.length === 0 ? "" : p[0].toUpperCase() + p.slice(1)))
     .join("");
-}
-
-function toJsonSchema(schemaOrShape: unknown): unknown {
-  if (schemaOrShape === undefined || schemaOrShape === null) return null;
-  if (typeof schemaOrShape !== "object") {
-    throw new Error(
-      `Invalid schema: expected a ZodType or plain-object ZodRawShape, got ${typeof schemaOrShape}`,
-    );
-  }
-  // ZodType has a `_def`; ZodRawShape is a plain object whose values are ZodTypes.
-  const wrapped =
-    "_def" in (schemaOrShape as Record<string, unknown>)
-      ? (schemaOrShape as z.ZodType)
-      : z.object(schemaOrShape as z.ZodRawShape);
-  return z.toJSONSchema(wrapped, { target: "draft-2020-12" });
 }
 
 export async function runCodegen(
@@ -145,6 +133,7 @@ export async function runCodegen(
       // `schema` is a deprecated alias for `inputSchema`.
       const inputSchema = toJsonSchema(
         tool.inputSchema ?? (tool as { schema?: unknown }).schema,
+        "input",
       );
       if (inputSchema) {
         const compiled = await compile(inputSchema as object, inputTypeName, {
@@ -164,7 +153,7 @@ export async function runCodegen(
     }
 
     try {
-      const outputSchema = toJsonSchema(tool.outputSchema);
+      const outputSchema = toJsonSchema(tool.outputSchema, "output", { openOutputObjects: false });
       if (outputSchema) {
         const compiled = await compile(outputSchema as object, outputTypeName, {
           bannerComment: "",

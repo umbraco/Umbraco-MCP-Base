@@ -95,6 +95,8 @@ MCP server template for Umbraco add-ons using the @umbraco-cms/mcp-server-sdk.
 
 ## Getting Started
 
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (high: out-of-bounds write in the Brotli decoder bundled with Node.js), which Node's built-in \`fetch\` can reach when it decompresses a Brotli response. Upgrading Node.js is the only fix. Check your version with \`node --version\`.
+
 ### 1. Install Dependencies
 
 \`\`\`bash
@@ -268,6 +270,15 @@ automatically; add your deployed Worker's origin when you have one:
 
 The \`ClientId\` must match \`UMBRACO_OAUTH_CLIENT_ID\` in \`.dev.vars\`.
 
+**Running the Worker over https locally** — \`npm run dev:worker\` serves the
+Worker over http. To test the sign-in flow the way it runs in production
+(over https, with secure cookies), use \`npm run dev:worker:https\` instead.
+It needs \`Umbraco.Mcp.HostedAuth\` \`17.0.0-beta.4\` / \`18.0.0-beta.4\` or later,
+which registers the local callback over both http and https. Wrangler uses
+a self-signed certificate: accept it in the browser on first visit, and
+trust it before connecting Node-based MCP clients (Claude Code, Cursor, the
+MCP Inspector), or keep using \`npm run dev:worker\` for those.
+
 **Umbraco Cloud** (one Worker serving many projects via \`siteRouting\`) — no
 config needed. \`HostedMcp:Mode\` resolves to \`Cloud\` automatically from
 \`umbraco-cloud.json\`, and clients register themselves per product. See the
@@ -318,10 +329,11 @@ exports[`template structure should produce expected package.json for sample proj
     "test:all": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=__tests__ --runInBand --forceExit && node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/evals/jest.config.ts --runInBand --forceExit",
     "test:e2e": "npx playwright test --config tests/hosted-e2e/playwright.config.ts",
     "dev:worker": "npx wrangler dev",
+    "dev:worker:https": "npx wrangler dev --local-protocol https",
     "deploy:worker": "npx wrangler deploy"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "files": [
     "dist"
@@ -336,7 +348,7 @@ exports[`template structure should produce expected package.json for sample proj
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.191",
     "@cloudflare/workers-oauth-provider": "^0.8.1",
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@umbraco-cms/mcp-hosted": "^17.0.0",
     "@umbraco-cms/mcp-server-sdk": "^17.0.0",
     "agents": "^0.6.0",
@@ -358,7 +370,7 @@ exports[`template structure should produce expected package.json for sample proj
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
     "tsup": "^8.4.0",
-    "undici": "^8.10.2",
+    "undici": "^8.12.2",
     "@playwright/test": "^1.61.1",
     "typescript": "^5.8.3",
     "wrangler": "^4.149.0"

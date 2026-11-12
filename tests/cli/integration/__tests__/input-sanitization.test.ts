@@ -32,7 +32,7 @@ describe("Input Sanitization (CLI)", () => {
       id: "../etc/passwd",
     });
 
-    // Should get an error response due to path traversal
+    // Rejected by the HTTP client: the id would put a ".." segment in the URL path
     expect(result.isError).toBe(true);
   });
 

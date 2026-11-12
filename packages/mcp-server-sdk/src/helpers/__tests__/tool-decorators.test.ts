@@ -9,7 +9,7 @@
 
 import { describe, it, expect, jest } from "@jest/globals";
 import { z } from "zod";
-import { withStandardDecorators, withPreExecutionCheck } from "../tool-decorators.js";
+import { withStandardDecorators, withPreExecutionCheck, withErrorHandling } from "../tool-decorators.js";
 
 describe("withPreExecutionCheck", () => {
   it("forwards a schema-less tool's single-argument call as a single argument", async () => {
@@ -158,5 +158,90 @@ describe("withErrorHandling with a status-less error body", () => {
     const text = JSON.stringify(result.content);
     expect(text).toContain("404");
     expect(text).not.toContain("undefined");
+  });
+});
+
+describe("withErrorHandling stderr logging", () => {
+  const secret = "jane.doe@example.com is already in use";
+
+  async function run(optIn: boolean) {
+    const { withErrorHandling } = await import("../tool-decorators.js");
+    const { UmbracoApiError } = await import("../api-call-helpers.js");
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+    if (optIn) process.env.UMBRACO_MCP_LOG_ERROR_BODIES = "true";
+    try {
+      const tool = {
+        name: "create-member",
+        description: "",
+        handler: async () => {
+          throw new UmbracoApiError({ status: 400, title: "Invalid", detail: secret });
+        },
+      } as any;
+      const result: any = await (withErrorHandling(tool).handler as (...args: any[]) => any)({}, {});
+      return { logged: JSON.stringify(spy.mock.calls), result };
+    } finally {
+      delete process.env.UMBRACO_MCP_LOG_ERROR_BODIES;
+      spy.mockRestore();
+    }
+  }
+
+  it("logs the tool name and status but not the error body by default, and still returns it to the caller", async () => {
+    const { logged, result } = await run(false);
+    expect(logged).toContain("create-member");
+    expect(logged).toContain("400");
+    expect(logged).not.toContain("jane.doe@example.com");
+    expect(JSON.stringify(result.content)).toContain("jane.doe@example.com");
+  });
+
+  it("logs the full error when UMBRACO_MCP_LOG_ERROR_BODIES=true", async () => {
+    const { logged } = await run(true);
+    expect(logged).toContain("jane.doe@example.com");
+  });
+});
+
+describe("withErrorHandling with an unanswered confirmation", () => {
+  it("returns a 408 error result saying nothing was changed", async () => {
+    const { withErrorHandling } = await import("../tool-decorators.js");
+    const { ConfirmationTimeoutError } = await import("../elicitation.js");
+
+    const tool = {
+      name: "t",
+      description: "",
+      handler: async () => {
+        throw new ConfirmationTimeoutError();
+      },
+    } as any;
+
+    const result = await (withErrorHandling(tool).handler as (...args: any[]) => any)({}, {});
+
+    expect(result.isError).toBe(true);
+    const problem = JSON.parse(result.content[0].text);
+    expect(problem.status).toBe(408);
+    expect(problem.detail).toBe(
+      "No response to the confirmation prompt, so nothing was changed. Ask the user and call the tool again to retry.",
+    );
+  });
+});
+
+describe("withErrorHandling schema conversion check (#417)", () => {
+  const make = (extra: Record<string, unknown>) =>
+    ({ name: "bad-tool", description: "", handler: jest.fn(), slices: [], ...extra }) as any;
+
+  it("throws naming the tool and field when an input field is z.date()", () => {
+    const tool = make({ inputSchema: { name: z.string(), when: z.date() } });
+    expect(() => withErrorHandling(tool)).toThrow(/Tool "bad-tool": inputSchema \(field "when"\) cannot be converted/);
+    expect(() => withStandardDecorators(tool)).toThrow(/bad-tool/);
+  });
+
+  it("throws naming the tool when the output schema contains z.date()", () => {
+    const tool = make({ outputSchema: { at: z.date() } });
+    expect(() => withErrorHandling(tool)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
+    const full = make({ outputSchema: z.object({ at: z.date() }) });
+    expect(() => withErrorHandling(full)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
+  });
+
+  it("still wraps a normal tool", () => {
+    const tool = make({ inputSchema: { name: z.string() }, outputSchema: { ok: z.boolean() } });
+    expect(() => withStandardDecorators(tool)).not.toThrow();
   });
 });

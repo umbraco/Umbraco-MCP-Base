@@ -6,12 +6,28 @@ trigger:
     - feature/*
     - release/*
 
+resources:
+  repositories:
+  - repository: build
+    type: github
+    name: Umbraco/Umbraco.Build
+    endpoint: github.com_umbraco
+
+parameters:
+  - name: sbom_generate
+    displayName: Generate SBOM
+    type: boolean
+    default: false
+
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
   - name: nodeVersion
-    value: '22.x'
+    value: '^22.23.4'
+  # Dependency-Track product name
+  - name: productName
+    value: 'Umbraco.Mcp-Base'
   - name: sdkPackagePath
     value: 'packages/mcp-server-sdk'
   - name: hostedPackagePath
@@ -178,11 +194,34 @@ stages:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifact: 'cli-package'
 
+# Runs in parallel with the build and gates Deploy_Npm: a failed SBOM (e.g. a license policy
+# violation) must stop a publish. Runs on the same branches (main), or on any branch when
+# sbom_generate is set (a forced run is also flagged isLatest in Dependency-Track).
+- stage: GenerateSBOM
+  displayName: Generate SBOM
+  dependsOn: []
+  condition: or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq('${{ parameters.sbom_generate }}', 'true'))
+  variables:
+  - group: dependency-track
+  jobs:
+  - job: GenerateSBOM
+    displayName: Generate SBOM
+    steps:
+    - template: devops/templates/generate-sbom-template.yml@build
+      parameters:
+        sbom_nuget: false
+        # The repo root: its lockfile covers every workspace, including the three published packages
+        # (mcp-server-sdk, mcp-hosted, create-umbraco-mcp-server); workspace folders have no
+        # lockfile of their own to scan.
+        sbom_npm_paths: ['.']
+        sbom_version_from: package.json # e.g. version 1.0.0-beta.47 is uploaded to project "Umbraco.Mcp-Base v1"
+
 - stage: Deploy_Npm
   displayName: 'NPM release'
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   dependsOn:
     - BuildAndTest
+    - GenerateSBOM
   jobs:
     - job: PublishSDK
       displayName: Publish SDK to NPM

@@ -19,6 +19,15 @@ export function groupsToCollectionNames(groups: ApiGroup[]): string[] {
   return groups.map((g) => toKebabCase(g.tag));
 }
 
+/**
+ * Maps each collection name to the OpenAPI tag it was built from (`"default"` for
+ * untagged operations), so consumers of `.discover.json` can match operations by
+ * tag instead of re-implementing the kebab-case conversion.
+ */
+export function groupsToCollectionTags(groups: ApiGroup[]): Record<string, string> {
+  return Object.fromEntries(groups.map((g) => [toKebabCase(g.tag), g.tag]));
+}
+
 export async function suggestModesWithLlm(
   groups: ApiGroup[],
   apiName: string

@@ -52,6 +52,7 @@ This package provides **library code** that consumers use in their `worker.ts`. 
 - Wrapping the OAuthProvider with `createWorkerExport()` to handle URL rewriting and the landing page
 - Wiring these together with our building blocks
 - Use `McpAgent.serve()` (Streamable HTTP), NOT `.mount()` (SSE legacy alias)
+- Wrap `McpAgent.serve()` in `createSiteRoutingApiHandler()` for the OAuthProvider's `apiHandler`. When a session's Umbraco sign-in is gone, `createPerRequestServer` throws `UmbracoSignInUnavailableError` and serves no tools. Only this wrapper answers `401 invalid_token` and sends the client back to sign-in; without it the session fails every request until the outer grant expires.
 - Pass `{ binding: "MCP_AGENT" }` if the DO binding name differs from the default `MCP_OBJECT`
 - Use `new_sqlite_classes` in wrangler.toml migrations (agents library requires SQLite)
 
@@ -96,4 +97,5 @@ The package implements the MCP Authorization spec's Third-Party Authorization Fl
 - PKCE for all OAuth flows
 - Single-use state parameters with 10-minute TTL
 - Umbraco tokens stored in KV, never exposed to MCP clients
-- Consent choices stored in KV state, narrowing-only model (user can't expand admin config)
+- Consent choices stored in KV state, narrowing-only model (user can't expand admin config). The config loader reads an empty mode or slice list as "no restriction", so a consent selection that shares nothing with the admin's list must resolve to no tools (`mergeConsentChoices`, `registerChainedTools`), never to an empty list
+- MCP sessions are bound to the sign-in that started them: `createSiteRoutingApiHandler` hands the client `<session id>.<tag>` (an HMAC keyed by the sign-in's token key) and refuses any request whose tag doesn't match the caller's own sign-in

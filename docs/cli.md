@@ -26,7 +26,7 @@ Auth credentials are created in the Umbraco backoffice under **Settings > Users*
 
 CLI arguments > environment variables > `.env` file values.
 
-A `.env` file in the current working directory is loaded automatically. Use `--env /path/to/.env` to specify a custom location.
+A `.env` file in the current working directory is loaded automatically, but only fills in variables the process environment hasn't set. Use `--env /path/to/.env` to specify a custom location; an explicit `--env` file overrides both the process environment and the default `./.env`.
 
 ## Starting the Server
 
@@ -118,6 +118,8 @@ node dist/index.js --umbraco-readonly
 
 Mutation tools are completely removed from the server — the agent cannot see or call them. Only tools with `readOnlyHint: true` are registered. Use this when you want zero risk of data modification.
 
+Readonly mode is also passed to chained MCP servers (as `--umbraco-readonly`), whether it is set as the flag or the environment variable, so a chained server built on the SDK hides its write tools too. `--list-tools` shows this server's own tools only, not the proxied ones.
+
 ### Dry-Run Mode
 
 ```bash
@@ -152,7 +154,7 @@ node dist/index.js --umbraco-dry-run
 
 ## Introspection Commands
 
-These flags print output and exit immediately — they do not start the MCP server and do not require auth credentials or a running Umbraco instance.
+These flags print output and exit immediately — they do not start the MCP server. `handleCliCommands` itself needs no credentials and no running Umbraco instance, and servers built from the template run introspection offline. A server whose entry point authenticates first in order to filter tools by the current user (such as Umbraco-CMS-MCP-Dev) needs a configured, reachable site before introspection works.
 
 Introspection respects all filtering configuration. If you set `UMBRACO_READONLY=true` or any filtering env var, the output only shows tools that pass those filters — exactly what the LLM would see at runtime.
 
@@ -248,8 +250,10 @@ UMBRACO_READONLY=true UMBRACO_INCLUDE_SLICES=read node dist/index.js --debug-con
 
 ## Input Sanitization
 
-The SDK automatically validates all string inputs before tool handlers run:
-- Rejects control characters, path traversal (`../`), embedded query params, percent-encoded strings
+The SDK automatically validates inputs before they reach Umbraco:
+- Rejects control characters in every string field of a tool's input. Fields marked `[raw]` in their `.describe()` are skipped
+- Allows free text with `?`, `&`, `%` or `../` anywhere in a tool's input (descriptions, translations, names)
+- Rejects a request whose URL path would reach a different endpoint than intended: a `?` or `#`, or a `..` segment (also `%2e%2e` and `..\`), coming from a path parameter such as `id` or `path`. The HTTP client checks this just before sending, so it covers every generated API call
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages
 

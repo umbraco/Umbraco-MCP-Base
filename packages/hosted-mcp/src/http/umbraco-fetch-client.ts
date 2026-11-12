@@ -7,12 +7,19 @@
  * compatible with api-call-helpers' validation logic.
  */
 
-import { normalizeBaseUrl, type HttpResponse } from "@umbraco-cms/mcp-server-sdk";
+import {
+  assertSafeRequestPath,
+  buildFetchBody,
+  normalizeBaseUrl,
+  serializeParams,
+  type HttpResponse,
+} from "@umbraco-cms/mcp-server-sdk";
 import type { HostedMcpEnv } from "../types/env.js";
 import {
   getRejectedRefreshToken,
   getStoredUmbracoToken,
   refreshUmbracoToken,
+  tokenLogRef,
   type RefreshFailure,
   type RefreshTokenResult,
   type StoredSiteContext,
@@ -29,6 +36,8 @@ export interface FetchClientOptions {
   returnFullResponse?: boolean;
   /** Custom status validation (defaults to throwing on non-2xx) */
   validateStatus?: ((status: number) => boolean) | null;
+  /** Abort signal for request cancellation (forwarded to `fetch`, retry included) */
+  signal?: AbortSignal;
 }
 
 /**
@@ -39,32 +48,6 @@ export const CAPTURE_RAW_HTTP_RESPONSE = {
   returnFullResponse: true,
   validateStatus: () => true,
 } as const;
-
-/**
- * Serializes params for Umbraco API calls.
- * Handles array params in repeat format (e.g., id=1&id=2).
- */
-function serializeParams(
-  params: Record<string, unknown> | undefined
-): string {
-  if (!params) return "";
-  const parts: string[] = [];
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        parts.push(
-          `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
-        );
-      }
-    } else {
-      parts.push(
-        `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
-      );
-    }
-  }
-  return parts.length > 0 ? `?${parts.join("&")}` : "";
-}
 
 /**
  * Configuration for creating a fetch client instance.
@@ -137,9 +120,11 @@ export interface UmbracoFetchClient {
   /**
    * The last refresh failure this client observed, or `undefined` if it has
    * never failed to refresh. `createPerRequestServer` reads this after its
-   * opening round-trips so a definitively dead session (`reason: "expired"`)
-   * can be surfaced as the degraded `authentication-expired` server rather
-   * than as a toolset that 401s on every call.
+   * opening round-trips so a definitively failed refresh (`reason` of
+   * `expired`, `misconfigured` or `request_rejected` — see
+   * `UNUSABLE_REFRESH_REASONS`) fails server creation
+   * (`UmbracoSignInUnavailableError`) rather than surfacing as a toolset that
+   * 401s on every call.
    */
   getRefreshFailure(): RefreshFailure | undefined;
   /**
@@ -277,12 +262,12 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
       return false;
     }
     const { env, tokenKey } = config.refreshContext;
-    const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch((error) => {
+    const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey).catch(async (error) => {
       // Logged, not swallowed: a KV outage here would otherwise read as
       // "nothing newer to adopt" and kill a session that is still healthy.
       logAuth(
         env,
-        `adoptStoredToken KV READ FAILED key=${tokenKey} error=${sanitizeForLog(
+        `adoptStoredToken KV READ FAILED login=${await tokenLogRef(tokenKey)} error=${sanitizeForLog(
           error instanceof Error ? error.message : "unknown error"
         )}`
       );
@@ -296,7 +281,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     if (typeof stored.expires_at !== "number" || Date.now() >= stored.expires_at) {
       return false;
     }
-    logAuth(env, `adopting a token refreshed by another client (key=${tokenKey})`);
+    logAuth(env, `adopting a token refreshed by another client (login=${await tokenLogRef(tokenKey)})`);
     currentToken = stored.access_token;
     currentExpiresAt = stored.expires_at;
     if (stored.refresh_token) {
@@ -313,18 +298,20 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     requestConfig: UmbracoFetchRequestConfig,
     options?: FetchClientOptions
   ): Promise<HttpResponse<T> | T> {
+    assertSafeRequestPath(requestConfig.url);
     const queryString = serializeParams(requestConfig.params);
     const fullUrl = `${normalizedBaseUrl}${requestConfig.url}${queryString}`;
 
-    // Detect Web FormData (Cloudflare Workers + Node 18+). When present,
-    // pass straight to fetch — it sets multipart Content-Type with boundary.
-    const isWebFormData = requestConfig.data != null
-      && typeof (globalThis as any).FormData !== "undefined"
-      && requestConfig.data instanceof (globalThis as any).FormData;
+    // Same body rules as the SDK's fetch clients (FormData passes through and
+    // fetch sets the multipart Content-Type; anything else is JSON).
+    const { body, skipDefaultContentType } = await buildFetchBody(
+      requestConfig.data,
+      options?.signal
+    );
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${currentToken}`,
-      ...(isWebFormData ? {} : { "Content-Type": "application/json" }),
+      ...(skipDefaultContentType ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...requestConfig.headers,
     };
@@ -332,12 +319,11 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     const fetchOptions: RequestInit = {
       method: requestConfig.method,
       headers,
+      signal: options?.signal,
     };
 
-    if (requestConfig.data !== undefined) {
-      fetchOptions.body = isWebFormData
-        ? (requestConfig.data as FormData)
-        : JSON.stringify(requestConfig.data);
+    if (body !== undefined) {
+      fetchOptions.body = body;
     }
 
     let resp = await fetch(fullUrl, fetchOptions);
@@ -497,7 +483,7 @@ export async function createFetchClientFromKV(
 ): Promise<UmbracoFetchClient | null> {
   const entry = await getStoredUmbracoToken(env.OAUTH_KV, tokenKey);
   if (!entry) {
-    logAuth(env, `createFetchClientFromKV key=${tokenKey} no_tokens_in_kv`);
+    logAuth(env, `createFetchClientFromKV login=${await tokenLogRef(tokenKey)} no_tokens_in_kv`);
     return null;
   }
 
@@ -506,7 +492,7 @@ export async function createFetchClientFromKV(
   if (!tokens.refresh_token) {
     logAuth(
       env,
-      `createFetchClientFromKV key=${tokenKey} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
+      `createFetchClientFromKV login=${await tokenLogRef(tokenKey)} stored_tokens_have_NO_refresh_token — auto-refresh disabled for this session`
     );
   }
 

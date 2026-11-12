@@ -26,6 +26,8 @@
  * ```
  */
 
+import { z, ZodType } from "zod";
+import { getParseErrorMessage } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type { ToolCollectionExport } from "../types/tool-collection.js";
 import type { GetServerConfigResult, UmbracoServerConfig } from "../config/config.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
@@ -160,7 +162,15 @@ export async function handleCliCommands(
         if (filterConfig && !shouldIncludeTool(tool, { collectionName: col.metadata.name, config: filterConfig })) {
           break; // Tool exists but is filtered out — fall through to "not found"
         }
-        const schema = toolToJsonSchema(tool);
+        let schema: Record<string, unknown>;
+        try {
+          schema = toolToJsonSchema(tool);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          console.error(`Could not convert the input schema for '${toolName}' to JSON Schema: ${reason}`);
+          await exitAfterFlush(1);
+          return;
+        }
         console.log(
           JSON.stringify(
             {
@@ -244,6 +254,29 @@ export async function handleCliCommands(
             await exitAfterFlush(1);
             return; // unreachable but satisfies TS
           }
+        }
+
+        // Validate against the input schema as the MCP path does, so defaults and
+        // transforms apply and bad args fail here rather than reaching the API
+        if (tool.inputSchema) {
+          const schema = tool.inputSchema instanceof ZodType ? tool.inputSchema : z.object(tool.inputSchema);
+          // safeParseAsync still rejects when a refine/transform throws; exit through
+          // the same path as a throwing handler instead of an unhandled rejection
+          let parsed: Awaited<ReturnType<typeof schema.safeParseAsync>>;
+          try {
+            parsed = await schema.safeParseAsync(args);
+          } catch (error: any) {
+            console.error(`Tool '${toolName}' failed: ${error.message}`);
+            await exitAfterFlush(1);
+            return; // unreachable but satisfies TS
+          }
+          if (!parsed.success) {
+            // Same formatter McpServer.validateToolInput uses, so the message matches MCP
+            console.error(`Input validation error: Invalid arguments for tool ${toolName}: ${getParseErrorMessage(parsed.error)}`);
+            await exitAfterFlush(1);
+            return; // unreachable but satisfies TS
+          }
+          args = parsed.data as Record<string, unknown>;
         }
 
         // Call the tool handler and print result

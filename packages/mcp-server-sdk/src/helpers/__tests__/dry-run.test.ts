@@ -4,7 +4,7 @@
  * Tests for the dry-run mode that intercepts mutation tools.
  */
 
-import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import { jest, describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 
 // Use dynamic imports to get fresh module state
 async function getDryRunModule() {
@@ -13,7 +13,14 @@ async function getDryRunModule() {
 }
 
 describe("configureDryRunMode", () => {
+  const original = process.env.UMBRACO_DRY_RUN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UMBRACO_DRY_RUN;
+    else process.env.UMBRACO_DRY_RUN = original;
+  });
+
   it("should default to disabled", async () => {
+    delete process.env.UMBRACO_DRY_RUN;
     const { isDryRunEnabled } = await getDryRunModule();
     expect(isDryRunEnabled()).toBe(false);
   });
@@ -27,6 +34,76 @@ describe("configureDryRunMode", () => {
   it("should disable dry-run mode", async () => {
     const { configureDryRunMode, isDryRunEnabled } = await getDryRunModule();
     configureDryRunMode(true);
+    configureDryRunMode(false);
+    expect(isDryRunEnabled()).toBe(false);
+  });
+});
+
+describe("isDryRunEnabled env fallback", () => {
+  const original = process.env.UMBRACO_DRY_RUN;
+  afterEach(() => {
+    if (original === undefined) delete process.env.UMBRACO_DRY_RUN;
+    else process.env.UMBRACO_DRY_RUN = original;
+  });
+
+  it("honours UMBRACO_DRY_RUN when configureDryRunMode was never called", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it.each(["true", "TRUE", "1"])("enables for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it.each(["false", "0", ""])("stays disabled for %p", async (value) => {
+    process.env.UMBRACO_DRY_RUN = value;
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(false);
+  });
+
+  it("reads the env var once, so a later change doesn't flip the mode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    expect(isDryRunEnabled()).toBe(true);
+  });
+
+  it("re-reads the env var after resetDryRunMode", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { isDryRunEnabled, resetDryRunMode } = await getDryRunModule();
+    expect(isDryRunEnabled()).toBe(true);
+
+    process.env.UMBRACO_DRY_RUN = "false";
+    resetDryRunMode();
+    expect(isDryRunEnabled()).toBe(false);
+  });
+
+  it("intercepts mutation tools through withDryRun when only the env var is set", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { withDryRun } = await getDryRunModule();
+    const handler = jest.fn();
+    const tool = {
+      name: "test-mutation",
+      description: "test",
+      handler,
+      slices: ["create"],
+      annotations: { destructiveHint: true },
+    } as any;
+
+    const result: any = await withDryRun(tool).handler({ input: "x" } as any, {} as any);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.structuredContent.dryRun).toBe(true);
+  });
+
+  it("lets an explicit configureDryRunMode(false) beat the env var", async () => {
+    process.env.UMBRACO_DRY_RUN = "true";
+    const { configureDryRunMode, isDryRunEnabled } = await getDryRunModule();
     configureDryRunMode(false);
     expect(isDryRunEnabled()).toBe(false);
   });
@@ -165,5 +242,190 @@ describe("withDryRun", () => {
     expect(annotations.destructiveHint).toBe(true);
     expect(annotations.idempotentHint).toBe(true);
     expect(annotations.readOnlyHint).toBe(false);
+  });
+});
+
+describe("dry-run over MCP with an outputSchema", () => {
+  // Fresh modules per test so dry-run state and the decorators agree on one
+  // copy of dry-run.ts.
+  async function setup() {
+    jest.resetModules();
+    const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { z } = await import("zod");
+    const dryRun = await import("../dry-run.js");
+    const decorators = await import("../tool-decorators.js");
+    const { createToolResult } = await import("../tool-result.js");
+
+    const outputSchema = { id: z.string(), message: z.string() };
+    const makeTool = (name: string, annotations: Record<string, boolean> = {}) =>
+      ({
+        name,
+        description: "test tool",
+        inputSchema: { name: z.string() },
+        outputSchema,
+        slices: [],
+        annotations: { openWorldHint: true, ...annotations },
+        handler: async () => createToolResult({ id: "real-id", message: "real" }),
+      }) as any;
+
+    // Registers like the template and hosted server do: config is loaded
+    // (dry-run set) first, then the schema comes from getRegisteredOutputSchema.
+    async function connect(tools: any[]) {
+      const server = new McpServer({ name: "test-server", version: "1.0.0" });
+      for (const tool of tools) {
+        server.registerTool(
+          tool.name,
+          {
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            outputSchema: dryRun.getRegisteredOutputSchema(tool),
+            annotations: tool.annotations,
+          },
+          tool.handler,
+        );
+      }
+      const client = new Client({ name: "test-client", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      return { client, close: async () => { await client.close(); await server.close(); } };
+    }
+
+    return { ...dryRun, ...decorators, makeTool, connect };
+  }
+
+  it("returns the preview for a mutation tool via withStandardDecorators", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+      expect(result.structuredContent.toolName).toBe("create-thing");
+      expect(result.structuredContent.inputReceived).toEqual({ name: "x" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("returns the preview for a Forms-style stack without withStandardDecorators", async () => {
+    const { configureDryRunMode, withDryRun, withPreExecutionCheck, withErrorHandling, compose, makeTool, connect } =
+      await setup();
+    const tool = withErrorHandling(compose(withDryRun, withPreExecutionCheck)(makeTool("create-form-body")));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: "create-form-body", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it("omits outputSchema from tools/list for a mutation tool while dry-run is on", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema and runs a read-only tool normally in dry-run", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("get-thing", { readOnlyHint: true }));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "get-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "get-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema and validated output when dry-run is off", async () => {
+    const { configureDryRunMode, withStandardDecorators, makeTool, connect } = await setup();
+    const tool = withStandardDecorators(makeTool("create-thing"));
+    configureDryRunMode(false);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+
+  it("keeps outputSchema for a tool no dry-run interception wrapped", async () => {
+    const { configureDryRunMode, withErrorHandling, makeTool, connect } = await setup();
+    const tool = withErrorHandling(makeTool("create-thing"));
+    configureDryRunMode(true);
+
+    const { client, close } = await connect([tool]);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.find((t) => t.name === "create-thing")!.outputSchema).toBeDefined();
+      const result: any = await client.callTool({ name: "create-thing", arguments: { name: "x" } });
+      expect(result.structuredContent).toEqual({ id: "real-id", message: "real" });
+    } finally {
+      await close();
+    }
+  });
+  // Cases that broke when the schema was hidden by a getter on withErrorHandling.
+  async function expectPreview(setupResult: Awaited<ReturnType<typeof setup>>, tool: any) {
+    const { configureDryRunMode, connect } = setupResult;
+    configureDryRunMode(true);
+    const { client, close } = await connect([tool]);
+    try {
+      const result: any = await client.callTool({ name: tool.name, arguments: { name: "x" } });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent.dryRun).toBe(true);
+    } finally {
+      await close();
+    }
+  }
+
+  it("returns the preview for a tool copied with a spread before dry-run is configured", async () => {
+    const s = await setup();
+    const tool = { ...s.withStandardDecorators(s.makeTool("create-copy")), slices: ["create"] };
+    await expectPreview(s, tool);
+  });
+
+  it("returns the preview when withDryRun wraps outside withErrorHandling", async () => {
+    const s = await setup();
+    await expectPreview(s, s.withDryRun(s.withErrorHandling(s.makeTool("create-inverted"))));
+  });
+
+  it("returns the preview for withDryRun without withErrorHandling", async () => {
+    const s = await setup();
+    await expectPreview(s, s.withDryRun(s.makeTool("create-bare")));
+  });
+
+  it("leaves outputSchema a plain, writable property on decorated tools", async () => {
+    const { withStandardDecorators, makeTool } = await setup();
+    const tool: any = withStandardDecorators(makeTool("create-thing"));
+    const descriptor = Object.getOwnPropertyDescriptor(tool, "outputSchema")!;
+    expect(descriptor.get).toBeUndefined();
+    expect(descriptor.writable).toBe(true);
   });
 });

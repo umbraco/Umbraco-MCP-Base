@@ -3,8 +3,9 @@
  *
  * The outer grant issued by OAuthProvider outlives Umbraco's refresh token.
  * Once the inner KV entry is gone, the wrapper must revoke the outer grant and
- * answer `401 invalid_token`, so MCP clients sign in again instead of being
- * left on the one-tool `authentication-expired` server.
+ * answer `401 invalid_token`, so MCP clients sign in again. Since #451 this
+ * is the only way back to sign-in: the Durable Object fails its start
+ * (`UmbracoSignInUnavailableError`) rather than serving a one-tool server.
  */
 
 import { describe, expect, it, jest, beforeEach, afterEach } from "@jest/globals";

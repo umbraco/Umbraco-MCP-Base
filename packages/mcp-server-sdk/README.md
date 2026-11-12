@@ -112,7 +112,8 @@ Features:
 - Automatic OAuth token refresh
 - Self-signed certificate support in development
 - Repeat-style query string serialization for array params
-- Error logging
+- Error logging — failed requests log status, method and path to stderr only. Response bodies can echo submitted values (names, emails, content fields) and MCP clients capture stderr in their own logs, so bodies are logged only on opt-in: `enableLogging: true` on `createUmbracoFetchClient`, or `UMBRACO_MCP_LOG_ERROR_BODIES=true` for the singleton client (which also makes the tool error handler log the full error instead of just the tool name and status)
+- Request tracing — `enableLogging: true` on `createUmbracoFetchClient` also logs a `Request:` / `Response:` line per call. These go to stderr via `console.error` (stdout carries the protocol in stdio servers), so hosts that grade logs by stream — e.g. Cloudflare Workers observability — record them at error level. Leave it off in production if that would trip error-rate alerts
 
 #### `UmbracoManagementClient`
 
@@ -467,6 +468,84 @@ package version has no relationship to the Umbraco major it targets (a scaffolde
 starts at `1.0.0`), so comparing against it falsely flagged every new project as incompatible
 ([#220](https://github.com/umbraco/Umbraco-MCP-Base/issues/220)).
 
+### Startup guard: `runStartupVersionCheck`
+
+Stdio entry points should use `runStartupVersionCheck`, which runs the whole guard in one call
+and never throws:
+
+```typescript
+import {
+  runStartupVersionCheck,
+  UmbracoManagementClient,
+  CAPTURE_RAW_HTTP_RESPONSE,
+  SERVER_INFORMATION_PATH,
+  type HttpResponse,
+} from '@umbraco-cms/mcp-server-sdk';
+import { UMBRACO_TARGET_MAJOR } from './config/umbraco-target.generated.js';
+
+const versionCheckMessage = await runStartupVersionCheck({
+  // UMBRACO_EXPECTED_MAJOR / --umbraco-expected-major from your config loader.
+  expectedUmbracoMajorOverride: serverConfig.custom.expectedUmbracoMajor,
+  generatedUmbracoMajor: UMBRACO_TARGET_MAJOR,
+  mcpVersion: packageJson.version, // diagnostics only — not compared
+  client: {
+    getServerInformation: async ({ signal } = {}) => {
+      const response = (await UmbracoManagementClient<{ version: string }>(
+        { url: SERVER_INFORMATION_PATH, method: 'GET' },
+        { ...CAPTURE_RAW_HTTP_RESPONSE, signal },
+      )) as unknown as HttpResponse<{ version: string }>;
+      return { version: response.data.version };
+    },
+  },
+  // timeoutMs: 5000, // default
+});
+
+const server = new McpServer(
+  { name, version },
+  versionCheckMessage ? { instructions: versionCheckMessage } : undefined,
+);
+```
+
+It:
+
+- resolves the expected major with `resolveExpectedUmbracoMajor(override, generated)` — a
+  non-blank (trimmed) override wins; `undefined`, `""` or whitespace falls back to the generated
+  major. mcp-hosted uses the same rule for `env.UMBRACO_EXPECTED_MAJOR`;
+- bounds the `server/information` lookup with a deadline (`timeoutMs`, default
+  `DEFAULT_VERSION_CHECK_TIMEOUT_MS` = 5000). It passes an `AbortSignal` to
+  `getServerInformation` — `UmbracoManagementClient` and `createUmbracoFetchClient` also apply
+  it to the token request — and enforces the deadline itself in case a client ignores the
+  signal. A timeout is handled like an unreachable CMS: a warning that says the version was not
+  checked and tools are not blocked;
+- calls `checkUmbracoVersion`, then `configureVersionCheckHook()`, so a mismatch blocks the first
+  decorated tool call once and a retry succeeds;
+- returns `getVersionCheckMessage()` for the server's `instructions`, or `null`;
+- never throws. If the guard itself fails, it logs to stderr and returns a message saying the
+  version was not checked, so the failure reaches `instructions` instead of looking like a pass.
+
+**Chained children: `UMBRACO_MCP_PARENT_CHECKED_MAJOR`.** A **parent** MCP server that runs its
+own guard and chains this server as a child process sets this in the child's spawn env to the
+major it checked against, using `chainedVersionCheckEnv(major)`:
+
+```typescript
+env: {
+  ...chainedVersionCheckEnv(resolveExpectedUmbracoMajor(override, UMBRACO_TARGET_MAJOR)),
+},
+```
+
+The child skips its own check (no request, no block, no message) **only when its resolved
+expected major is the same major**, so a mismatch isn't reported twice. A child built for a
+different major runs its own check, because the parent's check says nothing about it. Children
+inherit the env, so the value can reach grandchildren or be set by hand; neither turns the
+guard off for a server that targets a different major. Only set it for children that connect to
+the same Umbraco instance as the parent.
+
+Every message `checkUmbracoVersion` stores passes instance-supplied text (the reported version,
+a fetch error's message) through a sanitiser — control characters replaced, whitespace
+collapsed, length capped — since it is meant for `instructions`.
+
+### Lower-level building blocks
+
 `checkUmbracoVersion` computes the result and stores it in a singleton — on its own it does
 nothing else observable besides logging to `stderr`. Two more calls are required to make the
 warning actually reach the user: `configureVersionCheckHook()` bridges the singleton to
@@ -478,6 +557,7 @@ model/user sees it, not just the server log.
 ```typescript
 import {
   checkUmbracoVersion,
+  resolveExpectedUmbracoMajor,
   configureVersionCheckHook,
   getVersionCheckMessage,
   clearVersionCheckMessage,
@@ -491,7 +571,7 @@ import { UMBRACO_TARGET_MAJOR } from './config/umbraco-target.generated.js';
 await checkUmbracoVersion({
   mcpVersion: '1.0.0', // diagnostics only — not compared
   // Required. The generated target, with an optional runtime override.
-  expectedUmbracoMajor: process.env.UMBRACO_EXPECTED_MAJOR ?? UMBRACO_TARGET_MAJOR,
+  expectedUmbracoMajor: resolveExpectedUmbracoMajor(process.env.UMBRACO_EXPECTED_MAJOR, UMBRACO_TARGET_MAJOR),
   client: {
     getServerInformation: async () => {
       const response = await api.getServerInformation();
@@ -636,22 +716,21 @@ Notes:
 
 ### Wiring in scaffolded projects
 
-`template/src/index.ts` shows the full wiring: it passes
-`serverConfig.custom.expectedUmbracoMajor ?? UMBRACO_TARGET_MAJOR` into `checkUmbracoVersion`,
-where `UMBRACO_TARGET_MAJOR` is the generated constant above (re-exported from
+`template/src/index.ts` shows the full wiring: it calls `runStartupVersionCheck` with
+`serverConfig.custom.expectedUmbracoMajor` as the override and `UMBRACO_TARGET_MAJOR` as the
+generated major, where `UMBRACO_TARGET_MAJOR` is the generated constant above (re-exported from
 `template/src/config/index.ts`). `template/src/config/server-config.ts` exposes the override as
 a custom config field so users can retarget without editing code:
 
 | Env var | CLI flag | Effect |
 |---------|----------|--------|
-| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset (default) = use `UMBRACO_TARGET_MAJOR`. |
+| `UMBRACO_EXPECTED_MAJOR` | `--umbraco-expected-major` | Overrides the generated `UMBRACO_TARGET_MAJOR` for a project deliberately pointed at a different Umbraco major. Unset or blank (default) = use `UMBRACO_TARGET_MAJOR`. |
+| `UMBRACO_MCP_PARENT_CHECKED_MAJOR` | — | Set by a parent MCP server (via `chainedVersionCheckEnv`) in a chained child's spawn env to the major it already checked. The child skips its startup version check only if it targets that same major. Not a general opt-out. |
 
-The template then calls `configureVersionCheckHook()` unconditionally — harmless when the
-versions match, since nothing is blocked in that case.
-
-`checkUmbracoVersion` degrades to a no-op (no request, no message, nothing blocked) if the
-resolved major is blank — a runtime guard against a misconfigured `UMBRACO_EXPECTED_MAJOR=""`,
-not a supported way to disable the check.
+`checkUmbracoVersion` still degrades to a no-op (no request, no message, nothing blocked) if the
+major it is given is blank — a runtime guard for direct callers, not a supported way to disable
+the check. Through `runStartupVersionCheck` a blank override never gets that far: it falls back
+to the generated major.
 
 ## Eval Testing
 
@@ -737,25 +816,64 @@ if (errors.length > 0) {
 
 Well-known Umbraco IDs for common operations.
 
-```typescript
-import {
-  BLANK_UUID,
-  FOLDER_MEDIA_TYPE_ID,
-  IMAGE_MEDIA_TYPE_ID,
-  FILE_MEDIA_TYPE_ID,
-  STANDARD_MEDIA_TYPES,
-} from '@umbraco-cms/mcp-server-sdk';
+> **The media type and data type ID constants are fresh-install keys only.**
+> Sites upgraded from older Umbraco versions use different keys for the same
+> built-in types (e.g. the File media type is `0de4a970-…` on an upgraded site
+> but `4c52d8ab-…` on a fresh one), so sending a hard-coded key to such a site
+> fails with a 404. Use them for tests and fixtures against a fresh install, and
+> resolve the id at runtime for anything that runs against a real site.
 
-// Use in tool implementations
-if (STANDARD_MEDIA_TYPES.includes(mediaTypeId)) {
-  // Handle standard media type
+### Resolving media type ids
+
+`resolveMediaTypeId(alias)` looks a media type up on the connected site by its
+alias, which is stable across installs even when the key is not. It returns the
+site's id, or `undefined` when no media type has that alias.
+
+```typescript
+import { resolveMediaTypeId, MEDIA_TYPE_ALIASES } from '@umbraco-cms/mcp-server-sdk';
+
+const folderTypeId = await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Folder);
+if (!folderTypeId) {
+  throw new Error('This site has no Folder media type');
 }
 ```
 
-Available constants:
+- Uses `UmbracoManagementClient`, so it works on stdio (after `initializeUmbracoFetch()`), with `setCustomTransport()` and inside hosted sessions. Pass `{ client }` to use another Orval-style mutator; also pass `{ baseUrl }` (the site that client talks to) or its results are not cached.
+- Looks candidates up with `GET /umbraco/management/api/v1/item/media-type/search` (which matches names), checks each candidate's alias with `GET /media-type/{id}`, and falls back to walking `GET /tree/media-type/root` / `children` if the type was renamed.
+- Found ids are cached per base URL: `{ baseUrl }` if given, else the hosted session's, else the one passed to `initializeUmbracoFetch()`. If none is known, the result is not cached. A miss is cached for one minute, so repeated calls for an alias the site lacks don't each walk the tree; errors are never cached. `clearMediaTypeIdCache()` empties the cache. In a hosted Worker the cache is shared by all sessions for the same site: media type ids are site-wide and not secret, so a user can get an id from the cache that their own permissions wouldn't have let them look up.
+- The tree-walk fallback needs access to the media type tree (Settings section). For a user without it, such as an editor with Media access only, the name search still runs. If that finds nothing, the result is `undefined` rather than a 403.
+- `MEDIA_TYPE_ALIASES` holds the built-in aliases: `Folder`, `Image`, `File`, `umbracoMediaVideo`, `umbracoMediaAudio`, `umbracoMediaArticle`, `umbracoMediaVectorGraphics`.
+- `Folder`, `Image` and `File` have had these aliases since Umbraco 4, so every site has them unless they were deleted. Video, Audio, Article and Vector Graphics were only added to fresh installs in Umbraco 8.14, and no upgrade migration adds them. A site first installed earlier (even one now on 17) won't have them unless someone created them, so handle `undefined` by falling back to `File`. (8.14 seeded them as `Video`, `Audio`, `Article` and `VectorGraphics`, and 8.15 added the `umbracoMedia` prefix for new installs only. The resolver accepts the 8.14 alias when the current one isn't found.)
+
+```typescript
+const mediaTypeId =
+  (await resolveMediaTypeId(MEDIA_TYPE_ALIASES.Video)) ??
+  (await resolveMediaTypeId(MEDIA_TYPE_ALIASES.File));
+```
+
+### Looking up data types
+
+Data types have no alias, and neither their keys nor their names are stable across upgraded sites. For example, on a site first installed before Umbraco 8.14, the data type called "Media Picker" is the old picker (`135d60e0-…`) and `MEDIA_PICKER_DATA_TYPE_ID` (`4309a3ea-…`) doesn't exist. Fresh installs named the old picker "(Obsolete) Media Picker" in 8.14 and "Media Picker (legacy)" from 8.15 to 13. The name search (`GET /item/data-type/search`) also matches substrings, so "Media Picker" finds "Multiple Media Picker" and "Image Media Picker" too.
+
+Filter by property editor alias instead, then pick the match by its configuration, because several seeded data types share one editor:
+
+```
+GET /umbraco/management/api/v1/filter/data-type?editorAlias=Umbraco.MediaPicker3
+```
+
+| Constant | Editor alias |
+|---|---|
+| `TextString_DATA_TYPE_ID` | `Umbraco.TextBox` |
+| `MEDIA_PICKER_DATA_TYPE_ID` | `Umbraco.MediaPicker3` (single item, no type filter) |
+| `MEMBER_PICKER_DATA_TYPE_ID` | `Umbraco.MemberPicker` |
+| `TAG_DATA_TYPE_ID` | `Umbraco.Tags` |
+
+### Available constants
+
 - `BLANK_UUID` - Empty UUID for testing/snapshots
-- Media type IDs: `FOLDER_MEDIA_TYPE_ID`, `IMAGE_MEDIA_TYPE_ID`, `FILE_MEDIA_TYPE_ID`, `VIDEO_MEDIA_TYPE_ID`, `AUDIO_MEDIA_TYPE_ID`, `ARTICLE_MEDIA_TYPE_ID`, `VECTOR_GRAPHICS_MEDIA_TYPE_ID`
-- Data type IDs: `TextString_DATA_TYPE_ID`, `MEDIA_PICKER_DATA_TYPE_ID`, `MEMBER_PICKER_DATA_TYPE_ID`, `TAG_DATA_TYPE_ID`
+- Media type aliases: `MEDIA_TYPE_ALIASES` (stable across installs; use with `resolveMediaTypeId`)
+- Media type IDs (**deprecated, fresh install only**): `FOLDER_MEDIA_TYPE_ID`, `IMAGE_MEDIA_TYPE_ID`, `FILE_MEDIA_TYPE_ID`, `VIDEO_MEDIA_TYPE_ID`, `AUDIO_MEDIA_TYPE_ID`, `ARTICLE_MEDIA_TYPE_ID`, `VECTOR_GRAPHICS_MEDIA_TYPE_ID`, and the name-keyed `STANDARD_MEDIA_TYPES` map
+- Data type IDs (**fresh install only**): `TextString_DATA_TYPE_ID`, `MEDIA_PICKER_DATA_TYPE_ID`, `MEMBER_PICKER_DATA_TYPE_ID`, `TAG_DATA_TYPE_ID`. See [Looking up data types](#looking-up-data-types) for finding them on an arbitrary site
 - User group IDs: `TRANSLATORS_USER_GROUP_ID`, `WRITERS_USER_GROUP_ID`
 
 ## File Utilities
@@ -884,9 +1002,13 @@ The SDK provides several subpath exports for tree-shaking:
 
 ## Requirements
 
-- Node.js >= 22.3.0
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (see [Node.js version](#nodejs-version))
 - TypeScript >= 5.0
 - `@anthropic-ai/claude-agent-sdk` (optional, for eval testing)
+
+## Node.js version
+
+Node.js 22.23.4+, 24.22.1+ or 26.12.1+ is required. Earlier releases are affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) (high: out-of-bounds write in the Brotli decoder bundled with Node.js), which Node's built-in `fetch` can reach when it decompresses a Brotli response. Upgrading Node.js is the only fix. Check your version with `node --version`.
 
 ## TLS certificates
 

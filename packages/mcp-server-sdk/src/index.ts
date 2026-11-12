@@ -83,6 +83,8 @@ export {
   configureDryRunMode,
   isDryRunEnabled,
   withDryRun,
+  getRegisteredOutputSchema,
+  DRY_RUN_INTERCEPTS,
 } from "./helpers/dry-run.js";
 
 // Server Reference (for tools that need elicitation)
@@ -100,6 +102,7 @@ export { toolCallExtraIndex } from "./helpers/tool-call-params.js";
 // Elicitation Helpers
 export {
   confirmAction,
+  ConfirmationTimeoutError,
   ElicitationUnsupportedError,
   type ConfirmActionOptions,
 } from "./helpers/elicitation.js";
@@ -132,6 +135,12 @@ export {
 
 // URL helpers
 export { normalizeBaseUrl, isLoopbackUrl } from "./helpers/url.js";
+export {
+  resolveMediaTypeId,
+  clearMediaTypeIdCache,
+  type ResolveMediaTypeIdOptions,
+  type MediaTypeResolverClient,
+} from "./helpers/resolve-media-type-id.js";
 
 // ============================================================================
 // Telemetry
@@ -310,12 +319,23 @@ export {
   type CheckVersionOptions,
 } from "./version-check/check-umbraco-version.js";
 
+export {
+  runStartupVersionCheck,
+  resolveExpectedUmbracoMajor,
+  withVersionCheckDeadline,
+  DEFAULT_VERSION_CHECK_TIMEOUT_MS,
+  PARENT_CHECKED_MAJOR_ENV,
+  chainedVersionCheckEnv,
+  type StartupVersionCheckOptions,
+} from "./version-check/startup-version-check.js";
+
 // ============================================================================
 // Server Configuration
 // ============================================================================
 
 export {
   getServerConfig,
+  resetServerConfig,
   type UmbracoAuthConfig,
   type UmbracoServerConfig,
   type ConfigFieldDefinition,
@@ -352,6 +372,7 @@ export {
   MEDIA_TYPE_AUDIO,
   MEDIA_TYPE_ARTICLE,
   MEDIA_TYPE_VECTOR_GRAPHICS,
+  MEDIA_TYPE_ALIASES,
   STANDARD_MEDIA_TYPES,
 } from "./constants/constants.js";
 
@@ -377,6 +398,10 @@ export {
   setCustomTransport,
   // Factory for advanced use cases
   createUmbracoFetchClient,
+  // Request building, shared with other Umbraco fetch clients (e.g. hosted)
+  buildFetchBody,
+  assertSafeRequestPath,
+  serializeParams,
   // Types
   type UmbracoFetchAuthConfig,
   type UmbracoManagementClientOptions,

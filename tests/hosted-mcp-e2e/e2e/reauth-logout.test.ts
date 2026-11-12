@@ -19,17 +19,16 @@ test.describe("reauth via RP-Initiated Logout", () => {
   let workerUrl: string;
   let clientId: string;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ request }) => {
     workerUrl = await startWorker();
 
-    // Register a dynamic client
-    const resp = await fetch(`${workerUrl}/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    // Register a dynamic client. Uses Playwright's request context (which
+    // honours ignoreHTTPSErrors) because the Worker serves a self-signed cert.
+    const resp = await request.post(`${workerUrl}/register`, {
+      data: {
         redirect_uris: ["http://localhost:9999/callback"],
         client_name: "Reauth Test",
-      }),
+      },
     });
     const data = (await resp.json()) as { client_id: string };
     clientId = data.client_id;

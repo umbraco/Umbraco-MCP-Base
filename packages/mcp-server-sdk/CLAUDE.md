@@ -49,9 +49,9 @@ src/
 | `./testing` | setupTestEnvironment, setupMswServer, snapshot normalization, mock helpers |
 | `./evals` | runScenarioTest, runAgentTest, verification helpers, configureEvals |
 | `./config` | getServerConfig |
-| `./helpers` | API call helpers only |
+| `./helpers` | API call helpers, `resolveMediaTypeId` |
 | `./types` | Type definitions only |
-| `./constants` | Umbraco well-known IDs (BLANK_UUID, media type IDs, etc.) |
+| `./constants` | Umbraco well-known IDs (BLANK_UUID, media type aliases, fresh-install-only media/data type IDs, etc.) |
 | `./orval` | Build-time codegen helpers: import fixer, untyped-array relaxer, zod post-processor, target-major transformer. **Deliberately not in the main barrel** — they import `fs`/`path`, and the main barrel is what hosted-mcp bundles into a Cloudflare Worker. |
 
 ## Key Exports
@@ -69,6 +69,7 @@ src/
 - `executeVoidApiCall` - DELETE/PUT/POST without response body
 - `CAPTURE_RAW_HTTP_RESPONSE` - Required option for all API calls
 - `configureApiClient` - Set up the API client provider (stdio/CLI/test fallback; the per-request store wins)
+- `resolveMediaTypeId` - Media type id by alias on the connected site, cached per base URL. Use instead of the `*_MEDIA_TYPE_ID` constants, which are fresh-install keys only
 
 **HTTP Client:**
 - `initializeUmbracoFetch` - Initialize with baseUrl, clientId, clientSecret
@@ -106,7 +107,7 @@ Hosted code must not keep per-session values (tokens, clients, servers, token ke
 - Tests live in `__tests__/` directories adjacent to source
 - Test files named `*.test.ts`
 - Uses Jest with ESM (`--experimental-vm-modules`)
-- Toolkit tests don't use MSW (unit tests only)
+- Most toolkit tests are pure unit tests; HTTP-client tests (`src/http/__tests__/`) mock `fetch` directly; MSW (`msw/node` + `setupMswServer`) is used where a test needs a fake Management API (e.g. `resolve-media-type-id.test.ts`)
 
 ## Build
 
