@@ -8,6 +8,7 @@
  */
 
 import {
+  assertSafeRequestPath,
   buildFetchBody,
   normalizeBaseUrl,
   serializeParams,
@@ -297,6 +298,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
     requestConfig: UmbracoFetchRequestConfig,
     options?: FetchClientOptions
   ): Promise<HttpResponse<T> | T> {
+    assertSafeRequestPath(requestConfig.url);
     const queryString = serializeParams(requestConfig.params);
     const fullUrl = `${normalizedBaseUrl}${requestConfig.url}${queryString}`;
 

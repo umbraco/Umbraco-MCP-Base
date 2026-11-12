@@ -255,40 +255,72 @@ describe("withInputSanitization", () => {
     expect(handler).toHaveBeenCalled();
   });
 
-  describe("secret field name rule", () => {
+  // ---------------------------------------------------------------------------
+  // Only control characters are rejected in tool inputs (issue #447)
+  //
+  // `?`, `&`, `%xx` and `../` only matter once a value is put into a URL path,
+  // which the HTTP client checks (`assertSafeRequestPath`). Tool inputs can't
+  // tell which values will end up there, so free text round-trips everywhere.
+  // ---------------------------------------------------------------------------
+
+  describe("control characters only", () => {
     const run = (schema: any, input: any) => {
       const handler = jest.fn().mockReturnValue({ content: [] });
       const tool = { name: "t", description: "t", inputSchema: schema, handler, slices: [] } as any;
       const call = () => withInputSanitization(tool).handler(input, {} as any);
       return { handler, call };
     };
-    const nasty = "a?b&c%4a../x";
 
-    it.each(["password", "newPassword", "oldPassword", "resetPassword", "clientSecret"])(
-      "passes %s through unchanged",
-      (key) => {
-        const { handler, call } = run({ [key]: z.string() }, { [key]: nasty });
-        expect(call).not.toThrow();
-        expect(handler.mock.calls[0][0]).toEqual({ [key]: nasty });
+    const updateDocumentTypeSchema = {
+      id: z.string().uuid(),
+      data: z.object({
+        properties: z.array(z.object({ name: z.string(), description: z.string().nullable() })),
+      }),
+    };
+    const updateDictionaryItemSchema = {
+      id: z.string(),
+      data: z.object({
+        translations: z.array(z.object({ isoCode: z.string(), translation: z.string() })),
+      }),
+    };
+
+    it("accepts '?' in a nested property description (update-document-type)", () => {
+      const input = {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        data: { properties: [{ name: "Title", description: "Leeg? Dan gebruiken we de paginanaam." }] },
+      };
+      const { handler, call } = run(updateDocumentTypeSchema, input);
+      expect(call).not.toThrow();
+      expect(handler.mock.calls[0][0]).toBe(input);
+    });
+
+    it("accepts '?' in a nested translation (update-dictionary-item)", () => {
+      const input = { id: "x", data: { translations: [{ isoCode: "nl-NL", translation: "Wat zoek je?" }] } };
+      expect(run(updateDictionaryItemSchema, input).call).not.toThrow();
+    });
+
+    it.each(["Tom & Jerry", "50%20off", "see ../readme", "a?b&c", "Q&A?"])(
+      "accepts %s at any depth, including top-level fields of flattened bodies",
+      (text) => {
+        expect(run({ name: z.string(), description: z.string() }, { name: text, description: text }).call).not.toThrow();
+        expect(run({ tags: z.array(z.string()) }, { tags: [text] }).call).not.toThrow();
+        expect(run({ data: z.object({ items: z.array(z.object({ name: z.string() })) }) }, { data: { items: [{ name: text }] } }).call).not.toThrow();
+        expect(run({ headers: z.record(z.string(), z.string()) }, { headers: { note: text } }).call).not.toThrow();
+        expect(run({ password: z.string() }, { password: text }).call).not.toThrow();
       }
     );
 
-    it("still rejects control characters in a password", () => {
-      const { handler, call } = run({ password: z.string() }, { password: "ab\x00c" });
-      expect(call).toThrow(ToolValidationError);
-      expect(handler).not.toHaveBeenCalled();
+    it("rejects control characters everywhere", () => {
+      expect(run({ id: z.string() }, { id: "a\x00b" }).call).toThrow(ToolValidationError);
+      expect(run({ password: z.string() }, { password: "ab\x00c" }).call).toThrow(ToolValidationError);
+      const dict = { id: "x", data: { translations: [{ isoCode: "nl-NL", translation: "Wat\x1F zoek je?" }] } };
+      expect(run(updateDictionaryItemSchema, dict).call).toThrow(ToolValidationError);
+      expect(run({ headers: z.record(z.string(), z.string()) }, { headers: { password: "a\x0Bb" } }).call).toThrow(ToolValidationError);
+      expect(run({ other: z.string() }, { undeclared: "a\x01b" }).call).toThrow(ToolValidationError);
+      expect(run({ password: z.union([z.string(), z.number()]) }, { password: "a\x00b" }).call).toThrow(ToolValidationError);
     });
 
-    it.each(["a?b", "a&b", "a%4ab", "../x"])("still rejects %s in id and name", (bad) => {
-      expect(run({ id: z.string() }, { id: bad }).call).toThrow(ToolValidationError);
-      expect(run({ name: z.string() }, { name: bad }).call).toThrow(ToolValidationError);
-    });
-
-    it("still checks passwordHint (end-anchored)", () => {
-      expect(run({ passwordHint: z.string() }, { passwordHint: "a?b" }).call).toThrow(ToolValidationError);
-    });
-
-    it("ignores non-string fields like allowChangePassword", () => {
+    it("ignores non-string fields", () => {
       const { call } = run(
         { allowChangePassword: z.boolean(), lastPasswordChangeDate: z.date() },
         { allowChangePassword: true, lastPasswordChangeDate: new Date() }
@@ -296,56 +328,8 @@ describe("withInputSanitization", () => {
       expect(call).not.toThrow();
     });
 
-    it("applies to nested keys and array elements", () => {
-      const nested = run({ user: z.object({ newPassword: z.string() }) }, { user: { newPassword: nasty } });
-      expect(nested.call).not.toThrow();
-      const arr = run({ password: z.array(z.string()) }, { password: [nasty] });
-      expect(arr.call).not.toThrow();
-    });
-
-    it("does not relax undeclared top-level keys, whatever their name", () => {
-      expect(run({ other: z.string() }, { password: nasty }).call).toThrow(ToolValidationError);
-      expect(run({ other: z.string() }, { secret: "../x" }).call).toThrow(ToolValidationError);
-      expect(run({ other: z.string() }, { id: nasty }).call).toThrow(ToolValidationError);
-    });
-
-    it("relaxes optional and nullable password fields (Orval shapes)", () => {
-      expect(run({ password: z.string().optional() }, { password: nasty }).call).not.toThrow();
-      expect(run({ password: z.string().nullable() }, { password: nasty }).call).not.toThrow();
-    });
-
-    it("relaxes a password field typed as a union containing a string", () => {
-      const schema = { password: z.union([z.string(), z.number()]) };
-      expect(run(schema, { password: nasty }).call).not.toThrow();
-    });
-
-    it("relaxes password inside objects in an array", () => {
-      const schema = { users: z.array(z.object({ password: z.string() })) };
-      expect(run(schema, { users: [{ password: nasty }] }).call).not.toThrow();
-    });
-
-    it("matches the name case-insensitively", () => {
-      expect(run({ PASSWORD: z.string() }, { PASSWORD: nasty }).call).not.toThrow();
-    });
-
-    it("still checks secretary (secret is not a suffix)", () => {
-      expect(run({ secretary: z.string() }, { secretary: "a?b" }).call).toThrow(ToolValidationError);
-    });
-
-    it("does not let caller-chosen z.record keys opt out of the checks", () => {
-      const schema = { headers: z.record(z.string(), z.string()) };
-      expect(run(schema, { headers: { password: "a?b" } }).call).toThrow(ToolValidationError);
-      expect(run(schema, { headers: { "x.secret": "../x" } }).call).toThrow(ToolValidationError);
-    });
-
-    it("still relaxes a declared secret field nested under a record value", () => {
-      const schema = { users: z.record(z.string(), z.object({ password: z.string() })) };
-      expect(run(schema, { users: { bob: { password: nasty } } }).call).not.toThrow();
-    });
-
-    it("rejects a secret-like field the name rule misses, unless marked [raw]", () => {
-      expect(run({ pin: z.string() }, { pin: nasty }).call).toThrow(ToolValidationError);
-      expect(run({ pin: z.string().describe(RAW_FIELD_MARKER) }, { pin: nasty }).call).not.toThrow();
+    it("skips control characters too under [raw]", () => {
+      expect(run({ pin: z.string().describe(RAW_FIELD_MARKER) }, { pin: "a\x00b" }).call).not.toThrow();
     });
   });
 
@@ -460,7 +444,7 @@ describe("withInputSanitization", () => {
 
       expect(() =>
         sanitized.handler(
-          { items: [{ name: "ok" }, { name: "../bad" }] } as any,
+          { items: [{ name: "ok" }, { name: "bad\x00" }] } as any,
           {} as any,
         ),
       ).toThrow(ToolValidationError);

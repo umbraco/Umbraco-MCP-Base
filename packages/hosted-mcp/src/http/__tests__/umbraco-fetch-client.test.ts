@@ -60,6 +60,14 @@ describe("createUmbracoFetchClient", () => {
   };
 
   describe("request construction", () => {
+    it("rejects a path that would change the endpoint, without calling Umbraco", async () => {
+      const client = createUmbracoFetchClient(baseConfig);
+      for (const url of ["/umbraco/api/v1/items/x?y=1", "/umbraco/api/v1/items/../users"]) {
+        await expect(client({ method: "get", url })).rejects.toMatchObject({ name: "ToolValidationError" });
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("sends GET request with Authorization header", async () => {
       mockFetch.mockResolvedValue(
         createJsonResponse(200, { id: "1", name: "Test" })

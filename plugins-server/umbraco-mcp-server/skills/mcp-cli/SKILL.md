@@ -172,8 +172,10 @@ See [local-dev-testing.md](local-dev-testing.md) for SDK contributor guidance on
 
 ## Input Sanitization
 
-The SDK automatically validates all string inputs before tool handlers run:
-- Rejects control characters, path traversal (`../`), embedded query params, percent-encoded strings
+The SDK automatically validates inputs before they reach Umbraco:
+- Rejects control characters in every string
+- Allows `?`, `&`, `%` and `../` in free text (descriptions, translations, names)
+- Rejects an `id` or `path` argument that would change the request URL: `?`, `#` or a `../` segment
 - Validates UUID format where expected
 - Returns ProblemDetails (RFC 7807) with clear error messages
 

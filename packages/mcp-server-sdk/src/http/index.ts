@@ -16,6 +16,7 @@ export {
   createUmbracoFetchClient,
   // Request building, shared with other Umbraco fetch clients (e.g. hosted)
   buildFetchBody,
+  assertSafeRequestPath,
   serializeParams,
   // Types
   type UmbracoFetchAuthConfig,

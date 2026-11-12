@@ -5,6 +5,7 @@
 
 import { HttpResponse } from "../helpers/api-call-helpers.js";
 import { resolveStatusText } from "../helpers/status-text.js";
+import { ToolValidationError } from "../helpers/tool-validation-error.js";
 import { buildFetchBody } from "./fetch-body.js";
 import type { UmbracoManagementClientOptions, UmbracoRequestConfig } from "./types.js";
 
@@ -29,6 +30,34 @@ export function serializeParams(params: Record<string, unknown> | undefined): st
     }
   }
   return parts.length > 0 ? `?${parts.join("&")}` : "";
+}
+
+/**
+ * Rejects a request path that would reach a different endpoint than the API
+ * client meant. Orval puts path parameters into the URL template unencoded
+ * (`/script/${path}`) and sends query values separately (`params`, encoded by
+ * `serializeParams`), so a `?` or `#` in the path, or a `..` segment, can only
+ * have come from a parameter value. `..` is matched in the forms a URL parser
+ * resolves: plain, percent-encoded (`%2e`) and with `\` as the separator.
+ * Anything else, including the `%2F` of a handler that encodes a file path,
+ * passes. Throws a ToolValidationError so the agent can correct its arguments.
+ * @internal Exported for `@umbraco-cms/mcp-hosted` (released in lockstep); not a
+ *   supported public API, so its shape may change in any release.
+ */
+export function assertSafeRequestPath(path: string): void {
+  let problem: string | undefined;
+  if (/[?#]/.test(path)) {
+    problem = "contains '?' or '#'";
+  } else if (path.split(/[\\/]/).some((segment) => /^(?:\.|%2e){2}$/i.test(segment))) {
+    problem = "contains a '..' segment";
+  }
+  if (problem) {
+    throw new ToolValidationError({
+      title: "Invalid Input",
+      detail: `The request path '${path}' built from the tool's arguments ${problem}. Pass ids and paths as plain values, without '?', '#' or '../'.`,
+      extensions: { path },
+    });
+  }
 }
 
 /**
@@ -101,6 +130,7 @@ export async function executeUmbracoRequest<T>(
   config: UmbracoRequestConfig,
   options?: UmbracoManagementClientOptions
 ): Promise<HttpResponse<T> | T> {
+  assertSafeRequestPath(config.url);
   // The request's signal bounds the wait for the token too: without it a CMS
   // that accepts the connection but never answers the token request would hang
   // the caller whatever deadline it set (umbraco/Umbraco-MCP-Base#428).
