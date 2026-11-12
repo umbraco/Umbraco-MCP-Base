@@ -12,6 +12,7 @@ What it does not do:
 ## Prerequisites
 
 - **Node:** within the SDK's `engines` range. The script refuses to run on anything older.
+- **`npm ci` in this repo.** The checkers load `@cfworker/json-schema` from its `node_modules`.
 - **.NET 10, and SQL Server.** The local `sql` Docker container works. The connection string is taken from `TEST_SQL_CONNECTION_STRING` in this repo's `.env`, or from `SMOKE_SQL_CONNECTION_STRING`. Without it, the sites fall back to SQLite, which can't handle the full suites (`database table is locked` errors, token 500s, hook timeouts).
 - **Local checkouts** of both consumers. Defaults are `~/Projects/umbraco-mcp-dev-cms` and `~/Projects/umbraco-mcp-editor-cms`; override with `DEV_CMS_REPO` / `EDITOR_CMS_REPO`. The worktrees are cut from `origin/dev` (override with `CONSUMER_REF`).
 - **For the hosted part:** `npx wrangler login`, plus a browser where you can sign in to the Cloud test site.
