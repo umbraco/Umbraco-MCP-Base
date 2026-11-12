@@ -95,25 +95,48 @@ function openPlainOutputObjects({
 /**
  * Converts a tool's input or output schema (a full Zod schema — classic or
  * Mini — or a raw `ZodRawShape`) to JSON Schema draft 2020-12. Output schemas
- * are left open to additive fields (see `openPlainOutputObjects`).
+ * are left open to additive fields (see `openPlainOutputObjects`) unless
+ * `openOutputObjects: false` is passed.
  *
  * `unrepresentable: "any"` renders types JSON Schema cannot express (e.g.
- * `z.date()`) as `{}` instead of throwing — for display-only callers such as
- * CLI introspection. `ListTools` keeps Zod's default (throw).
+ * `z.date()`) as `{}` instead of throwing — for callers that must not fail a
+ * whole listing over one tool, such as CLI introspection and in-process
+ * chaining. `ListTools` keeps Zod's default (throw).
+ *
+ * `openOutputObjects: false` keeps Zod's `additionalProperties: false` on
+ * output objects. Codegen uses it so generated `*Output` types stay closed
+ * (no `[k: string]: unknown` index signature) and typos still fail to compile.
+ *
+ * @throws If `schema` is neither a Zod schema nor a plain-object raw shape
  */
 export function toJsonSchema(
   schema: unknown,
   io: "input" | "output",
-  options?: { unrepresentable?: "throw" | "any" },
+  options?: { unrepresentable?: "throw" | "any"; openOutputObjects?: boolean },
 ): Record<string, unknown> | undefined {
   if (!schema) return undefined;
-  const zodSchema = isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
-  return z.toJSONSchema(zodSchema, {
+  const openOutput = io === "output" && options?.openOutputObjects !== false;
+  return z.toJSONSchema(toZodSchema(schema), {
     target: "draft-2020-12",
     io,
     ...(options?.unrepresentable ? { unrepresentable: options.unrepresentable } : {}),
-    ...(io === "output" ? { override: openPlainOutputObjects } : {}),
+    ...(openOutput ? { override: openPlainOutputObjects } : {}),
   }) as Record<string, unknown>;
+}
+
+/**
+ * Normalises a tool schema — a full Zod schema (classic or Mini) or a raw
+ * `ZodRawShape` — to a Zod schema, wrapping a raw shape in `z.object`.
+ *
+ * @throws If `schema` is neither a Zod schema nor a plain-object raw shape
+ */
+export function toZodSchema(schema: unknown): z.ZodTypeAny {
+  if (typeof schema !== "object" || schema === null) {
+    throw new Error(
+      `Invalid schema: expected a ZodType or plain-object ZodRawShape, got ${schema === null ? "null" : typeof schema}`,
+    );
+  }
+  return isZodSchema(schema) ? (schema as z.ZodTypeAny) : z.object(schema as z.ZodRawShape);
 }
 
 /**

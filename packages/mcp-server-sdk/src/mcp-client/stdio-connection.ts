@@ -142,6 +142,7 @@ export class StdioConnection implements McpConnection {
       name: string;
       description?: string;
       inputSchema?: Record<string, unknown>;
+      outputSchema?: Record<string, unknown>;
     }>;
   }> {
     const result = await this.withExitNotice(() => this.client.listTools());
@@ -150,6 +151,7 @@ export class StdioConnection implements McpConnection {
         name: string;
         description?: string;
         inputSchema?: Record<string, unknown>;
+        outputSchema?: Record<string, unknown>;
       }>;
     };
   }

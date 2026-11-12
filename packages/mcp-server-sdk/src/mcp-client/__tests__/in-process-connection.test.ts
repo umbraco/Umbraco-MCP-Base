@@ -262,6 +262,119 @@ describe("InProcessConnection", () => {
   });
 });
 
+describe("InProcessConnection inputSchema conversion", () => {
+  const listSchema = async (inputSchema: unknown) => {
+    const connection = new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [
+        {
+          metadata: { name: "c", displayName: "C", description: "" },
+          tools: () => [
+            createToolDef({
+              name: "t",
+              description: "t",
+              inputSchema: inputSchema as any,
+              slices: ["read"],
+              handler: async () => ({ content: [] }),
+            }),
+          ],
+        },
+      ],
+    });
+    const { tools } = await connection.listTools();
+    return tools[0].inputSchema as any;
+  };
+
+  it("leaves defaulted fields out of required and pins draft 2020-12", async () => {
+    const schema = await listSchema({ q: z.string(), limit: z.number().default(10) });
+    expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(schema.required).toEqual(["q"]);
+    expect(schema.properties.limit).toBeDefined();
+  });
+
+  it("does not double-wrap a full ZodObject inputSchema", async () => {
+    const schema = await listSchema(z.object({ q: z.string(), limit: z.number().default(10) }));
+    expect(Object.keys(schema.properties).sort()).toEqual(["limit", "q"]);
+    expect(schema.required).toEqual(["q"]);
+  });
+});
+
+describe("InProcessConnection schema handling", () => {
+  const connect = (tool: Partial<ToolDefinition<any, any, any>>) =>
+    new InProcessConnection({
+      transport: "in-process",
+      name: "test",
+      collections: [
+        {
+          metadata: { name: "c", displayName: "C", description: "" },
+          tools: () => [
+            createToolDef({
+              name: "t",
+              description: "t",
+              slices: ["read"],
+              handler: async (args: unknown) => ({
+                content: [{ type: "text" as const, text: JSON.stringify(args) }],
+              }),
+              ...tool,
+            }),
+          ],
+        },
+      ],
+    });
+
+  const callArgs = async (connection: InProcessConnection, args: Record<string, unknown>) => {
+    const result = await connection.callTool("t", args);
+    return JSON.parse(result.content[0].text!);
+  };
+
+  it("applies defaults and strips unknown keys before calling the handler", async () => {
+    const connection = connect({ inputSchema: { q: z.string(), limit: z.number().default(10) } });
+    expect(await callArgs(connection, { q: "a", extra: 1 })).toEqual({ q: "a", limit: 10 });
+  });
+
+  it("returns an isError result for invalid arguments without calling the handler", async () => {
+    let called = false;
+    const connection = connect({
+      inputSchema: { q: z.string() },
+      handler: async () => {
+        called = true;
+        return { content: [] };
+      },
+    });
+    const result = await connection.callTool("t", { q: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Input validation error");
+    expect(called).toBe(false);
+  });
+
+  it("honours the deprecated schema alias for listing and validation", async () => {
+    const connection = connect({ schema: { id: z.string(), n: z.number().default(1) } });
+    const { tools } = await connection.listTools();
+    expect((tools[0].inputSchema as any).required).toEqual(["id"]);
+    expect(await callArgs(connection, { id: "x" })).toEqual({ id: "x", n: 1 });
+  });
+
+  it("lists the output schema, left open to additive fields", async () => {
+    const connection = connect({ outputSchema: z.object({ id: z.string() }) });
+    const { tools } = await connection.listTools();
+    const output = tools[0].outputSchema as any;
+    expect(output.required).toEqual(["id"]);
+    expect(output.additionalProperties).toBeUndefined();
+  });
+
+  it("omits outputSchema when the tool has none", async () => {
+    const { tools } = await connect({}).listTools();
+    expect(tools[0]).not.toHaveProperty("outputSchema");
+  });
+
+  it("lists a tool with an unrepresentable input type instead of failing the whole listing", async () => {
+    const connection = connect({ inputSchema: { since: z.date() } });
+    const { tools } = await connection.listTools();
+    expect(tools.map((t) => t.name)).toEqual(["t"]);
+  });
+});
+
 /**
  * A collection that lists `publish` only on 17.6+, and whose handlers report
  * the `extra` they received so tests can see exactly what crossed the chain.
