@@ -86,7 +86,7 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 | `@umbraco-cms/mcp-server-sdk/testing` | Test utilities: setupTestEnvironment, setupMswServer, snapshot helpers |
 | `@umbraco-cms/mcp-server-sdk/evals` | LLM eval framework: runScenarioTest, verification helpers |
 | `@umbraco-cms/mcp-server-sdk/config` | Configuration loading |
-| `@umbraco-cms/mcp-server-sdk/helpers` | API call helpers only |
+| `@umbraco-cms/mcp-server-sdk/helpers` | API call helpers, `resolveMediaTypeId` |
 | `@umbraco-cms/mcp-server-sdk/constants` | Umbraco well-known IDs |
 
 ## Core Concepts
