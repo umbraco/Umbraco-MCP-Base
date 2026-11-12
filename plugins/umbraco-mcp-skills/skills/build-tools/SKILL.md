@@ -65,13 +65,22 @@ Then read the generated files to understand:
 
 ### Step 2: Read Swagger Spec
 
-Fetch the swagger spec from the `swaggerUrl` in `.discover.json` using curl:
+Fetch the swagger spec from the `swaggerUrl` in `.discover.json` and list only the collection's
+operations. Don't dump the raw spec — the Management API spec is several megabytes and gets
+truncated. From the project root, run:
 
 ```bash
-curl -sk {swaggerUrl}
+curl -fsSk "{swaggerUrl}" | node ${CLAUDE_PLUGIN_ROOT}/skills/build-tools/scripts/list-operations.ts {collection}
 ```
 
-For each collection, find operations where `tags[0]` matches the collection's original tag name (the tag before kebab-case conversion). Collect:
+It prints one line per operation in the collection (`METHOD path operationId - summary`), matched
+on the collection's original tag from `.discover.json`'s `collectionTags`. If it exits saying there
+is no `collectionTags` entry (a `.discover.json` from an older `discover`), it lists the spec's tags:
+pick the one that corresponds to the collection and re-run with `--tag <thatTag>` appended.
+
+The method, path and `operationId` are usually all you need — the generated Zod schemas (Step 1)
+carry the parameter and response shapes. Only look deeper into the spec for an operation whose
+schema isn't clear from those. For each collection, collect:
 - HTTP method
 - Path
 - operationId
@@ -185,9 +194,10 @@ export default collection;
 
 Add the collection import and registration to `src/index.ts`:
 
-1. Add an import at the top with the other collection imports:
+1. Add an import at the top with the other collection imports (tool collections live under
+   `src/umbraco-api/tools/`, so the path from `src/` includes `umbraco-api/`):
    ```typescript
-   import {collection}Collection from "./tools/{collection}/index.js";
+   import {collection}Collection from "./umbraco-api/tools/{collection}/index.js";
    ```
 
 2. Add it to the `collections` array:
@@ -197,7 +207,8 @@ Add the collection import and registration to `src/index.ts`:
 
 3. If `configureApiClient` still references the example/template API client, update it to use the correct generated client getter (e.g. `getUmbracoEngageManagementAPI`). Check the import from `./umbraco-api/api/generated/` and ensure it matches.
 
-4. Do the same for `src/collections.ts` — add the collection import and add it to the exported array.
+4. Do the same for `src/collections.ts` — add the collection import (same
+   `./umbraco-api/tools/{collection}/index.js` path) and add it to the exported `collections` array.
 
 #### 3e. Compile
 

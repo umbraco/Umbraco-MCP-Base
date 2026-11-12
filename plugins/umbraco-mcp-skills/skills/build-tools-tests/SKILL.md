@@ -37,7 +37,7 @@ This skill orchestrates the following agents — use them for the relevant steps
 
 **ONE FILE AT A TIME.** This applies to ALL files — builders, helpers, builder tests, and tool tests. After creating any file:
 1. Compile: `npm run compile`
-2. If it has tests, run them: `npm test -- path/to/file.test.ts`
+2. If it has tests, run just that file: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand path/to/file.test.ts` (not `npm test -- <path>`: the `test` script already passes `--testPathPatterns=__tests__`, and Jest ORs a positional path with it, so that runs every `__tests__` file)
 3. Fix any failures
 4. Only then create the next file
 
@@ -136,7 +136,7 @@ import {
   createSnapshotResult,
 } from "@umbraco-cms/mcp-server-sdk/testing";
 import { configureApiClient, initializeUmbracoFetch } from "@umbraco-cms/mcp-server-sdk";
-import { getYourAPI } from "../../../../api/generated/yourApi.js";
+import { getYourAPI } from "../../../api/generated/yourApi.js";
 import { EntityBuilder } from "./helpers/{entity}-builder.js";
 import { EntityTestHelper } from "./helpers/{entity}-test-helper.js";
 
@@ -332,7 +332,7 @@ describe("EntityBuilder", () => {
 
 **After creating:**
 1. Compile: `npm run compile`
-2. Run: `npm test -- __tests__/{collection}/{entity}-builder.test.ts`
+2. Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand src/umbraco-api/tools/{collection}/__tests__/helpers/{entity}-builder.test.ts`
 3. Fix any failures before continuing
 
 ### Step 7: Per Collection — Create Integration Tests
@@ -510,7 +510,7 @@ This works for read-only collections too (cultures, languages, server info), whe
 For each test file:
 1. Write the test
 2. Compile: `npm run compile`
-3. Run: `npm test -- __tests__/{collection}/{test-file}.test.ts`
+3. Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand src/umbraco-api/tools/{collection}/__tests__/{test-file}.test.ts`
 4. Fix any failures before creating the next test file
 
 ### Step 8: Validate with `integration-test-validator`

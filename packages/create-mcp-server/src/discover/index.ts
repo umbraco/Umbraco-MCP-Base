@@ -9,7 +9,7 @@ import { discoverSwaggerEndpoints, type SwaggerEndpoint } from "./discover-swagg
 import { generateClient } from "./generate-client.js";
 import { analyzeApi } from "./analyze-api.js";
 import { extractPermissions } from "./extract-permissions.js";
-import { suggestModesWithLlm, suggestFallbackModes, groupsToCollectionNames } from "./suggest-modes.js";
+import { suggestModesWithLlm, suggestFallbackModes, groupsToCollectionNames, groupsToCollectionTags } from "./suggest-modes.js";
 import { updateModeRegistry, updateSliceRegistry } from "./update-registries.js";
 import { validateOpenApiUrl, toDirectSwaggerEndpoint } from "./direct-spec-url.js";
 import {
@@ -320,6 +320,7 @@ export async function runDiscover(dir?: string): Promise<void> {
     swaggerUrl: selected.url,
     baseUrl,
     collections: groupsToCollectionNames(selectedGroups),
+    collectionTags: groupsToCollectionTags(selectedGroups),
   };
 
   const manifestPath = path.join(projectDir, ".discover.json");

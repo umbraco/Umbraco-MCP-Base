@@ -54,6 +54,33 @@ describe("renderConsentScreen", () => {
     expect(html).toContain("https://app.test/cb");
   });
 
+  it("marks the application name as provided by the application and shows its ID", () => {
+    const html = renderConsentScreen(createOptions({ clientName: "Claude", clientId: "abc123" }));
+    expect(html).toContain("Claude");
+    expect(html).toContain("Name provided by the application");
+    expect(html).toContain("ID abc123");
+  });
+
+  it("shows 'Unnamed application' when the client registered without a name", () => {
+    const html = renderConsentScreen(createOptions({ clientName: undefined, clientId: "abc123" }));
+    expect(html).toContain("Unnamed application");
+    expect(html).toContain("ID abc123");
+  });
+
+  it("highlights the redirect URI's hostname", () => {
+    const html = renderConsentScreen(
+      createOptions({ redirectUri: "https://evil.example/oauth/callback?x=1" })
+    );
+    expect(html).toContain("After approval you'll be sent to");
+    expect(html).toContain("<strong>evil.example</strong>");
+    expect(html).toContain("https://evil.example/oauth/callback?x=1");
+  });
+
+  it("falls back to the full redirect URI when it can't be parsed", () => {
+    const html = renderConsentScreen(createOptions({ redirectUri: "not a url" }));
+    expect(html).toContain("<strong>not a url</strong>");
+  });
+
   it("includes the action URL in the form", () => {
     const html = renderConsentScreen(
       createOptions({ actionUrl: "https://worker.test/authorize?foo=bar" })

@@ -9,7 +9,7 @@
 
 import { describe, it, expect, jest } from "@jest/globals";
 import { z } from "zod";
-import { withStandardDecorators, withPreExecutionCheck } from "../tool-decorators.js";
+import { withStandardDecorators, withPreExecutionCheck, withErrorHandling } from "../tool-decorators.js";
 
 describe("withPreExecutionCheck", () => {
   it("forwards a schema-less tool's single-argument call as a single argument", async () => {
@@ -220,5 +220,28 @@ describe("withErrorHandling with an unanswered confirmation", () => {
     expect(problem.detail).toBe(
       "No response to the confirmation prompt, so nothing was changed. Ask the user and call the tool again to retry.",
     );
+  });
+});
+
+describe("withErrorHandling schema conversion check (#417)", () => {
+  const make = (extra: Record<string, unknown>) =>
+    ({ name: "bad-tool", description: "", handler: jest.fn(), slices: [], ...extra }) as any;
+
+  it("throws naming the tool and field when an input field is z.date()", () => {
+    const tool = make({ inputSchema: { name: z.string(), when: z.date() } });
+    expect(() => withErrorHandling(tool)).toThrow(/Tool "bad-tool": inputSchema \(field "when"\) cannot be converted/);
+    expect(() => withStandardDecorators(tool)).toThrow(/bad-tool/);
+  });
+
+  it("throws naming the tool when the output schema contains z.date()", () => {
+    const tool = make({ outputSchema: { at: z.date() } });
+    expect(() => withErrorHandling(tool)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
+    const full = make({ outputSchema: z.object({ at: z.date() }) });
+    expect(() => withErrorHandling(full)).toThrow(/Tool "bad-tool": outputSchema \(field "at"\) cannot be converted/);
+  });
+
+  it("still wraps a normal tool", () => {
+    const tool = make({ inputSchema: { name: z.string() }, outputSchema: { ok: z.boolean() } });
+    expect(() => withStandardDecorators(tool)).not.toThrow();
   });
 });

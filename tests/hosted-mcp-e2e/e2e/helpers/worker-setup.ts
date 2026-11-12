@@ -9,10 +9,11 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 let worker: Unstable_DevWorker | undefined;
 let workerUrl: string | undefined;
 
-// Use HTTP for both in CI to avoid self-signed cert issues.
-// The redirect_uri (http://127.0.0.1:8787/callback) matches the origin
-// registered for this client id in tests/umbraco-instance's HostedMcp:Clients
-// config (Umbraco.Mcp.HostedAuth).
+// In CI the Umbraco instance is reached over HTTP to avoid its self-signed
+// cert in server-side calls. The Worker itself is served over https; its
+// redirect_uri (https://127.0.0.1:8787/callback) matches an origin registered
+// for this client id in tests/umbraco-instance's HostedMcp:Clients config
+// (Umbraco.Mcp.HostedAuth).
 const BASE_VARS = {
   UMBRACO_BASE_URL: process.env.CI ? "http://localhost:5200" : "https://localhost:5201",
   UMBRACO_SERVER_URL: "http://localhost:5200",
@@ -25,6 +26,9 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
   worker = await unstable_dev("template/src/worker.ts", {
     config: "tests/hosted-mcp-e2e/wrangler.integration.toml",
     port: 8787,
+    // Serve over https (self-signed) so the sign-in flow matches production:
+    // __Host- cookies, Secure, and https redirect URIs.
+    localProtocol: "https",
     experimental: { disableExperimentalWarning: true },
     vars: { ...BASE_VARS, ...varsOverride },
     logLevel: "error",
@@ -32,7 +36,7 @@ export async function startWorker(varsOverride?: Record<string, string>): Promis
 
   const address = worker.address;
   const port = worker.port;
-  workerUrl = `http://${address}:${port}`;
+  workerUrl = `https://${address}:${port}`;
   return workerUrl;
 }
 
