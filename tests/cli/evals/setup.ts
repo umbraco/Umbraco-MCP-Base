@@ -160,8 +160,18 @@ async function executeQuery(
       // baselines) and only need the partial transcript, not a hard failure — so
       // treat any SDK-reported ceiling as an unsuccessful (not fatal) result and
       // let anything else (a genuine bug, not a resource ceiling) propagate.
+      //
+      // The same ceiling can also surface as the CLI subprocess dying outright
+      // ("Claude Code process exited with code 1") after it has already emitted
+      // the "Prompt is too long" text, so that shape is treated the same way.
+      // It still returns success: false, so every WITH-skill test — which asserts
+      // result.success — keeps failing on a genuine crash.
       const message = err instanceof Error ? err.message : String(err);
-      if (/^claude code returned an error result:/i.test(message)) {
+      if (
+        /^claude code (returned an error result:|process exited with code 1)/i.test(
+          message
+        )
+      ) {
         return {
           finalResult: assistantText.trim(),
           success: false,
