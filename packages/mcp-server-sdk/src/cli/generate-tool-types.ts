@@ -3,8 +3,11 @@
  * Tool-types codegen — both a library function and a CLI binary.
  *
  * Library: {@link runCodegen} walks an array of `ToolCollectionExport`,
- * runs each tool's input/output Zod schema through `z.toJSONSchema()` and
- * `json-schema-to-typescript`, and returns a single `.d.ts` blob plus a
+ * runs each tool's input/output Zod schema through the shared `toJsonSchema`
+ * helper (the same conversion as `tools/list` and `--describe-tool`, so
+ * defaulted input fields are optional) and `json-schema-to-typescript`.
+ * Output objects are kept closed so generated `*Output` types have no index
+ * signature. Returns a single `.d.ts` blob plus a
  * list of any schemas that fell back to generic types.
  *
  * Binary: when invoked directly (`umbraco-mcp-generate-types`), the file
@@ -56,17 +59,6 @@ function pascal(name: string): string {
     .split(/[-_]/)
     .map((p) => (p.length === 0 ? "" : p[0].toUpperCase() + p.slice(1)))
     .join("");
-}
-
-function schemaToJson(schemaOrShape: unknown, io: "input" | "output"): unknown {
-  if (schemaOrShape === undefined || schemaOrShape === null) return null;
-  if (typeof schemaOrShape !== "object") {
-    throw new Error(
-      `Invalid schema: expected a ZodType or plain-object ZodRawShape, got ${typeof schemaOrShape}`,
-    );
-  }
-  // Shared with tools/list and --describe-tool so required/defaulted fields agree.
-  return toJsonSchema(schemaOrShape, io);
 }
 
 export async function runCodegen(
@@ -139,7 +131,7 @@ export async function runCodegen(
 
     try {
       // `schema` is a deprecated alias for `inputSchema`.
-      const inputSchema = schemaToJson(
+      const inputSchema = toJsonSchema(
         tool.inputSchema ?? (tool as { schema?: unknown }).schema,
         "input",
       );
@@ -161,7 +153,7 @@ export async function runCodegen(
     }
 
     try {
-      const outputSchema = schemaToJson(tool.outputSchema, "output");
+      const outputSchema = toJsonSchema(tool.outputSchema, "output", { openOutputObjects: false });
       if (outputSchema) {
         const compiled = await compile(outputSchema as object, outputTypeName, {
           bannerComment: "",

@@ -246,11 +246,11 @@ describe("runCodegen", () => {
         registryName: "T",
       });
 
-    it("makes defaulted input fields optional, but keeps them required in output", async () => {
+    it("makes defaulted input fields optional, and keeps output required and closed", async () => {
       const { output, skipped } = await run({ q: z.string(), limit: z.number().default(10) });
       expect(skipped).toEqual([]);
       expect(output).toMatch(/interface ListThingsInput \{[^}]*q: string;[^}]*limit\?: number;/s);
-      expect(output).toMatch(/interface ListThingsOutput \{[^}]*limit: number;/s);
+      expect(output).toMatch(/interface ListThingsOutput \{\s*limit: number;\s*\}/);
     });
 
     it("treats a full ZodObject inputSchema as a schema, not a raw shape", async () => {

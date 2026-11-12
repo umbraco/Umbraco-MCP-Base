@@ -25,7 +25,7 @@
 import type { ToolDefinition } from "../types/tool-definition.js";
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
 import { DEFAULT_COLLECTION_CONFIG } from "../types/collection-configuration.js";
-import { toJsonSchema } from "../helpers/strict-json-schema-tools.js";
+import { toJsonSchema, toZodSchema } from "../helpers/strict-json-schema-tools.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
 import { createCollectionConfigLoader } from "../tool-filtering/collection-config-loader.js";
 import type { McpConnection, McpInProcessServerConfig, FilterConfig } from "./types.js";
@@ -56,17 +56,27 @@ export class InProcessConnection implements McpConnection {
       name: string;
       description?: string;
       inputSchema?: Record<string, unknown>;
+      outputSchema?: Record<string, unknown>;
     }>;
   }> {
     const carried = resolveCarriedRequestContext(context);
     const tools = this.getFilteredTools(getUmbracoVersion(carried));
 
+    // `unrepresentable: "any"` so one tool with e.g. a `z.date()` field can't
+    // make the whole chained server list zero tools.
     return {
-      tools: tools.map(({ tool }) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: toJsonSchema(tool.inputSchema, "input") ?? { type: "object", properties: {} },
-      })),
+      tools: tools.map(({ tool }) => {
+        const outputSchema = toJsonSchema(tool.outputSchema, "output", { unrepresentable: "any" });
+        return {
+          name: tool.name,
+          description: tool.description,
+          inputSchema: toJsonSchema(inputSchemaOf(tool), "input", { unrepresentable: "any" }) ?? {
+            type: "object",
+            properties: {},
+          },
+          ...(outputSchema ? { outputSchema } : {}),
+        };
+      }),
     };
   }
 
@@ -89,6 +99,27 @@ export class InProcessConnection implements McpConnection {
       );
     }
 
+    // Validate like McpServer does for a directly registered tool: apply
+    // defaults and strip unknown keys, so a defaulted field the advertised
+    // schema marks optional still reaches the handler with its default.
+    const rawSchema = inputSchemaOf(match.tool);
+    let parsedArgs: unknown = args;
+    if (rawSchema) {
+      const parsed = await toZodSchema(rawSchema).safeParseAsync(args ?? {});
+      if (!parsed.success) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Input validation error: Invalid arguments for tool ${name}: ${parsed.error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      parsedArgs = parsed.data;
+    }
+
     const extra = {
       ...carried,
       signal: new AbortController().signal,
@@ -101,7 +132,7 @@ export class InProcessConnection implements McpConnection {
       // Re-enter the store with the merged values so a chain made from inside
       // this handler sees them, not an outer store that may differ.
       (await runWithRequestContext({ ...sessionValues, ...carried }, () =>
-        match.tool.handler(args, extra as any),
+        match.tool.handler(parsedArgs as any, extra as any),
       )) as {
         content: Array<{ type: string; text?: string }>;
         structuredContent?: unknown;
@@ -177,6 +208,11 @@ export class InProcessConnection implements McpConnection {
       enabledSlices: this.filterConfig?.slices ?? [],
     };
   }
+}
+
+/** A tool's input schema, honouring the deprecated `schema` alias. */
+function inputSchemaOf(tool: ToolDefinition<any, any, any>): unknown {
+  return tool.inputSchema ?? tool.schema;
 }
 
 /**
