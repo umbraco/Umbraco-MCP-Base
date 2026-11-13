@@ -78,6 +78,18 @@ Note: `USE_MOCK_API=true` enables MSW interception. Without it, tests hit the re
 | `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e -w packages/create-mcp-server` | New-instance CLI E2E — scaffold, init's "create new" branch (PSW), Umbraco setup, discover, generate, compile, test | ~19 |
 | `TEST_SQL_CONNECTION_STRING="..." npm run test:e2e:existing -w packages/create-mcp-server` | Existing-instance CLI E2E — spawns a copy of `tests/umbraco-instance/` on a random port against a per-test SQL Server DB, runs scaffold + init's "use existing" branch, asserts `.env`, `orval.config.ts`, and a real API call | ~3 |
 
+### Pre-release consumer smoke (manual, before cutting a release)
+
+Requires SQL Server + .NET 10, local checkouts of `umbraco-mcp-dev-cms` and `umbraco-mcp-editor-cms`, and (for the hosted part) `wrangler login` plus a browser sign-in to the Cloud test site.
+
+| Command | What it tests |
+|---------|--------------|
+| `npm run smoke -- <stage> --version <x.y.z-beta.N>` | This repo's packages, installed from `npm pack` tarballs into dev-cms, editor-cms (chained to the upgraded dev-cms) and a fresh scaffold: packaging, builds, each consumer's own unit/integration + hosted e2e suites, side-by-side reruns on the previous SDK |
+| `npm run smoke:stdio -- <server-dir> --call <tool> '{}'` | One stdio server: stdout is pure JSON-RPC, schemas, `structuredContent` validates against `outputSchema` |
+| `npm run smoke:hosted -- <mcp-url> --call <tool> '{}'` | A deployed Worker as a real MCP client: discovery, DCR, S256-only PKCE, token/refresh/replay, MCP calls, session binding |
+
+Walkthrough: [`scripts/smoke/README.md`](scripts/smoke/README.md).
+
 ## SDK Package Exports
 
 | Entry Point | Purpose |
@@ -156,6 +168,7 @@ The full workflow lives in the **`release-and-branching` skill** (`.claude/skill
 
 > Follow the **`release-and-branching` skill** for the workflow (branch, merge style, sync-back). The steps below are the project-specific release mechanics the skill refers to.
 
+0. **Smoke-test `dev` against the consumers first** (`scripts/smoke/README.md`, `--version <next version>`). Releases have needed consumer patches after shipping because the consumers' own suites never ran against the new SDK before it was published. Do this before pushing the release branch: a push to `release/*` publishes the version to MyGet, and it can't be republished if the smoke finds something
 1. Create a release branch from `dev`: `release/<version>` (e.g. `release/17.0.0-beta.9`)
 2. Bump the version in **all** files (use find-and-replace for the old version string):
    - `package.json` (root)
