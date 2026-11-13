@@ -34,6 +34,7 @@ import type { CollectionConfiguration } from "../types/collection-configuration.
 import { toolToJsonSchema, toolToSummary, formatToolTable } from "./introspection.js";
 import { generateContextFile } from "./context-generator.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
+import { findUnknownArgKeys } from "../helpers/unknown-arg-keys.js";
 import { UMBRACO_VERSION_CONTEXT_KEY } from "../umbraco-version/request-context.js";
 
 /**
@@ -275,6 +276,16 @@ export async function handleCliCommands(
             console.error(`Input validation error: Invalid arguments for tool ${toolName}: ${getParseErrorMessage(parsed.error)}`);
             await exitAfterFlush(1);
             return; // unreachable but satisfies TS
+          }
+          // The parse strips keys the schema doesn't declare, so a misspelled
+          // argument would otherwise vanish without a word. Warn, don't fail:
+          // the MCP path accepts the same call.
+          const unknownKeys = findUnknownArgKeys(tool.inputSchema, args);
+          if (unknownKeys.length > 0) {
+            console.error(
+              `Warning: ignoring argument(s) not in the input schema for tool ${toolName}: ${unknownKeys.join(", ")}. ` +
+              `Use --describe-tool ${toolName} to see the accepted arguments.`,
+            );
           }
           args = parsed.data as Record<string, unknown>;
         }
