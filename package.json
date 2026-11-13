@@ -27,7 +27,8 @@
     "test:cli:evals": "cd tests/cli && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config evals/jest.config.ts --runInBand --forceExit",
     "smoke": "node scripts/smoke/smoke-consumers.mjs",
     "smoke:stdio": "node scripts/smoke/stdio-check.mjs",
-    "smoke:hosted": "node scripts/smoke/hosted-check.mjs"
+    "smoke:hosted": "node scripts/smoke/hosted-check.mjs",
+    "smoke:sdk": "node scripts/smoke/sdk-check.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

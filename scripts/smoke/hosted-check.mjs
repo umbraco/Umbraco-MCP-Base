@@ -32,7 +32,8 @@ const { Validator } = await import(require.resolve("@cfworker/json-schema"));
 
 const argv = process.argv.slice(2);
 const mcpUrl = argv[0];
-if (!mcpUrl?.startsWith("https://")) {
+// https for deployed Workers; plain http only for a local `wrangler dev`.
+if (!/^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(mcpUrl ?? "")) {
   console.error("usage: hosted-check.mjs <https://…/mcp> [--call tool json]... [--save name] [--cross name]");
   process.exit(2);
 }

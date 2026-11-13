@@ -71,12 +71,39 @@ S=~/Projects/mcp-smoke/$V-smoke.1
 npm run smoke:stdio -- $S/dev-cms --min-tools 400 \
   --env NODE_TLS_REJECT_UNAUTHORIZED=0 --env UMBRACO_BASE_URL=https://localhost:44491 \
   --call get-server-information '{}' --call get-document-root '{}' \
-  --expect-error get-document-by-id '{"id":"../../server/status"}'
+  --expect-error get-script-by-path '{"path":"../../server/status"}'
 npm run smoke:stdio -- $S/editor-cms --env NODE_TLS_REJECT_UNAUTHORIZED=0 \
   --env UMBRACO_BASE_URL=https://localhost:44591 --call list-document-types '{}'
 ```
 
-`stdio-check` flags any stdout line that isn't JSON-RPC, and it validates every `structuredContent` against the tool's `outputSchema`. Add `--env UMBRACO_DRY_RUN=true` to check dry-run, and `--print-tools` to list tool names.
+`stdio-check` flags any stdout line that isn't JSON-RPC, and it validates every `structuredContent` against the tool's `outputSchema`. Options:
+
+| Option | What it's for |
+|---|---|
+| `--print-tools` | Lists the tool names. |
+| `--env UMBRACO_DRY_RUN=true` | Checks dry-run. |
+| `--elicitation ignore` | Leaves confirmation prompts unanswered, to check the confirmation timeout. Raise `--call-timeout-ms` above the MCP request timeout of 60 s. |
+| `--server-arg <flag>` | Passes a CLI flag to the server, for example `--umbraco-readonly`. |
+
+For the URL-path guard, use a free-text path parameter such as `get-script-by-path`. A GUID field such as `id` is rejected by schema validation before the request is built.
+
+### Targeted checks
+
+Some SDK behaviour isn't reached by the consumers' own code. These checks exercise it directly:
+
+```bash
+# Token cache (single-flight, Bearer-challenge resend) and resolveMediaTypeId
+NODE_TLS_REJECT_UNAUTHORIZED=0 npm run smoke:sdk -- $S/dev-cms https://localhost:44491
+
+# The new startup version check and chained readonly, through the fresh scaffold.
+# Point the scaffold's chained "cms" server at the smoke dev-cms build first
+# (src/config/mcp-servers.ts: command process.execPath, args [<dev-cms>/dist/index.js]), then rebuild.
+npm run smoke:stdio -- $S/fresh/smoke-mcp --env UMBRACO_BASE_URL=https://localhost:44491 \
+  --env UMBRACO_CLIENT_ID=umbraco-back-office-mcp --env UMBRACO_CLIENT_SECRET=1234567890 \
+  --env NODE_TLS_REJECT_UNAUTHORIZED=0 --server-arg --umbraco-readonly --print-tools
+```
+
+The admin-config cap on consent needs a local Worker with a restrictive config, for example `npx wrangler dev --port 8787 --var UMBRACO_TOOL_MODES:system --var UMBRACO_READONLY:true …`. Run `npm run smoke:hosted -- http://127.0.0.1:8787/mcp` against it, ask for more on the consent screen, and check that the granted tool list stays within the config.
 
 The CLI has to be driven by hand: `--list-tools`, `--describe-tool`, `--call <tool> --call-args '<json>'`, `--umbraco-readonly`, and `UMBRACO_EXPECTED_MAJOR=<other>` for the version-mismatch warning. `NODE_TLS_REJECT_UNAUTHORIZED=0` must be in the process environment, because a `.env` file doesn't apply it.
 

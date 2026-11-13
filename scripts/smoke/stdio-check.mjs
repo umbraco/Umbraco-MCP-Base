@@ -11,7 +11,8 @@
  *
  *   node scripts/smoke/stdio-check.mjs <server-dir> [--entry dist/index.js]
  *        [--call <tool> '<json-args>']... [--expect-error <tool> '<json-args>']...
- *        [--env KEY=VALUE]... [--min-tools N]
+ *        [--env KEY=VALUE]... [--min-tools N] [--print-tools]
+ *        [--elicitation decline|ignore] [--call-timeout-ms N] [--server-arg <flag>]...
  *
  * Exit code 1 on any failed check.
  */
@@ -29,6 +30,10 @@ const serverDir = resolve(argv[0] ?? ".");
 let entry = "dist/index.js";
 let minTools = 1;
 let printTools = false;
+let elicitationMode = "decline";
+let elicitations = 0;
+let callTimeoutMs = 120_000;
+const serverArgs = [];
 const calls = [];
 const env = { ...process.env };
 for (let i = 1; i < argv.length; i++) {
@@ -36,6 +41,9 @@ for (let i = 1; i < argv.length; i++) {
   if (a === "--entry") entry = argv[++i];
   else if (a === "--min-tools") minTools = Number(argv[++i]);
   else if (a === "--print-tools") printTools = true;
+  else if (a === "--elicitation") elicitationMode = argv[++i];
+  else if (a === "--call-timeout-ms") callTimeoutMs = Number(argv[++i]);
+  else if (a === "--server-arg") serverArgs.push(argv[++i]);
   else if (a === "--call" || a === "--expect-error") calls.push({ tool: argv[++i], args: JSON.parse(argv[++i] ?? "{}"), expectError: a === "--expect-error" });
   else if (a === "--env") {
     const [k, ...v] = argv[++i].split("=");
@@ -50,7 +58,7 @@ const fail = (msg) => {
 };
 const pass = (msg) => console.log(`  ok   ${msg}`);
 
-const child = spawn(process.execPath, [entry], { cwd: serverDir, env, stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn(process.execPath, [entry, ...serverArgs], { cwd: serverDir, env, stdio: ["pipe", "pipe", "pipe"] });
 let stderr = "";
 child.stderr.on("data", (d) => (stderr += d));
 
@@ -75,8 +83,13 @@ child.stdout.on("data", (d) => {
       pending.get(msg.id)(msg);
       pending.delete(msg.id);
     } else if (msg.method === "elicitation/create" || msg.method === "sampling/createMessage") {
-      // Decline anything interactive; a smoke run never confirms a write.
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { action: "decline" } }) + "\n");
+      elicitations++;
+      // Decline anything interactive (a smoke run never confirms a write), or
+      // leave it unanswered with --elicitation ignore to exercise the
+      // server's confirmation timeout.
+      if (elicitationMode !== "ignore") {
+        child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { action: "decline" } }) + "\n");
+      }
     }
   }
 });
@@ -140,7 +153,11 @@ try {
       fail(`call ${c.tool}: not in tools/list`);
       continue;
     }
-    const r = await rpc("tools/call", { name: c.tool, arguments: c.args }, 120_000);
+    const before = elicitations;
+    const r = await rpc("tools/call", { name: c.tool, arguments: c.args }, callTimeoutMs);
+    if (elicitations > before) {
+      console.log(`       (${elicitations - before} confirmation request(s) ${elicitationMode === "ignore" ? "left unanswered" : "declined"})`);
+    }
     const res = r.result;
     const text = (res?.content ?? []).map((x) => x.text ?? "").join(" ").replace(/\s+/g, " ").slice(0, 200);
     if (c.expectError) {
