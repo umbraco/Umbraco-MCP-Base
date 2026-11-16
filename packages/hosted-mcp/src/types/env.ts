@@ -60,7 +60,6 @@ export interface OAuthProviderHelpers {
  *
  * Required secrets (set via `wrangler secret put`):
  * - UMBRACO_OAUTH_CLIENT_ID
- * - COOKIE_ENCRYPTION_KEY (generate with: openssl rand -hex 32)
  *
  * Required bindings (configured in wrangler.toml):
  * - OAUTH_KV: KV namespace for token storage
@@ -83,9 +82,21 @@ export interface HostedMcpEnv {
   /** OAuth client secret (optional, only needed for confidential clients) */
   UMBRACO_OAUTH_CLIENT_SECRET?: string;
 
-  // Cookie/session encryption
-  /** Encryption key for session cookies (hex string, 32 bytes) */
-  COOKIE_ENCRYPTION_KEY: string;
+  /**
+   * @deprecated Not read by this package: sign-in state lives in KV and
+   * stored Umbraco tokens are encrypted with a key derived per sign-in.
+   * Existing deployments can leave the secret in place or remove it.
+   */
+  COOKIE_ENCRYPTION_KEY?: string;
+
+  /**
+   * Optional Workers Rate Limiting binding for dynamic client registration.
+   * When bound, registration requests are limited per calling IP address;
+   * the limit and period are set on the binding in `wrangler.toml`.
+   */
+  REGISTER_RATE_LIMITER?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
 
   // KV namespaces
   /** KV namespace for encrypted token storage */

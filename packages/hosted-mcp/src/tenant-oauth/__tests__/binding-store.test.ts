@@ -4,6 +4,7 @@ import {
   hasClientBinding,
   getClientTenant,
   revokeClient,
+  BINDING_TTL_SECONDS,
 } from "../binding-store.js";
 
 function createMockKV() {
@@ -88,5 +89,78 @@ describe("binding-store", () => {
       expect(await hasClientBinding(kv as any, "a", "shared-id")).toBe(true);
       expect(await hasClientBinding(kv as any, "b", "shared-id")).toBe(false);
     });
+  });
+});
+
+describe("binding-store expiry", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  function createKV() {
+    const store = new Map<string, string>();
+    return {
+      store,
+      get: jest.fn(async (key: string) => store.get(key) ?? null),
+      put: jest.fn(async (key: string, value: string, _options?: { expirationTtl?: number }) => {
+        store.set(key, value);
+      }),
+      delete: jest.fn(async (key: string) => {
+        store.delete(key);
+      }),
+    };
+  }
+
+  it("writes both keys with the binding TTL", async () => {
+    const kv = createKV();
+    await putClientBinding(kv as any, "tenant-a", "client-123");
+
+    expect(kv.put).toHaveBeenCalledTimes(2);
+    for (const call of kv.put.mock.calls) {
+      expect(call[2]).toEqual({ expirationTtl: BINDING_TTL_SECONDS });
+    }
+  });
+
+  it("leaves a recent binding alone when it is used", async () => {
+    const kv = createKV();
+    await putClientBinding(kv as any, "tenant-a", "client-123");
+    kv.put.mockClear();
+
+    expect(await hasClientBinding(kv as any, "tenant-a", "client-123")).toBe(true);
+    expect(kv.put).not.toHaveBeenCalled();
+  });
+
+  it("renews both keys when a binding older than 30 days is used", async () => {
+    const kv = createKV();
+    kv.store.set(
+      "at:tenant-a:client:client-123",
+      JSON.stringify({ createdAt: Date.now() - 31 * DAY_MS })
+    );
+    kv.store.set("client:client-123:tenant", "tenant-a");
+
+    expect(await hasClientBinding(kv as any, "tenant-a", "client-123")).toBe(true);
+
+    expect(kv.put.mock.calls.map((call) => call[0]).sort()).toEqual([
+      "at:tenant-a:client:client-123",
+      "client:client-123:tenant",
+    ]);
+    for (const call of kv.put.mock.calls) {
+      expect(call[2]).toEqual({ expirationTtl: BINDING_TTL_SECONDS });
+    }
+  });
+
+  it("still reports the binding when renewing it fails", async () => {
+    const kv = createKV();
+    kv.store.set(
+      "at:tenant-a:client:client-123",
+      JSON.stringify({ createdAt: Date.now() - 31 * DAY_MS })
+    );
+    kv.put.mockRejectedValue(new Error("KV unavailable"));
+
+    expect(await hasClientBinding(kv as any, "tenant-a", "client-123")).toBe(true);
+  });
+
+  it("does not create a binding for a client that has none", async () => {
+    const kv = createKV();
+    expect(await hasClientBinding(kv as any, "tenant-a", "client-123")).toBe(false);
+    expect(kv.put).not.toHaveBeenCalled();
   });
 });

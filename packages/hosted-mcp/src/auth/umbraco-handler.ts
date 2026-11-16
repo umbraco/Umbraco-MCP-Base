@@ -44,6 +44,8 @@ import {
 } from "./flow-cookies.js";
 import { toHex } from "../crypto/hex.js";
 import { toBase64Url } from "../crypto/base64url.js";
+import { logAuth } from "./log.js";
+import { grantResource, resourceIsOnOrigin } from "./own-resource.js";
 import {
   getBackofficeEndpoints,
   storeOAuthState,
@@ -54,6 +56,7 @@ import {
   markClientAuthed,
   isClientAuthed,
   type TokenResponse,
+  parseOAuthErrorCode,
 } from "./token-storage.js";
 
 // ============================================================================
@@ -75,22 +78,44 @@ import {
  *
  * Fails closed on any entry that can't be extracted as a tenant alias —
  * legitimate clients only ever send the canonical `${origin}/at/<alias>`.
+ * Every entry must also be a URL on this Worker's own origin: a token is
+ * never issued for a resource on another host.
  */
 function checkAllResourceAliasesMatchClient(
   resource: string | string[] | undefined,
   prefixRegex: RegExp,
   registeredTenant: string | null,
-  resolvedSiteId: string
+  resolvedSiteId: string,
+  origin: string
 ): boolean {
   if (registeredTenant === null) return false;
   if (registeredTenant !== resolvedSiteId) return false;
   const values = !resource ? [] : Array.isArray(resource) ? resource : [resource];
   for (const v of values) {
+    if (!resourceIsOnOrigin(v, origin)) return false;
     const alias = extractSiteIdFromOneResource(v, prefixRegex);
     // null (non-extractable) and any cross-tenant value both fail closed.
     if (alias !== registeredTenant) return false;
   }
   return true;
+}
+
+/**
+ * A digest of the authorization request a consent screen was rendered for.
+ * Stored with the consent state so an approval only ever applies to the
+ * request the user was shown, not to another request from the same client.
+ */
+export async function authRequestDigest(authRequest: OAuthAuthRequest): Promise<string> {
+  const fields = JSON.stringify([
+    authRequest.clientId,
+    authRequest.redirectUri,
+    authRequest.state ?? "",
+    authRequest.codeChallenge ?? "",
+    authRequest.resource ?? "",
+    authRequest.scope,
+  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fields));
+  return toHex(new Uint8Array(digest));
 }
 
 // ============================================================================
@@ -156,6 +181,18 @@ async function resolveGrantUser(
 // ============================================================================
 // Upstream authorization errors
 // ============================================================================
+
+/**
+ * A sign-in callback failure whose message is safe to show to the browser.
+ * Messages are fixed text: nothing from Umbraco's response or the request is
+ * included. Any other error from the callback is reported generically.
+ */
+export class SignInCallbackError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SignInCallbackError";
+  }
+}
 
 /** Upstream errors passed to the MCP client unchanged; anything else becomes `server_error`. */
 const PASSTHROUGH_UPSTREAM_ERRORS = new Set(["access_denied", "temporarily_unavailable"]);
@@ -439,6 +476,18 @@ export function createAuthorizeHandler(
       return invalidRequest("PKCE with code_challenge_method=S256 is required");
     }
 
+    // Without URL-based site routing this Worker is the only resource its
+    // tokens are for (site routing validates `resource` per tenant below).
+    if (!siteRouting && !resourceIsOnOrigin(authRequest.resource, url.origin)) {
+      return new Response(
+        JSON.stringify({
+          error: "invalid_target",
+          error_description: "The resource parameter must be a URL on this server",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     // Handle POST (consent form submission)
     if (request.method === "POST") {
       // The consent form only ever posts to its own origin.
@@ -476,7 +525,11 @@ export function createAuthorizeHandler(
       submittedState: string
     ): Promise<Response> {
       const consentStateData = await consumeOAuthState(env.OAUTH_KV, `consent:${submittedState}`);
-      if (!consentStateData || consentStateData.clientId !== authRequest.clientId) {
+      if (
+        !consentStateData ||
+        consentStateData.clientId !== authRequest.clientId ||
+        consentStateData.requestDigest !== (await authRequestDigest(authRequest))
+      ) {
         return new Response("Invalid or expired consent state", { status: 403 });
       }
 
@@ -524,7 +577,8 @@ export function createAuthorizeHandler(
             authRequest.resource,
             sitePrefixRegex!,
             await getClientTenant(env.OAUTH_KV, authRequest.clientId),
-            site.id
+            site.id,
+            url.origin
           )
         ) {
           return new Response(
@@ -582,7 +636,11 @@ export function createAuthorizeHandler(
       // callback path is stored so /callback can check the code came back on
       // this site's redirect URI.
       await storeOAuthState(env.OAUTH_KV, umbracoState, {
-        authRequest,
+        // Outside site routing the grant always gets a resource, so its
+        // tokens carry an audience (see own-resource.ts).
+        authRequest: siteRouting
+          ? authRequest
+          : { ...authRequest, resource: grantResource(authRequest.resource, url.origin) },
         codeVerifier,
         consentChoices,
         siteClientId,
@@ -631,6 +689,7 @@ export function createAuthorizeHandler(
       const consentState = generateSecureRandom();
       await storeOAuthState(env.OAUTH_KV, `consent:${consentState}`, {
         clientId: authRequest.clientId,
+        requestDigest: await authRequestDigest(authRequest),
       });
 
       // Resolve the site at consent-render time when URL-based site routing is on.
@@ -651,7 +710,8 @@ export function createAuthorizeHandler(
             authRequest.resource,
             sitePrefixRegex!,
             await getClientTenant(env.OAUTH_KV, authRequest.clientId),
-            routedSite.id
+            routedSite.id,
+            url.origin
           )
         ) {
           return new Response(
@@ -694,7 +754,9 @@ export function createAuthorizeHandler(
           clientName: await lookupClientName(env, authRequest.clientId),
           clientId: authRequest.clientId,
           umbracoBaseUrl: routedSite?.baseUrl ?? env.UMBRACO_BASE_URL,
-          scopes: authRequest.scope.length > 0 ? authRequest.scope : scopes,
+          // Only scopes this server knows are shown: a client can put any
+          // text in `scope`, and it must not appear as a permission.
+          scopes: shownScopes(authRequest.scope, scopes),
           redirectUri: authRequest.redirectUri,
           actionUrl: url.toString(),
           state: consentState,
@@ -709,6 +771,12 @@ export function createAuthorizeHandler(
       );
     }
   };
+}
+
+/** The requested scopes this server supports, or all supported scopes when none were requested. */
+function shownScopes(requested: string[], supported: string[]): string[] {
+  const known = requested.filter((scope) => supported.includes(scope));
+  return known.length > 0 ? known : supported;
 }
 
 function invalidRequest(description: string): Response {
@@ -778,13 +846,11 @@ export function createCallbackHandler(env: HostedMcpEnv) {
           throw new UpstreamAuthorizationError(clientErrorRedirect(authRequest, error));
         }
       }
-      throw new Error(
-        `Umbraco authorization error: ${error} - ${url.searchParams.get("error_description") ?? ""}`
-      );
+      throw new SignInCallbackError("Umbraco ended the sign-in with an error");
     }
 
     if (!code || !state) {
-      throw new Error("Missing code or state parameter in callback");
+      throw new SignInCallbackError("Missing code or state parameter in callback");
     }
 
     // The state must come back to the browser that approved the consent
@@ -797,7 +863,7 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // Consume state (single-use)
     const stateData = await consumeOAuthState(env.OAUTH_KV, state);
     if (!stateData) {
-      throw new Error("Invalid or expired OAuth state parameter");
+      throw new SignInCallbackError("Invalid or expired OAuth state parameter");
     }
 
     // Retrieve the full OAuthAuthRequest stored during authorize
@@ -823,7 +889,7 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     // during an upgrade) has none and is rejected; the user starts again.
     const callbackPath = stateData.callbackPath;
     if (typeof callbackPath !== "string" || url.pathname !== callbackPath) {
-      throw new Error("Callback does not match the site this sign-in was started for");
+      throw new SignInCallbackError("Callback does not match the site this sign-in was started for");
     }
 
     // Use site-specific credentials from state if available (multi-site),
@@ -859,10 +925,11 @@ export function createCallbackHandler(env: HostedMcpEnv) {
     });
 
     if (!tokenResp.ok) {
-      const errorBody = await tokenResp.text();
-      throw new Error(
-        `Token exchange failed: ${tokenResp.status} ${tokenResp.statusText} - ${errorBody}`
-      );
+      // Umbraco's response can name internal hosts, so it never reaches the
+      // browser. The status and OAuth error code go to the auth log.
+      const errorCode = parseOAuthErrorCode(await tokenResp.text().catch(() => ""));
+      logAuth(env, `callback token exchange FAILED status=${tokenResp.status} error=${errorCode ?? "n/a"}`);
+      throw new SignInCallbackError("The sign-in could not be completed with Umbraco");
     }
 
     const tokens = (await tokenResp.json()) as TokenResponse;

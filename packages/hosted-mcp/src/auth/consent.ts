@@ -293,6 +293,8 @@ export function consentResponse(options: ConsentScreenOptions): Response {
       "X-Frame-Options": "DENY",
       "Content-Security-Policy": "frame-ancestors 'none'",
       "X-Content-Type-Options": "nosniff",
+      // The page carries a single-use consent state: never cache it.
+      "Cache-Control": "no-store",
     },
   });
 }

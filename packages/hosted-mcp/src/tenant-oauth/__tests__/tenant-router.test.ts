@@ -454,3 +454,228 @@ describe("dispatchTenantOAuth — authorize", () => {
     expect(oauthFetch).not.toHaveBeenCalled();
   });
 });
+
+describe("dispatchTenantOAuth — token client identity", () => {
+  function tokenRequest(options: {
+    query?: string;
+    form?: Record<string, string>;
+    headers?: Record<string, string>;
+  }): Request {
+    const form = new URLSearchParams({ grant_type: "refresh_token", ...(options.form ?? {}) });
+    return new Request(`https://worker.example.com/at/demo/token${options.query ?? ""}`, {
+      method: "POST",
+      body: form.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...(options.headers ?? {}),
+      },
+    });
+  }
+
+  const basic = (id: string, secret: string) => `Basic ${btoa(`${id}:${secret}`)}`;
+
+  it("accepts a client that authenticates with HTTP Basic", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn(async () => new Response("ok"));
+
+    const response = await dispatchTenantOAuth(
+      { kind: "token", alias: "demo" },
+      tokenRequest({ headers: { Authorization: basic("client-1", "s3cret") } }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(200);
+    expect(oauthFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the Basic client, not a client_id in the query string", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    await putClientBinding(kv as never, "other-tenant", "client-2");
+    const oauthFetch = jest.fn();
+
+    const response = await dispatchTenantOAuth(
+      { kind: "token", alias: "demo" },
+      tokenRequest({
+        query: "?client_id=client-1",
+        headers: { Authorization: basic("client-2", "s3cret") },
+      }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_client");
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+
+  it("checks the form client, not a client_id in the query string", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    await putClientBinding(kv as never, "other-tenant", "client-2");
+    const oauthFetch = jest.fn();
+
+    const response = await dispatchTenantOAuth(
+      { kind: "token", alias: "demo" },
+      tokenRequest({ query: "?client_id=client-1", form: { client_id: "client-2" } }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(400);
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+
+  it("requires a client id in the request itself, never only in the query string", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    const oauthFetch = jest.fn();
+
+    const response = await dispatchTenantOAuth(
+      { kind: "token", alias: "demo" },
+      tokenRequest({ query: "?client_id=client-1" }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_request");
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchTenantOAuth — authorize client identity", () => {
+  it("checks the query-string client on a consent submission, not one in the form", async () => {
+    const kv = createMockKV();
+    await putClientBinding(kv as never, "demo", "client-1");
+    await putClientBinding(kv as never, "other-tenant", "client-2");
+    const oauthFetch = jest.fn();
+
+    const response = await dispatchTenantOAuth(
+      { kind: "authorize", alias: "demo" },
+      new Request("https://worker.example.com/at/demo/authorize?client_id=client-2", {
+        method: "POST",
+        body: new URLSearchParams({ client_id: "client-1", action: "approve" }).toString(),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      }),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_client");
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchTenantOAuth — protected resource metadata", () => {
+  async function prm(path: string): Promise<Record<string, unknown>> {
+    const match = matchTenantOAuthPath(path)!;
+    const response = await dispatchTenantOAuth(
+      match,
+      new Request(`https://worker.example.com${path}`),
+      makeEnv(createMockKV()),
+      ctx,
+      makeRouting(),
+      { fetch: jest.fn() as never }
+    );
+    expect(response.status).toBe(200);
+    return (await response.json()) as Record<string, unknown>;
+  }
+
+  it("names the tenant as the resource for the tenant metadata URL", async () => {
+    const body = await prm("/.well-known/oauth-protected-resource/at/demo");
+    expect(body.resource).toBe("https://worker.example.com/at/demo");
+    expect(body.authorization_servers).toEqual(["https://worker.example.com/at/demo"]);
+  });
+
+  it("names the MCP endpoint as the resource for the MCP endpoint's metadata URL", async () => {
+    const body = await prm("/.well-known/oauth-protected-resource/at/demo/mcp");
+    expect(body.resource).toBe("https://worker.example.com/at/demo/mcp");
+    expect(body.authorization_servers).toEqual(["https://worker.example.com/at/demo"]);
+  });
+});
+
+describe("dispatchTenantOAuth — registration limits", () => {
+  function registerRequest(body: string, headers: Record<string, string> = {}): Request {
+    return new Request("https://worker.example.com/at/demo/register", {
+      method: "POST",
+      body,
+      headers: { "content-type": "application/json", ...headers },
+    });
+  }
+
+  it("refuses an oversized registration before it reaches the provider", async () => {
+    const kv = createMockKV();
+    const oauthFetch = jest.fn();
+
+    const response = await dispatchTenantOAuth(
+      { kind: "register", alias: "demo" },
+      registerRequest(JSON.stringify({ client_name: "x".repeat(20_000) })),
+      makeEnv(kv),
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(413);
+    expect(oauthFetch).not.toHaveBeenCalled();
+    expect(kv.store.size).toBe(0);
+  });
+
+  it("refuses a registration over the rate limit, keyed by caller address", async () => {
+    const kv = createMockKV();
+    const oauthFetch = jest.fn();
+    const limit = jest.fn(async (_options: { key: string }) => ({ success: false }));
+
+    const response = await dispatchTenantOAuth(
+      { kind: "register", alias: "demo" },
+      registerRequest("{}", { "cf-connecting-ip": "203.0.113.7" }),
+      { ...makeEnv(kv), REGISTER_RATE_LIMITER: { limit } },
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(limit).toHaveBeenCalledWith({ key: "203.0.113.7" });
+    expect(oauthFetch).not.toHaveBeenCalled();
+  });
+
+  it("still registers when the rate limiter itself fails", async () => {
+    const kv = createMockKV();
+    const oauthFetch = jest.fn(
+      async () => new Response(JSON.stringify({ client_id: "client-9" }), { status: 201 })
+    );
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const limit = jest.fn(async () => {
+      throw new Error("limiter down");
+    });
+
+    const response = await dispatchTenantOAuth(
+      { kind: "register", alias: "demo" },
+      registerRequest("{}"),
+      { ...makeEnv(kv), REGISTER_RATE_LIMITER: { limit } },
+      ctx,
+      makeRouting(),
+      { fetch: oauthFetch as never }
+    );
+    warn.mockRestore();
+
+    expect(response.status).toBe(201);
+    expect(kv.store.get("client:client-9:tenant")).toBe("demo");
+  });
+});

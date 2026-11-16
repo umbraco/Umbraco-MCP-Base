@@ -16,7 +16,7 @@
 
 interface KVNamespaceLike {
   get(key: string): Promise<string | null>;
-  put(key: string, value: string): Promise<void>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
 }
 
@@ -36,6 +36,15 @@ interface ForwardRecord {
 }
 
 /**
+ * Bindings expire when unused, so abandoned registrations don't accumulate.
+ * A binding in use is rewritten (both keys, fresh TTL) once it is older than
+ * `BINDING_REFRESH_AFTER_MS`, so it outlives its client registration however
+ * long the OAuth provider keeps that (90 days by default).
+ */
+export const BINDING_TTL_SECONDS = 120 * 24 * 60 * 60;
+const BINDING_REFRESH_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
  * Write the binding pair. KV doesn't expose multi-key transactions — we write
  * forward then reverse. If the second write fails, the forward record is
  * orphaned but harmless (extra row, no security impact — the reverse-index
@@ -47,12 +56,14 @@ export async function putClientBinding(
   clientId: string
 ): Promise<void> {
   const record: ForwardRecord = { createdAt: Date.now() };
-  await kv.put(forwardKey(alias, clientId), JSON.stringify(record));
-  await kv.put(reverseKey(clientId), alias);
+  const options = { expirationTtl: BINDING_TTL_SECONDS };
+  await kv.put(forwardKey(alias, clientId), JSON.stringify(record), options);
+  await kv.put(reverseKey(clientId), alias, options);
 }
 
 /**
  * Forward lookup — does this client have a binding for this specific tenant?
+ * Extends the binding's lifetime when it is due (see `BINDING_TTL_SECONDS`).
  */
 export async function hasClientBinding(
   kv: KVNamespaceLike,
@@ -60,7 +71,21 @@ export async function hasClientBinding(
   clientId: string
 ): Promise<boolean> {
   const value = await kv.get(forwardKey(alias, clientId));
-  return value !== null;
+  if (value === null) return false;
+  if (isDueForRefresh(value)) {
+    // Best effort: the binding is valid either way.
+    await putClientBinding(kv, alias, clientId).catch(() => undefined);
+  }
+  return true;
+}
+
+function isDueForRefresh(value: string): boolean {
+  try {
+    const createdAt = (JSON.parse(value) as Partial<ForwardRecord>).createdAt;
+    return typeof createdAt !== "number" || Date.now() - createdAt > BINDING_REFRESH_AFTER_MS;
+  } catch {
+    return true;
+  }
 }
 
 /**

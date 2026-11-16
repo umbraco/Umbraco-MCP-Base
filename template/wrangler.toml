@@ -5,7 +5,6 @@
 # 2. Set secrets:
 #    npx wrangler secret put UMBRACO_BASE_URL
 #    npx wrangler secret put UMBRACO_OAUTH_CLIENT_ID
-#    npx wrangler secret put COOKIE_ENCRYPTION_KEY
 #    npx wrangler secret put TENANT_HASH_KEY   # optional: keys the hashed
 #      `umbraco.mcp.tenant` AND `umbraco.mcp.login_session` span attributes.
 #      Omit it and spans simply carry neither — the plaintext project alias
