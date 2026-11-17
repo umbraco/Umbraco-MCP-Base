@@ -173,6 +173,35 @@ describe("umbracoCloudSiteRouting", () => {
     }
   });
 
+  it("counts the error TTL from when the probe failed, and rethrows the validator's own error", async () => {
+    class PortalError extends Error {}
+    const failure = new PortalError("portal API down");
+    const nowSpy = jest.spyOn(Date, "now");
+    // The probe takes 5s to fail, like the default validator's timeout.
+    const validateProject = jest
+      .fn<(siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean>()
+      .mockImplementation(() => {
+        nowSpy.mockReturnValue(3_005_000);
+        throw failure;
+      });
+    try {
+      nowSpy.mockReturnValue(3_000_000);
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor", validateProject });
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+
+      // 12s after the probe started, 7s after it failed: still inside the 10s TTL.
+      nowSpy.mockReturnValue(3_012_000);
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+      expect(validateProject).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(3_015_001);
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+      expect(validateProject).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("caches an unreachable site for the error TTL, then probes again", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
     fetchSpy.mockRejectedValue(timeout);

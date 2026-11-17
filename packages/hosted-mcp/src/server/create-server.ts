@@ -55,6 +55,7 @@ import {
   type RequestTransport,
 } from "@umbraco-cms/mcp-server-sdk";
 import { resolveRequestTelemetry, siteRef } from "../telemetry/request-telemetry.js";
+import { aliasOnly } from "../cloud/site-id.js";
 import type { HostedMcpEnv } from "../types/env.js";
 import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
@@ -488,18 +489,48 @@ function signInUnavailable(
   message: string
 ): UmbracoSignInUnavailableError {
   const mode = SIGN_IN_UNAVAILABLE_MODES[cause];
-  console.log(
-    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=${mode} cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
-  );
+  recordFailedStart(initSpan, traceId, initStartedAt, mode, cause);
   if (mode === "auth-misconfigured") {
     console.warn(
       `[mcp-hosted] createPerRequestServer id=${traceId} sign-in unavailable cause=${cause}: ${message}`
     );
   }
+  return new UmbracoSignInUnavailableError(cause, message);
+}
+
+/**
+ * Writes the `:done` log line and the init span's mode, cause and tool count
+ * for a start that built no server.
+ */
+function recordFailedStart(
+  initSpan: TelemetrySpan,
+  traceId: string,
+  initStartedAt: number,
+  mode: Exclude<ServerInitMode, "full">,
+  cause: string
+): void {
+  console.log(
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=${mode} cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
+  );
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, mode);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, cause);
-  return new UmbracoSignInUnavailableError(cause, message);
+}
+
+/**
+ * An error from site resolution as one log-safe line: its name and message,
+ * with the site's id and alias replaced by `safeSiteId`. A custom resolver or
+ * validator can let a fetch error through whose message names the host, and
+ * the plaintext alias must not reach the logs. The stack is left out for the
+ * same reason.
+ */
+function describeSiteError(err: unknown, siteId: string | undefined, safeSiteId: string): string {
+  let text = err instanceof Error ? `${err.name}: ${err.message}` : "non-Error value thrown";
+  for (const secret of siteId ? [siteId, aliasOnly(siteId)] : []) {
+    const pattern = new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    text = text.replace(pattern, safeSiteId);
+  }
+  return text;
 }
 
 /**
@@ -639,13 +670,10 @@ async function initPerRequestServer(
   try {
     site = await resolveRequestSite(siteId, options, env);
   } catch (err) {
-    console.error(`[mcp-hosted] createPerRequestServer id=${traceId} site unreachable:`, err);
-    console.log(
-      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=site-unreachable cause=site-unreachable tools=0 elapsedMs=${Date.now() - initStartedAt}`
+    console.error(
+      `[mcp-hosted] createPerRequestServer id=${traceId} site resolution threw: ${describeSiteError(err, siteId, safeSiteId)}`
     );
-    initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "site-unreachable");
-    initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
-    initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, "site-unreachable");
+    recordFailedStart(initSpan, traceId, initStartedAt, "site-unreachable", "site-unreachable");
     throw new Error("The Umbraco site isn't responding right now. Try again shortly.", { cause: err });
   }
 

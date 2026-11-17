@@ -107,7 +107,7 @@ const MAX_CACHE_ENTRIES = 1_000;
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }
   | { kind: "miss"; expiresAt: number }
-  | { kind: "error"; message: string; expiresAt: number };
+  | { kind: "error"; error: unknown; expiresAt: number };
 
 /**
  * Build a `SiteRoutingConfig` preconfigured for Umbraco Cloud.
@@ -148,7 +148,9 @@ export function umbracoCloudSiteRouting(
     const now = Date.now();
     const cached = cache.get(siteId);
     if (cached && cached.expiresAt > now) {
-      if (cached.kind === "error") throw new Error(cached.message);
+      // The validator's own error, so a caller sees the same thing whether or
+      // not the cache answered.
+      if (cached.kind === "error") throw cached.error;
       return cached.kind === "ok" ? cached.site : null;
     }
 
@@ -169,8 +171,9 @@ export function umbracoCloudSiteRouting(
     try {
       exists = await validator(siteId, candidateUrl, env);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "site probe failed";
-      setCache(siteId, { kind: "error", message, expiresAt: now + ttl.error });
+      // Counted from when the probe failed, not from `now`: a probe that ran
+      // into its own 5s timeout would otherwise use up half the TTL.
+      setCache(siteId, { kind: "error", error: err, expiresAt: Date.now() + ttl.error });
       throw err;
     }
     const baseUrl = exists ? candidateUrl : undefined;

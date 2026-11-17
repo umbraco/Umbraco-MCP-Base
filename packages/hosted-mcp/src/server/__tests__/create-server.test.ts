@@ -1262,6 +1262,36 @@ describe("createPerRequestServer — version check", () => {
     expect(kvDelete).not.toHaveBeenCalled();
   });
 
+  it("logs a resolveSite throw without the site's alias or a stack", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(
+        createPerRequestServer(
+          {
+            ...baseOptions,
+            resolveSite: async () => {
+              throw new TypeError("getaddrinfo ENOTFOUND Secret-Alias.euwest01.umbraco.io");
+            },
+          } as typeof baseOptions,
+          makeMockEnv(),
+          { ...mockProps, consentChoices: { siteId: "secret-alias.euwest01" } },
+        )
+      ).rejects.toThrow("isn't responding right now");
+
+      const lines = [...logSpy.mock.calls, ...errorSpy.mock.calls].map((args) => args.map(String).join(" "));
+      const thrown = lines.filter((l) => l.includes("site resolution threw"));
+      expect(thrown).toHaveLength(1);
+      expect(thrown[0]).toContain("TypeError: getaddrinfo ENOTFOUND");
+      expect(errorSpy.mock.calls.every((args) => args.length === 1)).toBe(true);
+      expect(lines.some((l) => /secret-alias/i.test(l))).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     await createPerRequestServer(
