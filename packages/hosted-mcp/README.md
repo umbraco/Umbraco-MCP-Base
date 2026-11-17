@@ -128,15 +128,27 @@ wrangler secret put UMBRACO_BASE_URL
 wrangler secret put UMBRACO_OAUTH_CLIENT_ID
 wrangler secret put UMBRACO_OAUTH_CLIENT_SECRET
 
-# Always required
-wrangler secret put COOKIE_ENCRYPTION_KEY  # openssl rand -hex 32
-
 # Optional — only if tracing is enabled and you want tenant/login-session attribution
 wrangler secret put TENANT_HASH_KEY        # openssl rand -hex 32
 
 # Optional — only if login-session needs to rotate independently of tenant
 wrangler secret put LOGIN_SESSION_HASH_KEY # openssl rand -hex 32
 ```
+
+`COOKIE_ENCRYPTION_KEY` is no longer read by this package. Existing deployments can leave the secret in place or remove it.
+
+#### Optional: rate-limit client registration
+
+Dynamic client registration (`/register`, or `/at/<alias>/register` under site routing) is open to any caller. Each request is limited to 16 KB. To also limit how often one IP address can register, add a [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) binding named `REGISTER_RATE_LIMITER` to `wrangler.toml`:
+
+```toml
+[[ratelimits]]
+name = "REGISTER_RATE_LIMITER"
+namespace_id = "1001"                  # any integer unique within your account
+simple = { limit = 20, period = 60 }   # 20 registrations per minute per IP address
+```
+
+Without the binding, registration is not rate-limited by the Worker.
 
 `TENANT_HASH_KEY` keys the HMAC behind both the `umbraco.mcp.tenant` and
 `umbraco.mcp.login_session` span attributes — omitting it disables both, not

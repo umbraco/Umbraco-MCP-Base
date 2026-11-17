@@ -439,6 +439,9 @@ export async function consumeLogoutRedirect(
 // Client Auth Markers
 // ============================================================================
 
+/** Renewed on each sign-in, so the marker only expires for a client that has stopped signing in. */
+const CLIENT_AUTHED_TTL_SECONDS = 120 * 24 * 60 * 60;
+
 /**
  * Records that a client has completed at least one successful auth flow.
  * Used to decide whether to show the "Reauth" button on the consent screen.
@@ -447,7 +450,7 @@ export async function markClientAuthed(
   kv: KVNamespace,
   clientId: string
 ): Promise<void> {
-  await kv.put(`client_authed:${clientId}`, "1");
+  await kv.put(`client_authed:${clientId}`, "1", { expirationTtl: CLIENT_AUTHED_TTL_SECONDS });
 }
 
 /**
@@ -559,7 +562,7 @@ const KNOWN_ERROR_CODES = ["invalid_grant", ...CLIENT_ERROR_CODES, ...REQUEST_ER
  * `undefined` rather than guessing — an unrecognised body must not be read as
  * a definitive `invalid_grant`.
  */
-function parseOAuthErrorCode(body: string): string | undefined {
+export function parseOAuthErrorCode(body: string): string | undefined {
   try {
     const parsed = JSON.parse(body) as { error?: unknown };
     if (parsed && typeof parsed === "object" && typeof parsed.error === "string") {
@@ -871,11 +874,12 @@ async function performRefresh(
 
         if (!resp.ok) {
           const body = await resp.text().catch(() => UNREADABLE_BODY);
+          const errorCode = parseOAuthErrorCode(body);
+          // The error code only: the upstream body is never logged.
           logAuth(
             env,
-            `refreshUmbracoToken FAILED login=${await tokenLogRef(tokenKey)} status=${resp.status} body=${body.slice(0, 500)}`
+            `refreshUmbracoToken FAILED login=${await tokenLogRef(tokenKey)} status=${resp.status} error=${errorCode ?? "n/a"}`
           );
-          const errorCode = parseOAuthErrorCode(body);
           const reason = classifyRefreshFailure(errorCode);
           return {
             ok: false,

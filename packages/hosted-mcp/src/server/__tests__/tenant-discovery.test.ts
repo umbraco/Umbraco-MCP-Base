@@ -119,7 +119,8 @@ describe("createWorkerExport — tenant-OAuth dispatch", () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.resource).toBe("https://worker.example.com/at/abc");
+    // RFC 9728 §3.3: `resource` is the URL the metadata was requested for.
+    expect(body.resource).toBe("https://worker.example.com/at/abc/mcp");
     expect(body.authorization_servers).toEqual(["https://worker.example.com/at/abc"]);
     expect(oauth.fetch).not.toHaveBeenCalled();
   });
@@ -280,5 +281,101 @@ describe("createWorkerExport — tenant-OAuth dispatch", () => {
       ctx
     );
     expect(response.status).toBe(404);
+  });
+});
+
+describe("createWorkerExport — single-site OAuth endpoints", () => {
+  function singleSite(oauth: { fetch: jest.Mock }) {
+    return createWorkerExport(oauth as never, baseOptions);
+  }
+
+  function okProvider() {
+    return { fetch: jest.fn(async (_request: Request) => new Response("ok")) };
+  }
+
+  it("drops a same-origin resource from a /token request so the grant's own applies", async () => {
+    const oauth = okProvider();
+    const form = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: "abc",
+      client_id: "client-1",
+      resource: "https://worker.example.com/mcp",
+    });
+
+    await singleSite(oauth as never).fetch(
+      new Request("https://worker.example.com/token", {
+        method: "POST",
+        body: form.toString(),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      }),
+      makeEnv(),
+      ctx
+    );
+
+    const forwarded = oauth.fetch.mock.calls[0][0];
+    const sent = new URLSearchParams(await forwarded.text());
+    expect(new URL(forwarded.url).pathname).toBe("/token");
+    expect(sent.has("resource")).toBe(false);
+    expect(sent.get("code")).toBe("abc");
+  });
+
+  it("leaves a tenant /token request to the tenant router under site routing", async () => {
+    const oauth = okProvider();
+    const handler = createWorkerExport(oauth as never, {
+      ...baseOptions,
+      siteRouting: makeRouting(),
+    });
+    const form = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: "client-1",
+      resource: "https://worker.example.com/at/abc",
+    });
+
+    await handler.fetch(
+      new Request("https://worker.example.com/token", {
+        method: "POST",
+        body: form.toString(),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      }),
+      makeEnv(),
+      ctx
+    );
+
+    const sent = new URLSearchParams(await oauth.fetch.mock.calls[0][0].text());
+    expect(sent.get("resource")).toBe("https://worker.example.com/at/abc");
+  });
+
+  it("refuses an oversized registration at root /register", async () => {
+    const oauth = okProvider();
+
+    const response = await singleSite(oauth as never).fetch(
+      new Request("https://worker.example.com/register", {
+        method: "POST",
+        body: JSON.stringify({ client_name: "x".repeat(20_000) }),
+        headers: { "content-type": "application/json" },
+      }),
+      makeEnv(),
+      ctx
+    );
+
+    expect(response.status).toBe(413);
+    expect(oauth.fetch).not.toHaveBeenCalled();
+  });
+
+  it("passes an ordinary registration through to the provider", async () => {
+    const oauth = okProvider();
+
+    const response = await singleSite(oauth as never).fetch(
+      new Request("https://worker.example.com/register", {
+        method: "POST",
+        body: JSON.stringify({ client_name: "Test client", redirect_uris: ["http://127.0.0.1/cb"] }),
+        headers: { "content-type": "application/json" },
+      }),
+      makeEnv(),
+      ctx
+    );
+
+    expect(response.status).toBe(200);
+    expect(oauth.fetch).toHaveBeenCalledTimes(1);
   });
 });

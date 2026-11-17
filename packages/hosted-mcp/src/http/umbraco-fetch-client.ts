@@ -334,7 +334,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
         const env = config.refreshContext.env;
         logAuth(
           env,
-          `401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (key=${config.refreshContext.tokenKey})`
+          `401 on ${requestConfig.method} ${requestConfig.url} — attempting refresh (login=${await tokenLogRef(config.refreshContext.tokenKey)})`
         );
         const result = await refresh();
 
@@ -436,7 +436,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
       } else {
         logAuth(
           config.refreshContext.env,
-          `getSessionAuth token expired or near expiry — refreshing up front (key=${config.refreshContext.tokenKey})`
+          `getSessionAuth token expired or near expiry — refreshing up front (login=${await tokenLogRef(config.refreshContext.tokenKey)})`
         );
         const result = await refresh();
         if (!result.ok) {
@@ -450,7 +450,7 @@ export function createUmbracoFetchClient(config: UmbracoFetchClientConfig): Umbr
           }
           logAuth(
             config.refreshContext.env,
-            `getSessionAuth pre-emptive refresh failed (${result.reason}) — returning the still-valid current token (key=${config.refreshContext.tokenKey})`
+            `getSessionAuth pre-emptive refresh failed (${result.reason}) — returning the still-valid current token (login=${await tokenLogRef(config.refreshContext.tokenKey)})`
           );
         }
       }

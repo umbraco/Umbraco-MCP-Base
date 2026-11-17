@@ -32,6 +32,13 @@ jest.unstable_mockModule("../token-storage.js", () => ({
   consumeLogoutRedirect: mockConsumeLogoutRedirect,
   markClientAuthed: mockMarkClientAuthed,
   isClientAuthed: mockIsClientAuthed,
+  parseOAuthErrorCode: (body: string) => {
+    try {
+      return (JSON.parse(body) as { error?: string }).error;
+    } catch {
+      return undefined;
+    }
+  },
 }));
 
 const mockConsentResponse = jest.fn<(...args: unknown[]) => Response>();
@@ -45,8 +52,21 @@ const mockFetch = jest.fn<typeof fetch>();
 (globalThis as any).fetch = mockFetch;
 
 // Dynamic import after mocks are set up
-const { createAuthorizeHandler, createCallbackHandler, createLogoutCallbackHandler } =
-  await import("../umbraco-handler.js");
+const handlerModule = await import("../umbraco-handler.js");
+const { createCallbackHandler, createLogoutCallbackHandler, authRequestDigest } = handlerModule;
+
+// A consent state is tied to the authorization request its screen was
+// rendered for. Most tests submit a consent form without rendering it first,
+// so the stored consent state (see the `consumeOAuthState` mock) carries the
+// digest of whichever request the handler was last called with.
+let lastRequestDigest = "";
+const createAuthorizeHandler: typeof handlerModule.createAuthorizeHandler = (env, options) => {
+  const handler = handlerModule.createAuthorizeHandler(env, options);
+  return async (request, authRequest) => {
+    lastRequestDigest = await authRequestDigest(authRequest);
+    return handler(request, authRequest);
+  };
+};
 const { flowCookieName, FlowBindingError } = await import("../flow-cookies.js");
 
 // ============================================================================
@@ -140,7 +160,7 @@ beforeEach(() => {
   mockConsumeOAuthState.mockClear().mockImplementation((async (_kv: unknown, key: string) => {
     // Return valid consent state for CSRF validation on POST
     if (key.startsWith("consent:")) {
-      return { clientId: "mcp-client-1" };
+      return { clientId: "mcp-client-1", requestDigest: lastRequestDigest };
     }
     return null;
   }) as never);
@@ -198,7 +218,35 @@ describe("createAuthorizeHandler", () => {
       ];
       expect(kv).toBe(env.OAUTH_KV);
       expect(stateKey).toMatch(/^consent:/);
-      expect(data).toEqual({ clientId: authRequest.clientId });
+      expect(data).toEqual({
+        clientId: authRequest.clientId,
+        requestDigest: await authRequestDigest(authRequest),
+      });
+    });
+
+    it("sends only scopes this server supports to the consent screen", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", { method: "GET" });
+
+      await handler(
+        request,
+        createMockAuthRequest({ scope: ["openid", "Full access to your bank account"] })
+      );
+
+      const [consentOptions] = mockConsentResponse.mock.calls[0] as [{ scopes: string[] }];
+      expect(consentOptions.scopes).toEqual(["openid"]);
+    });
+
+    it("shows the supported scopes when the client requested none of them", async () => {
+      const env = createMockEnv();
+      const handler = createAuthorizeHandler(env);
+      const request = new Request("https://worker.example.com/authorize", { method: "GET" });
+
+      await handler(request, createMockAuthRequest({ scope: ["anything"] }));
+
+      const [consentOptions] = mockConsentResponse.mock.calls[0] as [{ scopes: string[] }];
+      expect(consentOptions.scopes).toEqual(["openid", "offline_access"]);
     });
 
     it("passes correct options to consentResponse", async () => {
@@ -379,13 +427,54 @@ describe("createAuthorizeHandler", () => {
         Record<string, unknown>,
       ];
       expect(kv).toBe(env.OAUTH_KV);
-      expect(data.authRequest).toEqual(authRequest);
+      // A request without `resource` is granted for this Worker's own origin.
+      expect(data.authRequest).toEqual({
+        ...authRequest,
+        resource: "https://worker.example.com",
+      });
       expect(data.codeVerifier).toBeTruthy();
       expect(typeof data.codeVerifier).toBe("string");
       expect(data.siteClientId).toBe("test-client-id");
       expect(data.siteClientSecret).toBe("test-client-secret");
       expect(data.siteBaseUrl).toBe("https://umbraco.example.com");
     });
+
+    it("keeps the resource the client sent when it is on this origin", async () => {
+      const handler = createAuthorizeHandler(createMockEnv());
+      const authRequest = createMockAuthRequest({ resource: "https://worker.example.com/mcp" });
+      const request = new Request("https://worker.example.com/authorize", {
+        method: "POST",
+        headers: { Cookie: consentCookie() },
+        body: createApproveFormBody(),
+      });
+
+      await handler(request, authRequest);
+
+      const [, , data] = mockStoreOAuthState.mock.calls[0] as [any, string, Record<string, unknown>];
+      expect((data.authRequest as OAuthAuthRequest).resource).toBe("https://worker.example.com/mcp");
+    });
+
+    it.each(["GET", "POST"])(
+      "refuses a %s for a resource on another origin",
+      async (method) => {
+        const handler = createAuthorizeHandler(createMockEnv());
+        const response = await handler(
+          new Request("https://worker.example.com/authorize", {
+            method,
+            ...(method === "POST"
+              ? { headers: { Cookie: consentCookie() }, body: createApproveFormBody() }
+              : {}),
+          }),
+          createMockAuthRequest({
+            resource: ["https://worker.example.com/mcp", "https://other.example.com/mcp"],
+          })
+        );
+
+        expect(response.status).toBe(400);
+        expect(((await response.json()) as { error: string }).error).toBe("invalid_target");
+        expect(mockStoreOAuthState).not.toHaveBeenCalled();
+      }
+    );
   });
 
   describe("POST — reauth", () => {
@@ -1384,7 +1473,7 @@ describe("createCallbackHandler", () => {
             "https://worker.example.com/callback?error=invalid_scope&error_description=Bad+scope"
           )
         )
-      ).rejects.toThrow("Umbraco authorization error: invalid_scope");
+      ).rejects.toThrow(/^Umbraco ended the sign-in with an error$/);
     });
 
     it("throws 'Missing code or state' when code is missing", async () => {
@@ -1455,11 +1544,11 @@ describe("createCallbackHandler", () => {
       ).rejects.toThrow("missing codeVerifier");
     });
 
-    it("throws 'Token exchange failed' with status on non-2xx", async () => {
+    it("reports a failed token exchange without Umbraco's response", async () => {
       const env = createMockEnv();
       mockConsumeOAuthState.mockResolvedValue(makeStoredState());
       mockFetch.mockResolvedValue(
-        new Response("invalid_grant: code expired", {
+        new Response("invalid_grant: code expired at https://internal.example.net", {
           status: 400,
           statusText: "Bad Request",
         })
@@ -1467,13 +1556,11 @@ describe("createCallbackHandler", () => {
 
       const handler = createCallbackHandler(env);
 
-      await expect(
-        handler(
-          callbackRequest(
-            "https://worker.example.com/callback?code=c&state=s"
-          )
-        )
-      ).rejects.toThrow("Token exchange failed: 400");
+      const error = await handler(
+        callbackRequest("https://worker.example.com/callback?code=c&state=s")
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(handlerModule.SignInCallbackError);
+      expect((error as Error).message).toBe("The sign-in could not be completed with Umbraco");
     });
   });
 
@@ -1864,6 +1951,23 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
       expect(body.error).toBe("invalid_client");
     });
 
+    it("rejects a resource for the right tenant on another origin", async () => {
+      const env = createMockEnv();
+      bindClientToSite(env, "mcp-client-1", "my-project");
+
+      const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
+      const response = await handler(
+        new Request("https://worker.example.com/authorize"),
+        createMockAuthRequest({
+          resource: "https://other.example.com/at/my-project/",
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as { error: string }).error).toBe("invalid_client");
+      expect(mockConsentResponse).not.toHaveBeenCalled();
+    });
+
     it("rejects 400 invalid_client when client has no tenant binding at all", async () => {
       const env = createMockEnv();
       // KV.get returns null for everything (no binding ever written)
@@ -1996,7 +2100,10 @@ describe("Authorize Handler — siteRouting (URL-based)", () => {
           // Honour consent state lookup the existing test infrastructure relies on
           return null;
         }) as never);
-      mockConsumeOAuthState.mockResolvedValue({ clientId: "mcp-client-1" });
+      mockConsumeOAuthState.mockImplementation((async () => ({
+        clientId: "mcp-client-1",
+        requestDigest: lastRequestDigest,
+      })) as never);
 
       const handler = createAuthorizeHandler(env, { siteRouting: siteRouting as any });
       const response = await handler(
@@ -2137,6 +2244,36 @@ describe("browser-bound authorization flow", () => {
       );
       expect(response.status).toBe(403);
       expect(mockConsumeOAuthState).not.toHaveBeenCalled();
+    });
+
+    it("rejects an approval for a different request than the consent screen showed", async () => {
+      const handler = handlerModule.createAuthorizeHandler(createMockEnv());
+      // The screen was rendered for one redirect URI...
+      const shown = await authRequestDigest(createMockAuthRequest());
+      mockConsumeOAuthState.mockResolvedValue({ clientId: "mcp-client-1", requestDigest: shown });
+
+      // ...and the approval arrives for another, from the same client.
+      const response = await handler(
+        consentPost(createApproveFormBody(), { Cookie: consentCookie() }),
+        createMockAuthRequest({ redirectUri: "https://client.example.com/other-callback" })
+      );
+
+      expect(response.status).toBe(403);
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
+      expect(response.headers.get("Location")).toBeNull();
+    });
+
+    it("rejects a consent state stored without a request digest", async () => {
+      const handler = handlerModule.createAuthorizeHandler(createMockEnv());
+      mockConsumeOAuthState.mockResolvedValue({ clientId: "mcp-client-1" });
+
+      const response = await handler(
+        consentPost(createApproveFormBody(), { Cookie: consentCookie() }),
+        createMockAuthRequest()
+      );
+
+      expect(response.status).toBe(403);
+      expect(mockStoreOAuthState).not.toHaveBeenCalled();
     });
 
     it("clears the consent cookie when rejecting", async () => {
