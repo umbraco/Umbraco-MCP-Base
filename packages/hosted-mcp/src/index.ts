@@ -165,6 +165,7 @@ export {
   type MultiSiteConfig,
   type SiteRoutingConfig,
   type SiteRoutingResolver,
+  type SiteResolveHint,
 } from "./types/multi-site.js";
 
 export {

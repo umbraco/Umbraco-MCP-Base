@@ -56,7 +56,7 @@ import {
 } from "@umbraco-cms/mcp-server-sdk";
 import { resolveRequestTelemetry, siteRef } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../types/env.js";
-import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
+import type { MultiSiteConfig, SiteConfig, SiteResolveHint } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { NO_TOOLS_SENTINEL } from "./chained-filter.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
@@ -71,7 +71,8 @@ import { deleteStoredUmbracoToken, type RefreshFailureReason } from "../auth/tok
  */
 export type SiteResolver = (
   siteId: string,
-  env: HostedMcpEnv
+  env: HostedMcpEnv,
+  hint?: SiteResolveHint
 ) => SiteConfig | null | Promise<SiteConfig | null>;
 
 /**
@@ -327,17 +328,19 @@ export function resolveToolFilter(
  * Resolves a site config from either a dynamic resolver or a static site list.
  * The dynamic resolver (`resolveSite`) takes precedence over the static list (`multiSite`).
  *
+ * @param hint - Passed through to the dynamic resolver (see `SiteResolveHint`)
  * @returns The resolved SiteConfig, or null/undefined if no site found
  */
 export async function resolveRequestSite(
   siteId: string | undefined,
   options: Pick<CreateServerOptions, "resolveSite" | "multiSite">,
-  env: HostedMcpEnv
+  env: HostedMcpEnv,
+  hint?: SiteResolveHint
 ): Promise<SiteConfig | null | undefined> {
   if (!siteId) return undefined;
 
   if (options.resolveSite) {
-    return options.resolveSite(siteId, env);
+    return hint ? options.resolveSite(siteId, env, hint) : options.resolveSite(siteId, env);
   }
 
   return options.multiSite?.sites.find((s) => s.id === siteId);
@@ -637,7 +640,8 @@ async function initPerRequestServer(
   const siteId = props.consentChoices?.siteId;
   let site: Awaited<ReturnType<typeof resolveRequestSite>>;
   try {
-    site = await resolveRequestSite(siteId, options, env);
+    // This session's sign-in was made for `siteId`, so the site existed then.
+    site = await resolveRequestSite(siteId, options, env, { signedIn: true });
   } catch (err) {
     console.error(`[mcp-hosted] createPerRequestServer id=${traceId} site unreachable:`, err);
     console.log(

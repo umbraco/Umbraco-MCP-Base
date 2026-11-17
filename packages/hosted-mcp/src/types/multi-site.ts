@@ -66,6 +66,19 @@ export interface MultiSiteConfig {
 }
 
 /**
+ * What the caller already knows about the site it asks a resolver for.
+ */
+export interface SiteResolveHint {
+  /**
+   * The caller holds a completed sign-in for this site, so the site existed
+   * when that sign-in was made. Set when a session's server starts; unset on
+   * the unauthenticated routing and authorize paths. A resolver may use it to
+   * report a site it can't reach as an error and not as "does not exist".
+   */
+  signedIn?: boolean;
+}
+
+/**
  * Resolves a SiteConfig from a site identifier extracted from the URL.
  *
  * Error semantics:
@@ -75,7 +88,8 @@ export interface MultiSiteConfig {
  */
 export type SiteRoutingResolver = (
   siteId: string,
-  env: HostedMcpEnv
+  env: HostedMcpEnv,
+  hint?: SiteResolveHint
 ) => SiteConfig | null | Promise<SiteConfig | null>;
 
 /**

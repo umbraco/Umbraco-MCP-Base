@@ -1204,6 +1204,20 @@ describe("createPerRequestServer — version check", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("tells the resolver the session is signed in for the site", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const resolveSite = jest.fn(async (..._args: unknown[]) => null);
+    const env = makeMockEnv();
+    await expect(
+      createPerRequestServer(
+        { ...baseOptions, resolveSite } as typeof baseOptions,
+        env,
+        { ...mockProps, consentChoices: { siteId: "some-site" } },
+      )
+    ).rejects.toThrow("no longer available");
+    expect(resolveSite).toHaveBeenCalledWith("some-site", env, { signedIn: true });
+  });
+
   it("fails retryably, not as a lost site, when resolveSite throws, and keeps the stored token", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     const { setTelemetryAdapter, clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
