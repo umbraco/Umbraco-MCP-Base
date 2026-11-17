@@ -88,7 +88,9 @@ const dirs = {
 function sh(cmd, cwd, { allowFail = false, quiet = false } = {}) {
   console.log(`\n$ (${cwd.replace(root, "<smoke>")}) ${cmd}`);
   try {
-    return execSync(cmd, { cwd, stdio: quiet ? "pipe" : "inherit", encoding: "utf8", env: process.env });
+    // With inherited stdio execSync returns null on success; callers that pass
+    // allowFail read null as "the command failed".
+    return execSync(cmd, { cwd, stdio: quiet ? "pipe" : "inherit", encoding: "utf8", env: process.env }) ?? "";
   } catch (err) {
     if (allowFail) return null;
     throw err;
@@ -383,8 +385,31 @@ function portOnlySnapshotFailures(log) {
   return minus.length > 0 && JSON.stringify(minus.sort()) === JSON.stringify(plus.sort());
 }
 
+/**
+ * A site left running by an earlier smoke run still answers on the side
+ * ports, but from another folder: the consumers' snapshots replace their own
+ * working directory in paths the site reports (index folders), so those
+ * snapshots then fail for a reason that has nothing to do with the release.
+ */
+function warnIfSiteFromAnotherRun() {
+  for (const [key, dir] of [["dev", dirs.dev], ["editor", dirs.editor]]) {
+    const port = SITES[key].https;
+    try {
+      const pid = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n")[0];
+      if (!pid) continue;
+      const cwd = execSync(`lsof -a -p ${pid} -d cwd -Fn`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).match(/^n(.*)$/m)?.[1] ?? "";
+      if (cwd && !cwd.startsWith(dir)) {
+        console.warn(`WARNING: the ${key} site on port ${port} runs from ${cwd}, not ${dir}.\n         Stop it (pid ${pid}) and start this run's site, or expect path-only snapshot failures.`);
+      }
+    } catch {
+      // Nothing listening, or lsof unavailable: the suites will report an unreachable site themselves.
+    }
+  }
+}
+
 function gate() {
   patchPorts();
+  warnIfSiteFromAnotherRun();
   const results = [];
   const run = (label, cmd, cwd, logName) => {
     const logFile = join(root, logName);

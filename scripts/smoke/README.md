@@ -47,6 +47,8 @@ The stage prints the commands that start each site and create its API user. edit
 
 ## 3. Gate
 
+Start this run's sites first. A site still running from an earlier smoke run answers on the same ports, but its index folders are in another directory, so the consumers' path-normalised snapshots fail. The gate warns when it sees one.
+
 ```bash
 npm run smoke -- gate --version $V
 ```
@@ -130,10 +132,14 @@ Then run the checks for each Worker:
 D=https://mcp-smoke-dev-cms.<subdomain>.workers.dev/at/mcp-test-v18.euwest01/mcp
 npm run smoke:hosted -- $D --min-tools 50 --save a --call get-server-information '{}'
 # open the printed authorize URL, approve consent, sign in to Umbraco
-npm run smoke:hosted -- $D --cross a --save b --call get-user-current '{}'
+npm run smoke:hosted -- $D --cross a --call get-user-current '{}'
 # second sign-in: tick "Read-only mode" on consent; expect fewer tools,
 # and sign-in a's MCP session must refuse b's token (session binding)
 ```
+
+The second run has no `--save`, so it ends with the code-replay check: the authorization code is presented a second time and must be refused. `@cloudflare/workers-oauth-provider` 0.8 and later also revokes that whole sign-in when this happens, which is why the check runs last and is skipped for a sign-in kept with `--save`.
+
+Leave the consent screen as it loads unless a step says otherwise. Ticking a mode narrows the tool list, and `--min-tools` then fails.
 
 **The sign-in is always done by a person.** It's a real Umbraco ID login.
 

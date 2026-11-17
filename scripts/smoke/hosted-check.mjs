@@ -179,8 +179,6 @@ async function tokenRequest(params) {
 const replayParams = { grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: reg.client_id, code_verifier: verifier };
 const tok = await tokenRequest(replayParams);
 check(tok.status === 200 && Boolean(tok.body.access_token), `token exchange → access_token${tok.body.refresh_token ? " + refresh_token" : ""} (${tok.status}${tok.status !== 200 ? " " + JSON.stringify(tok.body).slice(0, 150) : ""})`);
-const replay = await tokenRequest(replayParams);
-check(replay.status >= 400, `authorization code cannot be replayed (${replay.status})`);
 let accessToken = tok.body.access_token;
 
 if (tok.body.refresh_token) {
@@ -246,6 +244,19 @@ if (cross) {
     }
   }
 }
+// --- 6. authorization code replay ------------------------------------------
+// Last, and never for a saved sign-in: workers-oauth-provider 0.8+ revokes the
+// whole grant when its authorization code is presented a second time, so this
+// ends the sign-in (and --cross needs a saved one alive).
+if (save) {
+  console.log(`       (code replay not checked: --save keeps this sign-in alive)`);
+} else {
+  const replay = await tokenRequest(replayParams);
+  check(replay.status >= 400, `authorization code cannot be replayed (${replay.status})`);
+  const after = await mcp(accessToken, { jsonrpc: "2.0", id: 93, method: "tools/list", params: {} }, sid);
+  console.log(`       (this sign-in's token after the replay → ${after.status}${after.status === 401 ? ", grant revoked" : ""})`);
+}
+
 if (save) {
   const f = join(stateDir, `${save}.json`);
   writeFileSync(f, JSON.stringify({ mcpUrl, accessToken, sessionId: sid, savedAt: new Date().toISOString() }));
