@@ -33,8 +33,8 @@ import type { GetServerConfigResult, UmbracoServerConfig } from "../config/confi
 import type { CollectionConfiguration } from "../types/collection-configuration.js";
 import { toolToJsonSchema, toolToSummary, formatToolTable } from "./introspection.js";
 import { generateContextFile } from "./context-generator.js";
+import { findStrippedArgKeys } from "./stripped-arg-keys.js";
 import { shouldIncludeTool } from "../tool-filtering/tool-filter.js";
-import { findUnknownArgKeys } from "../helpers/unknown-arg-keys.js";
 import { UMBRACO_VERSION_CONTEXT_KEY } from "../umbraco-version/request-context.js";
 
 /**
@@ -280,10 +280,10 @@ export async function handleCliCommands(
           // The parse strips keys the schema doesn't declare, so a misspelled
           // argument would otherwise vanish without a word. Warn, don't fail:
           // the MCP path accepts the same call.
-          const unknownKeys = findUnknownArgKeys(tool.inputSchema, args);
-          if (unknownKeys.length > 0) {
+          const strippedKeys = findStrippedArgKeys(args, parsed.data);
+          if (strippedKeys.length > 0) {
             console.error(
-              `Warning: ignoring argument(s) not in the input schema for tool ${toolName}: ${unknownKeys.join(", ")}. ` +
+              `Warning: ignoring argument(s) not in the input schema for tool ${toolName}: ${strippedKeys.join(", ")}. ` +
               `Use --describe-tool ${toolName} to see the accepted arguments.`,
             );
           }
