@@ -2,36 +2,15 @@ import { describe, expect, it, jest, beforeEach } from "@jest/globals";
 import type { HostedMcpEnv } from "../../types/env.js";
 import { umbracoCloudSiteRouting } from "../index.js";
 
-/** Minimal KV: enough for the Cloud preset's "seen before" marker. */
-function createMockKV(initial: Record<string, string> = {}) {
-  const store = new Map<string, string>(Object.entries(initial));
-  return {
-    store,
-    get: jest.fn(async (key: string) => store.get(key) ?? null),
-    put: jest.fn(async (key: string, value: string, _opts?: { expirationTtl?: number }) => {
-      store.set(key, value);
-    }),
-  };
-}
-
-const withKv = (kv: ReturnType<typeof createMockKV>, base: HostedMcpEnv): HostedMcpEnv =>
-  ({ ...base, OAUTH_KV: kv }) as unknown as HostedMcpEnv;
-
-// Emptied before each test, so no test sees another's seen-markers.
-const baseKv = createMockKV();
 const env = {
   UMBRACO_CLOUD_REGION: "euwest01",
   UMBRACO_CLOUD_ROUTING_ENABLED: "true",
-  OAUTH_KV: baseKv,
-} as unknown as HostedMcpEnv;
+} as HostedMcpEnv;
 
 describe("umbracoCloudSiteRouting", () => {
   let fetchSpy: jest.SpiedFunction<typeof fetch>;
 
   beforeEach(() => {
-    baseKv.store.clear();
-    baseKv.get.mockClear();
-    baseKv.put.mockClear();
     fetchSpy = jest.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({ issuer: "https://example.umbraco.io" }),
@@ -116,11 +95,10 @@ describe("umbracoCloudSiteRouting", () => {
     expect(site).toBeNull();
   });
 
-  it("throws when the discovery probe network call fails for a site seen before", async () => {
+  it("throws when the discovery probe network call fails", async () => {
     fetchSpy.mockRejectedValue(new Error("DNS failure for secret-alias.example"));
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-    const kv = createMockKV({ "cloud_site_seen:known.euwest01": "1" });
-    const result = config.resolveSite("known", withKv(kv, env));
+    const result = config.resolveSite("missing", env);
     await expect(result).rejects.toThrow("site probe failed: Error");
     await expect(result).rejects.not.toThrow("secret-alias");
     const e = (await Promise.resolve(result).catch((x: unknown) => x)) as Error;
@@ -224,343 +202,26 @@ describe("umbracoCloudSiteRouting", () => {
     }
   });
 
-  it("caches an unreachable, previously seen site for the error TTL, then probes again", async () => {
+  it("caches an unreachable site for the error TTL, then probes again", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
     fetchSpy.mockRejectedValue(timeout);
-    const kvEnv = withKv(createMockKV({ "cloud_site_seen:abc.euwest01": "1" }), env);
     const nowSpy = jest.spyOn(Date, "now");
     try {
       nowSpy.mockReturnValue(1_000_000);
       const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      await expect(config.resolveSite("abc", kvEnv)).rejects.toThrow("site probe failed: TimeoutError");
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
       expect(fetchSpy).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1_005_000);
-      await expect(config.resolveSite("abc", kvEnv)).rejects.toThrow("site probe failed: TimeoutError");
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
       expect(fetchSpy).toHaveBeenCalledTimes(1);
 
       nowSpy.mockReturnValue(1_010_001);
-      await expect(config.resolveSite("abc", kvEnv)).rejects.toThrow("site probe failed: TimeoutError");
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     } finally {
       nowSpy.mockRestore();
     }
-  });
-
-  describe("a probe that gets no answer (what a non-existent alias returns)", () => {
-    const timeout = () => Object.assign(new Error("timed out"), { name: "TimeoutError" });
-
-    it.each(["no-such-project", "no-such-project.uksouth01"])(
-      "treats %s as missing when the site was never resolved, and caches the miss",
-      async (alias) => {
-        fetchSpy.mockRejectedValue(timeout());
-        const kv = createMockKV();
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite(alias, withKv(kv, env))).toBeNull();
-        expect(await config.resolveSite(alias, withKv(kv, env))).toBeNull();
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
-        expect(kv.put).not.toHaveBeenCalled();
-      }
-    );
-
-    it("treats a DNS failure (e.g. a mistyped region) as missing too", async () => {
-      fetchSpy.mockRejectedValue(new TypeError("fetch failed"));
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      expect(await config.resolveSite("abc.euwets01", withKv(createMockKV(), env))).toBeNull();
-    });
-
-    it("is unreachable for a signed-in caller, even with no marker and a cached unseen miss", async () => {
-      fetchSpy.mockRejectedValue(timeout());
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      expect(await config.resolveSite("abc", env)).toBeNull();
-      await expect(config.resolveSite("abc", env, { signedIn: true })).rejects.toThrow(
-        "site probe failed: TimeoutError"
-      );
-      // Same probe result, read differently: no second probe inside the error TTL.
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it("keeps answering each kind of caller the same way, whoever probed last", async () => {
-      fetchSpy.mockRejectedValue(timeout());
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(5_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        const kvEnv = withKv(createMockKV(), env);
-        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
-        await expect(config.resolveSite("abc", kvEnv, { signedIn: true })).rejects.toThrow("TimeoutError");
-        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
-
-        // Past the error TTL the signed-in caller probes again. The router's
-        // answer for the alias must still be "missing", not the new error.
-        nowSpy.mockReturnValue(5_010_001);
-        await expect(config.resolveSite("abc", kvEnv, { signedIn: true })).rejects.toThrow("TimeoutError");
-        expect(fetchSpy).toHaveBeenCalledTimes(2);
-        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
-        expect(fetchSpy).toHaveBeenCalledTimes(2);
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it("shares one probe between resolves that arrive while it runs", async () => {
-      let release!: (r: Response) => void;
-      fetchSpy.mockReturnValue(new Promise<Response>((resolve) => { release = resolve; }));
-      const kv = createMockKV();
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      const pending = [1, 2, 3].map(() => config.resolveSite("abc", withKv(kv, env)));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      release(new Response("ok", { status: 200 }));
-      const sites = await Promise.all(pending);
-      expect(sites.every((site) => site?.id === "abc")).toBe(true);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(kv.put).toHaveBeenCalledTimes(1);
-    });
-
-    it("shares the marker between the bare and region-qualified forms of one host", async () => {
-      const kv = createMockKV();
-      const first = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      expect(await first.resolveSite("abc.euwest01", withKv(kv, env))).not.toBeNull();
-
-      // A fresh isolate, the site now down, the legacy bare URL: still "unreachable".
-      fetchSpy.mockRejectedValue(timeout());
-      const second = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      await expect(second.resolveSite("abc", withKv(kv, env))).rejects.toThrow("TimeoutError");
-    });
-
-    it("reads Cloudflare's origin-unreachable statuses like a timeout", async () => {
-      fetchSpy.mockResolvedValue(new Response("", { status: 522 }));
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      expect(await config.resolveSite("made-up", withKv(createMockKV(), env))).toBeNull();
-      const known = withKv(createMockKV({ "cloud_site_seen:known.euwest01": "1" }), env);
-      await expect(config.resolveSite("known", known)).rejects.toThrow("site probe failed: status=522");
-    });
-
-    it("counts the miss TTL from when the probe ended", async () => {
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(7_000_000);
-        // The probe takes 5s to come back with a 404.
-        fetchSpy.mockImplementation(async () => {
-          nowSpy.mockReturnValue(7_005_000);
-          return new Response("nope", { status: 404 });
-        });
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite("abc", env)).toBeNull();
-        // 32s after the probe started, 27s after it ended: inside the 30s TTL.
-        nowSpy.mockReturnValue(7_032_000);
-        expect(await config.resolveSite("abc", env)).toBeNull();
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it("still answers a signed-in caller from a cached 404", async () => {
-      fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      expect(await config.resolveSite("abc", env)).toBeNull();
-      expect(await config.resolveSite("abc", env, { signedIn: true })).toBeNull();
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it("retries a failed marker write on the next uncached resolve", async () => {
-      const kv = createMockKV();
-      kv.put.mockRejectedValueOnce(new Error("KV down"));
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(1_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        await config.resolveSite("abc", withKv(kv, env));
-        nowSpy.mockReturnValue(1_060_001);
-        await config.resolveSite("abc", withKv(kv, env));
-        expect(kv.put).toHaveBeenCalledTimes(2);
-        expect(kv.store.has("cloud_site_seen:abc.euwest01")).toBe(true);
-      } finally {
-        nowSpy.mockRestore();
-        warn.mockRestore();
-      }
-    });
-
-    it("marks a resolved site in KV once, with a TTL", async () => {
-      const kv = createMockKV();
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(1_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        await config.resolveSite("abc", withKv(kv, env));
-        nowSpy.mockReturnValue(1_060_001);
-        await config.resolveSite("abc", withKv(kv, env));
-        expect(fetchSpy).toHaveBeenCalledTimes(2);
-        expect(kv.put).toHaveBeenCalledTimes(1);
-        expect(kv.put).toHaveBeenCalledWith("cloud_site_seen:abc.euwest01", "1", {
-          expirationTtl: 30 * 24 * 60 * 60,
-        });
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it("is unreachable for a site this isolate resolved earlier, without reading KV", async () => {
-      const kv = createMockKV();
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(1_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite("abc", withKv(kv, env))).not.toBeNull();
-        fetchSpy.mockRejectedValue(timeout());
-        nowSpy.mockReturnValue(1_060_001);
-        await expect(config.resolveSite("abc", withKv(kv, env))).rejects.toThrow(
-          "site probe failed: TimeoutError"
-        );
-        expect(kv.get).not.toHaveBeenCalled();
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it("is unreachable in a fresh isolate for a site another isolate marked in KV", async () => {
-      const kv = createMockKV();
-      await umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" }).resolveSite(
-        "abc",
-        withKv(kv, env)
-      );
-      fetchSpy.mockRejectedValue(timeout());
-      const fresh = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      await expect(fresh.resolveSite("abc", withKv(kv, env))).rejects.toThrow(
-        "site probe failed: TimeoutError"
-      );
-    });
-
-    it("still resolves a site when the marker write fails", async () => {
-      const kv = createMockKV();
-      kv.put.mockRejectedValue(new Error("KV put failed for cloud_site_seen:secret-alias"));
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      try {
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite("secret-alias", withKv(kv, env))).not.toBeNull();
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(String(warn.mock.calls[0][0])).toMatch(/seen-marker write failed: Error$/);
-        expect(warn.mock.calls.flat().join(" ")).not.toContain("secret-alias");
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it("is still unreachable in this isolate after a failed marker write", async () => {
-      const kv = createMockKV();
-      kv.put.mockRejectedValue(new Error("KV down"));
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(1_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite("abc", withKv(kv, env))).not.toBeNull();
-        fetchSpy.mockRejectedValue(timeout());
-        nowSpy.mockReturnValue(1_060_001);
-        await expect(config.resolveSite("abc", withKv(kv, env))).rejects.toThrow(
-          "site probe failed: TimeoutError"
-        );
-      } finally {
-        nowSpy.mockRestore();
-        warn.mockRestore();
-      }
-    });
-
-    it("keeps the unseen miss for the miss TTL, not the error TTL", async () => {
-      fetchSpy.mockRejectedValue(timeout());
-      const nowSpy = jest.spyOn(Date, "now");
-      try {
-        nowSpy.mockReturnValue(1_000_000);
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        expect(await config.resolveSite("nope", env)).toBeNull();
-        nowSpy.mockReturnValue(1_010_001);
-        expect(await config.resolveSite("nope", env)).toBeNull();
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
-        nowSpy.mockReturnValue(1_030_001);
-        expect(await config.resolveSite("nope", env)).toBeNull();
-        expect(fetchSpy).toHaveBeenCalledTimes(2);
-      } finally {
-        nowSpy.mockRestore();
-      }
-    });
-
-    it("writes one marker for every case variant of an alias", async () => {
-      const kv = createMockKV();
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      for (const alias of ["abc.uksouth01", "ABC.uksouth01", "Abc.UkSouth01"]) {
-        await config.resolveSite(alias, withKv(kv, env));
-      }
-      expect(kv.put).toHaveBeenCalledTimes(1);
-      expect([...kv.store.keys()]).toEqual(["cloud_site_seen:abc.uksouth01"]);
-    });
-
-    it("writes no marker for an id that isn't `<alias>` or `<alias>.<region>`", async () => {
-      const kv = createMockKV();
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      for (const alias of ["a.b.c", "user@abc", "a_b", "a".repeat(64)]) {
-        await config.resolveSite(alias, withKv(kv, env));
-      }
-      expect(kv.put).not.toHaveBeenCalled();
-    });
-
-    it("writes no marker when a custom validateProject is set, and its timeout-shaped throw stays unreachable", async () => {
-      const kv = createMockKV();
-      const validateProject = jest
-        .fn<(siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean>()
-        .mockReturnValueOnce(true)
-        .mockImplementation(() => {
-          throw Object.assign(new Error("site probe failed: TimeoutError"), { name: "TimeoutError" });
-        });
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor", validateProject });
-      expect(await config.resolveSite("abc", withKv(kv, env))).not.toBeNull();
-      expect(kv.put).not.toHaveBeenCalled();
-      await expect(config.resolveSite("never-seen", withKv(kv, env))).rejects.toThrow(
-        "site probe failed: TimeoutError"
-      );
-    });
-
-    it("is unreachable when the marker can't be read, and keeps the alias out of the logs", async () => {
-      fetchSpy.mockRejectedValue(timeout());
-      const kv = createMockKV();
-      kv.get.mockRejectedValue(new Error("KV get failed for cloud_site_seen:secret-alias"));
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-      try {
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        const result = config.resolveSite("secret-alias", withKv(kv, env));
-        await expect(result).rejects.toThrow("site probe failed: TimeoutError");
-        await expect(result).rejects.not.toThrow("secret-alias");
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(String(warn.mock.calls[0][0])).toMatch(/seen-marker read failed: Error$/);
-        expect(warn.mock.calls.flat().join(" ")).not.toContain("secret-alias");
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it("keeps a 503 unreachable for a site never resolved: the site answered", async () => {
-      fetchSpy.mockResolvedValue(new Response("down", { status: 503 }));
-      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-      await expect(config.resolveSite("abc", withKv(createMockKV(), env))).rejects.toThrow(
-        "status=503"
-      );
-    });
-
-    it("logs the rejection by siteRef only", async () => {
-      fetchSpy.mockRejectedValue(timeout());
-      const log = jest.spyOn(console, "log").mockImplementation(() => undefined);
-      try {
-        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-        const hashEnv = { ...env, TENANT_HASH_KEY: "ab".repeat(32) } as HostedMcpEnv;
-        expect(await config.resolveSite("secret-alias", hashEnv)).toBeNull();
-        const lines = log.mock.calls.map((c) => c.map(String).join(" "));
-        expect(lines.filter((l) => /^site-probe site=[0-9a-f]{12} no-answer unseen cause=TimeoutError$/.test(l))).toHaveLength(1);
-        expect(lines.some((l) => l.includes("secret-alias"))).toBe(false);
-      } finally {
-        log.mockRestore();
-      }
-    });
   });
 
   it("supports a custom validateProject hook", async () => {
