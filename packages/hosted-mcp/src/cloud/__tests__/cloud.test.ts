@@ -119,7 +119,7 @@ describe("umbracoCloudSiteRouting", () => {
   it("throws when the discovery probe network call fails for a site seen before", async () => {
     fetchSpy.mockRejectedValue(new Error("DNS failure for secret-alias.example"));
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-    const kv = createMockKV({ "cloud_site_seen:known": "1" });
+    const kv = createMockKV({ "cloud_site_seen:known.euwest01": "1" });
     const result = config.resolveSite("known", withKv(kv, env));
     await expect(result).rejects.toThrow("site probe failed: Error");
     await expect(result).rejects.not.toThrow("secret-alias");
@@ -227,7 +227,7 @@ describe("umbracoCloudSiteRouting", () => {
   it("caches an unreachable, previously seen site for the error TTL, then probes again", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
     fetchSpy.mockRejectedValue(timeout);
-    const kvEnv = withKv(createMockKV({ "cloud_site_seen:abc": "1" }), env);
+    const kvEnv = withKv(createMockKV({ "cloud_site_seen:abc.euwest01": "1" }), env);
     const nowSpy = jest.spyOn(Date, "now");
     try {
       nowSpy.mockReturnValue(1_000_000);
@@ -276,7 +276,84 @@ describe("umbracoCloudSiteRouting", () => {
       await expect(config.resolveSite("abc", env, { signedIn: true })).rejects.toThrow(
         "site probe failed: TimeoutError"
       );
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      // Same probe result, read differently: no second probe inside the error TTL.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps answering each kind of caller the same way, whoever probed last", async () => {
+      fetchSpy.mockRejectedValue(timeout());
+      const nowSpy = jest.spyOn(Date, "now");
+      try {
+        nowSpy.mockReturnValue(5_000_000);
+        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+        const kvEnv = withKv(createMockKV(), env);
+        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
+        await expect(config.resolveSite("abc", kvEnv, { signedIn: true })).rejects.toThrow("TimeoutError");
+        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
+
+        // Past the error TTL the signed-in caller probes again. The router's
+        // answer for the alias must still be "missing", not the new error.
+        nowSpy.mockReturnValue(5_010_001);
+        await expect(config.resolveSite("abc", kvEnv, { signedIn: true })).rejects.toThrow("TimeoutError");
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        expect(await config.resolveSite("abc", kvEnv)).toBeNull();
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it("shares one probe between resolves that arrive while it runs", async () => {
+      let release!: (r: Response) => void;
+      fetchSpy.mockReturnValue(new Promise<Response>((resolve) => { release = resolve; }));
+      const kv = createMockKV();
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const pending = [1, 2, 3].map(() => config.resolveSite("abc", withKv(kv, env)));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      release(new Response("ok", { status: 200 }));
+      const sites = await Promise.all(pending);
+      expect(sites.every((site) => site?.id === "abc")).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(kv.put).toHaveBeenCalledTimes(1);
+    });
+
+    it("shares the marker between the bare and region-qualified forms of one host", async () => {
+      const kv = createMockKV();
+      const first = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      expect(await first.resolveSite("abc.euwest01", withKv(kv, env))).not.toBeNull();
+
+      // A fresh isolate, the site now down, the legacy bare URL: still "unreachable".
+      fetchSpy.mockRejectedValue(timeout());
+      const second = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      await expect(second.resolveSite("abc", withKv(kv, env))).rejects.toThrow("TimeoutError");
+    });
+
+    it("reads Cloudflare's origin-unreachable statuses like a timeout", async () => {
+      fetchSpy.mockResolvedValue(new Response("", { status: 522 }));
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      expect(await config.resolveSite("made-up", withKv(createMockKV(), env))).toBeNull();
+      const known = withKv(createMockKV({ "cloud_site_seen:known.euwest01": "1" }), env);
+      await expect(config.resolveSite("known", known)).rejects.toThrow("site probe failed: status=522");
+    });
+
+    it("counts the miss TTL from when the probe ended", async () => {
+      const nowSpy = jest.spyOn(Date, "now");
+      try {
+        nowSpy.mockReturnValue(7_000_000);
+        // The probe takes 5s to come back with a 404.
+        fetchSpy.mockImplementation(async () => {
+          nowSpy.mockReturnValue(7_005_000);
+          return new Response("nope", { status: 404 });
+        });
+        const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+        expect(await config.resolveSite("abc", env)).toBeNull();
+        // 32s after the probe started, 27s after it ended: inside the 30s TTL.
+        nowSpy.mockReturnValue(7_032_000);
+        expect(await config.resolveSite("abc", env)).toBeNull();
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it("still answers a signed-in caller from a cached 404", async () => {
@@ -299,7 +376,7 @@ describe("umbracoCloudSiteRouting", () => {
         nowSpy.mockReturnValue(1_060_001);
         await config.resolveSite("abc", withKv(kv, env));
         expect(kv.put).toHaveBeenCalledTimes(2);
-        expect(kv.store.has("cloud_site_seen:abc")).toBe(true);
+        expect(kv.store.has("cloud_site_seen:abc.euwest01")).toBe(true);
       } finally {
         nowSpy.mockRestore();
         warn.mockRestore();
@@ -317,7 +394,7 @@ describe("umbracoCloudSiteRouting", () => {
         await config.resolveSite("abc", withKv(kv, env));
         expect(fetchSpy).toHaveBeenCalledTimes(2);
         expect(kv.put).toHaveBeenCalledTimes(1);
-        expect(kv.put).toHaveBeenCalledWith("cloud_site_seen:abc", "1", {
+        expect(kv.put).toHaveBeenCalledWith("cloud_site_seen:abc.euwest01", "1", {
           expirationTtl: 30 * 24 * 60 * 60,
         });
       } finally {
