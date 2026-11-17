@@ -171,15 +171,15 @@ export function umbracoCloudSiteRouting(
     try {
       exists = await validator(siteId, candidateUrl, env);
     } catch (err) {
-      // Counted from when the probe failed, not from `now`: a probe that ran
-      // into its own 5s timeout would otherwise use up half the TTL.
+      // Every TTL counts from when the probe ended, not from `now`: a probe
+      // that ran into its own 5s timeout would otherwise use up half of it.
       setCache(siteId, { kind: "error", error: err, expiresAt: Date.now() + ttl.error });
       throw err;
     }
     const baseUrl = exists ? candidateUrl : undefined;
 
     if (!baseUrl) {
-      setCache(siteId, { kind: "miss", expiresAt: now + ttl.miss });
+      setCache(siteId, { kind: "miss", expiresAt: Date.now() + ttl.miss });
       return null;
     }
 
@@ -204,7 +204,7 @@ export function umbracoCloudSiteRouting(
       ...(oauthClientSecret ? { oauthClientSecret } : {}),
     };
 
-    setCache(siteId, { kind: "ok", site, expiresAt: now + ttl.ok });
+    setCache(siteId, { kind: "ok", site, expiresAt: Date.now() + ttl.ok });
     return site;
   };
 

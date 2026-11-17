@@ -202,6 +202,26 @@ describe("umbracoCloudSiteRouting", () => {
     }
   });
 
+  it("counts the miss TTL from when the probe ended", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(7_000_000);
+      // The probe takes 5s to come back with a 404.
+      fetchSpy.mockImplementation(async () => {
+        nowSpy.mockReturnValue(7_005_000);
+        return new Response("nope", { status: 404 });
+      });
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      expect(await config.resolveSite("abc", env)).toBeNull();
+      // 32s after the probe started, 27s after it ended: inside the 30s TTL.
+      nowSpy.mockReturnValue(7_032_000);
+      expect(await config.resolveSite("abc", env)).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("caches an unreachable site for the error TTL, then probes again", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
     fetchSpy.mockRejectedValue(timeout);

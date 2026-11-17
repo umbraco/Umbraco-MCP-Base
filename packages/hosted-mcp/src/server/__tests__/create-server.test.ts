@@ -1292,6 +1292,32 @@ describe("createPerRequestServer — version check", () => {
     }
   });
 
+  it("keeps the logged error readable when the alias is an ordinary word", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(
+        createPerRequestServer(
+          {
+            ...baseOptions,
+            resolveSite: async () => {
+              throw new Error("site probe failed: status=503 for site.euwest01.umbraco.io");
+            },
+          } as typeof baseOptions,
+          makeMockEnv(),
+          { ...mockProps, consentChoices: { siteId: "site" } },
+        )
+      ).rejects.toThrow("isn't responding right now");
+      const line = errorSpy.mock.calls.map((args) => String(args[0])).find((l) => l.includes("site resolution threw"))!;
+      expect(line).toContain("Error: site probe failed: status=503 for ");
+      expect(line).not.toContain("site.euwest01");
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     await createPerRequestServer(

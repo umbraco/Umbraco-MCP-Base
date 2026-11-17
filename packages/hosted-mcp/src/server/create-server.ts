@@ -57,7 +57,7 @@ import {
 import { resolveRequestTelemetry, siteRef } from "../telemetry/request-telemetry.js";
 import { aliasOnly } from "../cloud/site-id.js";
 import type { HostedMcpEnv } from "../types/env.js";
-import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
+import type { MultiSiteConfig, SiteConfig, SiteRoutingResolver } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { NO_TOOLS_SENTINEL } from "./chained-filter.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
@@ -70,10 +70,7 @@ import { deleteStoredUmbracoToken, type RefreshFailureReason } from "../auth/tok
  * Used for URL-based site routing where sites are not statically enumerated.
  * Return null to reject unknown sites.
  */
-export type SiteResolver = (
-  siteId: string,
-  env: HostedMcpEnv
-) => SiteConfig | null | Promise<SiteConfig | null>;
+export type SiteResolver = SiteRoutingResolver;
 
 /**
  * Resolves to a server-level `instructions` string that the MCP server sends
@@ -523,12 +520,17 @@ function recordFailedStart(
  * validator can let a fetch error through whose message names the host, and
  * the plaintext alias must not reach the logs. The stack is left out for the
  * same reason.
+ *
+ * Only replaced where it stands as a hostname label or path segment (a whole
+ * token followed by `.` or `/`), so an alias that is also an ordinary word
+ * ("site", "error") doesn't blank out the message it appears in.
  */
 function describeSiteError(err: unknown, siteId: string | undefined, safeSiteId: string): string {
   let text = err instanceof Error ? `${err.name}: ${err.message}` : "non-Error value thrown";
-  for (const secret of siteId ? [siteId, aliasOnly(siteId)] : []) {
-    const pattern = new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    text = text.replace(pattern, safeSiteId);
+  const secrets = siteId ? [siteId, aliasOnly(siteId)].filter((secret) => secret.length > 0) : [];
+  for (const secret of secrets) {
+    const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp(`(?<![a-z0-9-])${escaped}(?=[./])`, "gi"), safeSiteId);
   }
   return text;
 }
