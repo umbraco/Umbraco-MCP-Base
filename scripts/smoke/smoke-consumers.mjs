@@ -514,10 +514,10 @@ function hosted() {
 
 function hostedTeardown() {
   for (const w of WORKERS) {
-    wrangler(`delete --name ${w.name} --force`, w.dir(), { allowFail: true });
+    wrangler(`delete ${w.name} --force`, w.dir(), { allowFail: true });
     const list = JSON.parse(wrangler(`kv namespace list`, w.dir(), { quiet: true }));
     const ns = list.find((n) => n.title === `${w.name}-oauth`);
-    if (ns) wrangler(`kv namespace delete --namespace-id ${ns.id} --force`, w.dir(), { allowFail: true });
+    if (ns) wrangler(`kv namespace delete --namespace-id ${ns.id} --skip-confirmation`, w.dir(), { allowFail: true });
   }
 }
 
