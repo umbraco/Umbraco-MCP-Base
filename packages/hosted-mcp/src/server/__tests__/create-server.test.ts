@@ -1209,13 +1209,12 @@ describe("createPerRequestServer — version check", () => {
     const { setTelemetryAdapter, clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
     const { SERVER_INIT_SPAN, HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
     const kvDelete = jest.fn(async () => undefined);
+    // Default mock env: KV holds a stored token, so "not deleted" is meaningful.
+    const defaultEnv = makeMockEnv();
     const env = makeMockEnv({
-      OAUTH_KV: {
-        get: async () => null,
-        put: async () => undefined,
-        delete: kvDelete,
-      },
+      OAUTH_KV: { ...(defaultEnv.OAUTH_KV as object), delete: kvDelete },
     } as unknown as Partial<HostedMcpEnv>);
+    const resolverError = new Error("site probe failed: status=503");
     const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
     setTelemetryAdapter({
       startSpan: (name, attributes, fn) => {
@@ -1232,7 +1231,7 @@ describe("createPerRequestServer — version check", () => {
         {
           ...baseOptions,
           resolveSite: async () => {
-            throw new Error("site probe failed: status=503");
+            throw resolverError;
           },
         } as typeof baseOptions,
         env,
@@ -1240,6 +1239,11 @@ describe("createPerRequestServer — version check", () => {
       );
       await expect(start).rejects.toThrow("isn't responding right now");
       await expect(start).rejects.not.toThrow("Connect again and choose a site.");
+      const thrown = await start.catch((x) => x);
+      const { UmbracoSignInUnavailableError } = await import("../create-server.js");
+      expect(thrown).not.toBeInstanceOf(UmbracoSignInUnavailableError);
+      expect(thrown.cause).toBe(resolverError);
+      expect(mockFetch).not.toHaveBeenCalled();
 
       const done = logSpy.mock.calls
         .map((args) => String(args[0]))

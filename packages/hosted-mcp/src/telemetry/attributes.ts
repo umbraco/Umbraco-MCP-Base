@@ -31,11 +31,15 @@ export const AUTH_REFRESH_SPAN = "mcp.auth.refresh";
 
 export const HostedTelemetryAttributes = {
   /**
-   * `full` when tools were registered. When no server was built
-   * (`createPerRequestServer` throws `UmbracoSignInUnavailableError`):
+   * `full` when tools were registered. When no server was built:
    * `auth-expired` when the user's session ended (KV token gone, or Umbraco
-   * rejected the refresh token), `auth-misconfigured` when Umbraco rejected the
-   * OAuth client or the refresh request — a fault an administrator must fix.
+   * rejected the refresh token) and `auth-misconfigured` when Umbraco rejected
+   * the OAuth client or the refresh request — a fault an administrator must fix
+   * (both: `createPerRequestServer` throws `UmbracoSignInUnavailableError`);
+   * `site-unreachable` when resolving the session's site threw (for the Cloud
+   * preset: the probe got 5xx, 429, a timeout or another fetch error), where
+   * `createPerRequestServer` throws a plain `Error`. That one is transient and
+   * the sign-in is kept.
    */
   INIT_MODE: "umbraco.mcp.init.mode",
   /**
@@ -48,7 +52,8 @@ export const HostedTelemetryAttributes = {
    * of the `SignInUnavailableReason` values (`no-token-in-kv`,
    * `refresh-rejected-expired`, `refresh-rejected-misconfigured`,
    * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`,
-   * or `site-unreachable` when the site probe failed.
+   * or `site-unreachable` when resolving the site threw (for the Cloud preset,
+   * typically the site probe failing).
    */
   INIT_CAUSE: "umbraco.mcp.init.cause",
   /** Whether a site was resolved (multi-site / cloud routing) — the alias itself is never recorded. */

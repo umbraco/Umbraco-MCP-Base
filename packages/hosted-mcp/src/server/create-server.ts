@@ -518,6 +518,8 @@ function signInUnavailable(
  *   tied back to the session that hit it
  * @returns Configured McpServer ready to handle the request
  * @throws {UmbracoSignInUnavailableError} When this session has no usable Umbraco sign-in
+ * @throws {Error} When resolving the session's site threw (recorded as
+ *   `mode=site-unreachable`). Retryable; the stored sign-in is left untouched.
  */
 export async function createPerRequestServer(
   options: CreateServerOptions,

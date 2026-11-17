@@ -218,16 +218,25 @@ export function umbracoCloudSiteRouting(
  * any other thrown fetch error is "unreachable": it throws, with the status or
  * the error's `name` in the message (never the error's message, which can carry
  * the hostname). Any other 4xx (404, 401, 403, ...) is "missing" (`false`).
- * (HEAD looks tempting but Cloud's edge returns 404 for HEAD on this path.)
+ * An alias that can't form a valid hostname is "missing" too (`false`, logged
+ * as `invalid-host`) and is never fetched. (HEAD looks tempting but Cloud's edge returns 404 for HEAD on this path.)
  */
 async function defaultValidateProject(
   siteId: string,
   baseUrl: string,
   env: HostedMcpEnv
 ): Promise<boolean> {
+  let probeUrl: string;
+  try {
+    probeUrl = new URL("/umbraco", baseUrl).toString();
+  } catch {
+    // An alias that can never be a hostname: the site can't exist.
+    console.log(`site-probe site=${await siteRef(siteId, env)} invalid-host`);
+    return false;
+  }
   let status: number;
   try {
-    const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
+    const response = await fetch(probeUrl, {
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(5_000),
