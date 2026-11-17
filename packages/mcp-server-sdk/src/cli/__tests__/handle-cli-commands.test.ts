@@ -513,6 +513,43 @@ describe("handleCliCommands", () => {
         expect(receivedArgs).toEqual({ id: "abc", take: 10 });
       });
 
+      it("warns about keys the schema doesn't declare and still calls the handler", async () => {
+        let receivedArgs: any;
+        const tool = makeTool({
+          name: "create-form",
+          inputSchema: {
+            name: z.string(),
+            fields: z.array(z.object({ label: z.string(), required: z.boolean().optional() })),
+          },
+          handler: (async (args: any) => {
+            receivedArgs = args;
+            return { content: [] };
+          }) as any,
+        });
+
+        await expect(
+          run(tool, '{"name":"Contact","colour":"red","fields":[{"label":"Email","mandatory":true}]}'),
+        ).rejects.toThrow("process.exit(0)");
+
+        expect(consoleErrorOutput).toContain(
+          "Warning: ignoring argument(s) not in the input schema for tool create-form: colour, fields[0].mandatory.",
+        );
+        expect(consoleErrorOutput).toContain("--describe-tool create-form");
+        expect(receivedArgs).toEqual({ name: "Contact", fields: [{ label: "Email" }] });
+      });
+
+      it("prints no warning when every key is declared", async () => {
+        const tool = makeTool({
+          name: "get-item",
+          inputSchema: { id: z.string() },
+          handler: (async () => ({ content: [] })) as any,
+        });
+
+        await expect(run(tool, '{"id":"abc"}')).rejects.toThrow("process.exit(0)");
+
+        expect(consoleErrorOutput).not.toContain("Warning:");
+      });
+
       it("accepts a ZodType input schema", async () => {
         let receivedArgs: any;
         const tool = makeTool({
