@@ -26,6 +26,7 @@
  * default region its bare-alias URLs target.
  */
 
+import { siteRef } from "../telemetry/request-telemetry.js";
 import type { HostedMcpEnv } from "../types/env.js";
 import type {
   SiteConfig,
@@ -59,11 +60,14 @@ export interface UmbracoCloudRoutingOptions {
   ) => string | null | undefined | Promise<string | null | undefined>;
   /**
    * Override the default validation. The default GETs
-   * `https://{alias}.{region}.umbraco.io/umbraco` and treats a response
-   * under 400 as "exists" (see `defaultValidateProject`).
+   * `https://{alias}.{region}.umbraco.io/umbraco` and sorts the result into
+   * three outcomes (see `defaultValidateProject`): under 400 is "exists", a 5xx,
+   * 429, timeout or other fetch error is "unreachable" (throws), and any other
+   * 4xx is "missing".
    *
    * Return `true` to allow the project, `false` to reject (the router
-   * surfaces this as 404). Throw to surface 502.
+   * surfaces this as 404). Throw to surface 502; the throw is cached for the
+   * `error` TTL.
    */
   validateProject?: (
     siteId: string,
@@ -102,7 +106,8 @@ const MAX_CACHE_ENTRIES = 1_000;
 
 type CacheEntry =
   | { kind: "ok"; site: SiteConfig; expiresAt: number }
-  | { kind: "miss"; expiresAt: number };
+  | { kind: "miss"; expiresAt: number }
+  | { kind: "error"; error: unknown; expiresAt: number };
 
 /**
  * Build a `SiteRoutingConfig` preconfigured for Umbraco Cloud.
@@ -143,6 +148,9 @@ export function umbracoCloudSiteRouting(
     const now = Date.now();
     const cached = cache.get(siteId);
     if (cached && cached.expiresAt > now) {
+      // The validator's own error, so a caller sees the same thing whether or
+      // not the cache answered.
+      if (cached.kind === "error") throw cached.error;
       return cached.kind === "ok" ? cached.site : null;
     }
 
@@ -159,12 +167,19 @@ export function umbracoCloudSiteRouting(
       ? `https://${siteId}.umbraco.io`
       : `https://${siteId}.${resolvedRegion}.umbraco.io`;
 
-    const baseUrl = (await validator(siteId, candidateUrl, env))
-      ? candidateUrl
-      : undefined;
+    let exists: boolean;
+    try {
+      exists = await validator(siteId, candidateUrl, env);
+    } catch (err) {
+      // Every TTL counts from when the probe ended, not from `now`: a probe
+      // that ran into its own 5s timeout would otherwise use up half of it.
+      setCache(siteId, { kind: "error", error: err, expiresAt: Date.now() + ttl.error });
+      throw err;
+    }
+    const baseUrl = exists ? candidateUrl : undefined;
 
     if (!baseUrl) {
-      setCache(siteId, { kind: "miss", expiresAt: now + ttl.miss });
+      setCache(siteId, { kind: "miss", expiresAt: Date.now() + ttl.miss });
       return null;
     }
 
@@ -189,7 +204,7 @@ export function umbracoCloudSiteRouting(
       ...(oauthClientSecret ? { oauthClientSecret } : {}),
     };
 
-    setCache(siteId, { kind: "ok", site, expiresAt: now + ttl.ok });
+    setCache(siteId, { kind: "ok", site, expiresAt: Date.now() + ttl.ok });
     return site;
   };
 
@@ -201,24 +216,45 @@ export function umbracoCloudSiteRouting(
 }
 
 /**
- * Default validator — GETs `/umbraco` on the Cloud host. Any 2xx/3xx is
- * "exists"; 4xx/5xx and network failures are "missing". (HEAD looks tempting
- * but Cloud's edge returns 404 for HEAD on this path.)
+ * Default validator — GETs `/umbraco` on the Cloud host and sorts the result
+ * into three outcomes. Under 400 is "exists" (`true`). A 5xx, 429, timeout or
+ * any other thrown fetch error is "unreachable": it throws, with the status or
+ * the error's `name` in the message (never the error's message, which can carry
+ * the hostname). Any other 4xx (404, 401, 403, ...) is "missing" (`false`).
+ * An alias that can't form a valid hostname is "missing" too (`false`, logged
+ * as `invalid-host`) and is never fetched. (HEAD looks tempting but Cloud's edge returns 404 for HEAD on this path.)
  */
 async function defaultValidateProject(
-  _siteId: string,
+  siteId: string,
   baseUrl: string,
-  _env: HostedMcpEnv
+  env: HostedMcpEnv
 ): Promise<boolean> {
+  let probeUrl: string;
   try {
-    const response = await fetch(new URL("/umbraco", baseUrl).toString(), {
+    probeUrl = new URL("/umbraco", baseUrl).toString();
+  } catch {
+    // An alias that can never be a hostname: the site can't exist.
+    console.log(`site-probe site=${await siteRef(siteId, env)} invalid-host`);
+    return false;
+  }
+  let status: number;
+  try {
+    const response = await fetch(probeUrl, {
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(5_000),
     });
     response.body?.cancel();
-    return response.status < 400;
-  } catch {
-    return false;
+    status = response.status;
+  } catch (err) {
+    throw new Error(
+      `site probe failed: ${err instanceof Error ? err.name : "UnknownError"}`
+    );
   }
+  if (status < 400) return true;
+  if (status >= 500 || status === 429) {
+    throw new Error(`site probe failed: status=${status}`);
+  }
+  console.log(`site-probe site=${await siteRef(siteId, env)} status=${status}`);
+  return false;
 }

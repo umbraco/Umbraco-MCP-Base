@@ -25,6 +25,7 @@ import type { ChainedServerConsentConfig } from "./worker-entry.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
 import { loadWorkerConfig } from "../config/worker-config.js";
 import { resolveChainedFilter } from "./chained-filter.js";
+import { fetchCurrentUser } from "./current-user.js";
 import {
   getServerSessionContext,
   getServerAdminConfig,
@@ -77,20 +78,15 @@ export async function registerChainedTools(
   const { server, env, props, chainedServer, fetchUser = true } = options;
 
   try {
-    // Fetch the real authenticated user for chained tool filtering
+    // Fetch the real authenticated user for chained tool filtering. When the
+    // user can't be fetched, tools see a user with no sections or groups (as
+    // on the main server), so tools that gate on permissions stay hidden.
     let currentUser: Record<string, unknown> = {};
     if (fetchUser) {
       const fetchClient = await createFetchClientFromKV(env, props.umbracoTokenKey);
-      if (fetchClient) {
-        try {
-          currentUser = ((await fetchClient({
-            url: "/umbraco/management/api/v1/user/current",
-            method: "GET",
-          })) ?? {}) as Record<string, unknown>;
-        } catch {
-          // If user fetch fails, tools will be unfiltered
-        }
-      }
+      currentUser = fetchClient
+        ? await fetchCurrentUser(fetchClient)
+        : { allowedSections: [], userGroupIds: [] };
     }
 
     // The admin boundary for this session: env config plus the resolved

@@ -98,4 +98,9 @@ The package implements the MCP Authorization spec's Third-Party Authorization Fl
 - Single-use state parameters with 10-minute TTL
 - Umbraco tokens stored in KV, never exposed to MCP clients
 - Consent choices stored in KV state, narrowing-only model (user can't expand admin config). The config loader reads an empty mode or slice list as "no restriction", so a consent selection that shares nothing with the admin's list must resolve to no tools (`mergeConsentChoices`, `registerChainedTools`), never to an empty list
+- Sign-in callback failures return fixed messages only: nothing from Umbraco's response, or from an unexpected error, reaches the browser (`SignInCallbackError`). Auth logs carry a login reference and an OAuth error code, never a token key or an upstream body
+- A consent state is tied to the authorization request its screen was rendered for (`authRequestDigest`), and the screen lists only scopes this server supports
+- Every grant has a `resource`, so every access token has an audience. Outside site routing a grant without one defaults to the Worker's origin, and `/token` drops a same-origin `resource` so the grant's own applies (`auth/own-resource.ts`)
+- Under site routing the tenant client binding is checked against the client id the OAuth provider itself will use: the query string at `/authorize`, HTTP Basic or the form body at `/token`.
+- Client registration requests are capped at 16 KB and can be rate-limited per IP address with an optional `REGISTER_RATE_LIMITER` binding
 - MCP sessions are bound to the sign-in that started them: `createSiteRoutingApiHandler` hands the client `<session id>.<tag>` (an HMAC keyed by the sign-in's token key) and refuses any request whose tag doesn't match the caller's own sign-in

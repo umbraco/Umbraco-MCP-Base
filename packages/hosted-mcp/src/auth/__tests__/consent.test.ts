@@ -450,6 +450,11 @@ describe("consentResponse", () => {
     );
   });
 
+  it("is never cached", () => {
+    const response = consentResponse(createOptions());
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   it("sets X-Frame-Options: DENY", () => {
     const response = consentResponse(createOptions());
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");

@@ -55,50 +55,22 @@ import {
   type RequestTransport,
 } from "@umbraco-cms/mcp-server-sdk";
 import { resolveRequestTelemetry, siteRef } from "../telemetry/request-telemetry.js";
+import { aliasOnly } from "../cloud/site-id.js";
 import type { HostedMcpEnv } from "../types/env.js";
-import type { MultiSiteConfig, SiteConfig } from "../types/multi-site.js";
+import type { MultiSiteConfig, SiteConfig, SiteRoutingResolver } from "../types/multi-site.js";
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { NO_TOOLS_SENTINEL } from "./chained-filter.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
+import { fetchCurrentUser } from "./current-user.js";
 import type { AuthProps, ConsentChoices } from "../types/auth.js";
 import { deleteStoredUmbracoToken, type RefreshFailureReason } from "../auth/token-storage.js";
-
-/**
- * Fetches the current user from Umbraco's Management API.
- * Used to provide per-user tool filtering based on allowed sections.
- */
-async function fetchCurrentUser(
-  fetchClient: Awaited<ReturnType<typeof createFetchClientFromKV>> & {}
-): Promise<Record<string, unknown>> {
-  let user: Record<string, unknown> = {};
-  try {
-    const fetched = await fetchClient({
-      url: "/umbraco/management/api/v1/user/current",
-      method: "GET",
-    });
-    user = (fetched ?? {}) as Record<string, unknown>;
-  } catch {
-    // If we can't fetch the user, fall through to defaults. Tools that
-    // gate on permissions will see empty arrays and refuse to expose
-    // themselves; a definitively dead token fails server creation below.
-  }
-  // Guarantee the array-shaped fields downstream policy predicates iterate
-  // over. Without this, every consumer has to guard with `?? []` against the
-  // empty-object fallback above (and against partial responses).
-  if (!Array.isArray(user.allowedSections)) user.allowedSections = [];
-  if (!Array.isArray(user.userGroupIds)) user.userGroupIds = [];
-  return user;
-}
 
 /**
  * Callback to dynamically resolve a SiteConfig from a site identifier.
  * Used for URL-based site routing where sites are not statically enumerated.
  * Return null to reject unknown sites.
  */
-export type SiteResolver = (
-  siteId: string,
-  env: HostedMcpEnv
-) => SiteConfig | null | Promise<SiteConfig | null>;
+export type SiteResolver = SiteRoutingResolver;
 
 /**
  * Resolves to a server-level `instructions` string that the MCP server sends
@@ -514,18 +486,53 @@ function signInUnavailable(
   message: string
 ): UmbracoSignInUnavailableError {
   const mode = SIGN_IN_UNAVAILABLE_MODES[cause];
-  console.log(
-    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=${mode} cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
-  );
+  recordFailedStart(initSpan, traceId, initStartedAt, mode, cause);
   if (mode === "auth-misconfigured") {
     console.warn(
       `[mcp-hosted] createPerRequestServer id=${traceId} sign-in unavailable cause=${cause}: ${message}`
     );
   }
+  return new UmbracoSignInUnavailableError(cause, message);
+}
+
+/**
+ * Writes the `:done` log line and the init span's mode, cause and tool count
+ * for a start that built no server.
+ */
+function recordFailedStart(
+  initSpan: TelemetrySpan,
+  traceId: string,
+  initStartedAt: number,
+  mode: Exclude<ServerInitMode, "full">,
+  cause: string
+): void {
+  console.log(
+    `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=${mode} cause=${cause} tools=0 elapsedMs=${Date.now() - initStartedAt}`
+  );
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, mode);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
   initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, cause);
-  return new UmbracoSignInUnavailableError(cause, message);
+}
+
+/**
+ * An error from site resolution as one log-safe line: its name and message,
+ * with the site's id and alias replaced by `safeSiteId`. A custom resolver or
+ * validator can let a fetch error through whose message names the host, and
+ * the plaintext alias must not reach the logs. The stack is left out for the
+ * same reason.
+ *
+ * Only replaced where it stands as a hostname label or path segment (a whole
+ * token followed by `.` or `/`), so an alias that is also an ordinary word
+ * ("site", "error") doesn't blank out the message it appears in.
+ */
+function describeSiteError(err: unknown, siteId: string | undefined, safeSiteId: string): string {
+  let text = err instanceof Error ? `${err.name}: ${err.message}` : "non-Error value thrown";
+  const secrets = siteId ? [siteId, aliasOnly(siteId)].filter((secret) => secret.length > 0) : [];
+  for (const secret of secrets) {
+    const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text.replace(new RegExp(`(?<![a-z0-9-])${escaped}(?=[./])`, "gi"), safeSiteId);
+  }
+  return text;
 }
 
 /**
@@ -544,6 +551,8 @@ function signInUnavailable(
  *   tied back to the session that hit it
  * @returns Configured McpServer ready to handle the request
  * @throws {UmbracoSignInUnavailableError} When this session has no usable Umbraco sign-in
+ * @throws {Error} When resolving the session's site threw (recorded as
+ *   `mode=site-unreachable`). Retryable; the stored sign-in is left untouched.
  */
 export async function createPerRequestServer(
   options: CreateServerOptions,
@@ -659,7 +668,16 @@ async function initPerRequestServer(
   // Uses the site's base URL for API calls instead of the global env URL.
   let effectiveEnv = env;
   const siteId = props.consentChoices?.siteId;
-  const site = await resolveRequestSite(siteId, options, env);
+  let site: Awaited<ReturnType<typeof resolveRequestSite>>;
+  try {
+    site = await resolveRequestSite(siteId, options, env);
+  } catch (err) {
+    console.error(
+      `[mcp-hosted] createPerRequestServer id=${traceId} site resolution threw: ${describeSiteError(err, siteId, safeSiteId)}`
+    );
+    recordFailedStart(initSpan, traceId, initStartedAt, "site-unreachable", "site-unreachable");
+    throw new Error("The Umbraco site isn't responding right now. Try again shortly.", { cause: err });
+  }
 
   // A grant for a site that no longer resolves must not carry on against the
   // env-level Umbraco with none of that site's restrictions.

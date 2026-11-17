@@ -20,6 +20,7 @@ import {
 } from "../site-routing/internal/alias-context.js";
 import { putClientBinding, hasClientBinding } from "./binding-store.js";
 import { validateResourceMatch } from "./resource-match.js";
+import { guardRegistration } from "./registration-guard.js";
 
 export type TenantOAuthKind =
   | "authorize"
@@ -32,6 +33,8 @@ export type TenantOAuthKind =
 export interface TenantOAuthMatch {
   kind: TenantOAuthKind;
   alias: string;
+  /** PRM only: the metadata was requested for the MCP endpoint (`/at/<alias>/mcp`). */
+  mcpEndpoint?: boolean;
 }
 
 // Both well-known documents accept an optional `/mcp` suffix after the alias.
@@ -44,7 +47,7 @@ export interface TenantOAuthMatch {
 const RFC_8414_AS_METADATA_REGEX =
   /^\/\.well-known\/oauth-authorization-server\/at\/([^/]+)(?:\/mcp)?\/?$/;
 const PRM_REGEX =
-  /^\/\.well-known\/oauth-protected-resource\/at\/([^/]+)(?:\/mcp)?\/?$/;
+  /^\/\.well-known\/oauth-protected-resource\/at\/([^/]+)(\/mcp)?\/?$/;
 const TENANT_OP_REGEX =
   /^\/at\/([^/]+)\/(authorize|token|register|callback|\.well-known\/oauth-authorization-server)\/?$/;
 
@@ -58,7 +61,7 @@ export function matchTenantOAuthPath(pathname: string): TenantOAuthMatch | null 
   if (m1) return { kind: "as-metadata", alias: m1[1] };
 
   const m2 = pathname.match(PRM_REGEX);
-  if (m2) return { kind: "prm", alias: m2[1] };
+  if (m2) return { kind: "prm", alias: m2[1], mcpEndpoint: Boolean(m2[2]) };
 
   const m3 = pathname.match(TENANT_OP_REGEX);
   if (m3) {
@@ -153,7 +156,12 @@ export async function dispatchTenantOAuth(
     if (match.kind === "as-metadata") {
       return renderTenantAuthorizationServerMetadata(url.origin, match.alias, request);
     }
-    return renderProtectedResourceMetadataForTenant(url.origin, match.alias, request);
+    return renderProtectedResourceMetadataForTenant(
+      url.origin,
+      match.alias,
+      match.mcpEndpoint === true,
+      request
+    );
   }
 
   // For authorize/token/register/callback — alias must resolve to a real site.
@@ -198,6 +206,9 @@ async function dispatchRegister(
   ctx: ExecutionContext,
   oauthProvider: OAuthProviderLike
 ): Promise<Response> {
+  const refused = await guardRegistration(request, env);
+  if (refused) return refused;
+
   const url = new URL(request.url);
   const stripped = new URL("/register", url.origin);
   stripped.search = url.search;
@@ -236,7 +247,7 @@ async function dispatchAuthorizeOrToken(
   const url = new URL(request.url);
   const canonical = canonicalResourceForAlias(url.origin, alias);
 
-  const parsed = await readClientIdAndResource(request);
+  const parsed = await readClientIdAndResource(kind, request);
   if (!parsed.clientId) {
     return jsonError(400, "invalid_request", "client_id is required");
   }
@@ -290,7 +301,18 @@ interface ParsedRequest {
   formClone: URLSearchParams | null;
 }
 
-async function readClientIdAndResource(request: Request): Promise<ParsedRequest> {
+/**
+ * Reads the client id and `resource` from where OAuthProvider itself reads
+ * them, so the binding check always covers the client the request is
+ * processed for:
+ * - `/authorize`: the query string (also for the consent form's POST).
+ * - `/token`: HTTP Basic credentials when present, otherwise the form body.
+ *   A query-string `client_id` is ignored.
+ */
+async function readClientIdAndResource(
+  kind: "authorize" | "token",
+  request: Request
+): Promise<ParsedRequest> {
   const url = new URL(request.url);
   const queryClientId = url.searchParams.get("client_id");
   const queryResource = url.searchParams.getAll("resource");
@@ -298,31 +320,52 @@ async function readClientIdAndResource(request: Request): Promise<ParsedRequest>
 
   if (request.method === "GET" || request.method === "HEAD") {
     return {
-      clientId: queryClientId,
+      clientId: kind === "authorize" ? queryClientId : null,
       sentResource: queryResourceValue,
       formClone: null,
     };
   }
 
   const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.includes("application/x-www-form-urlencoded")) {
-    const text = await request.clone().text();
-    const form = new URLSearchParams(text);
-    const formResource = form.getAll("resource");
-    const formResourceValue =
-      formResource.length > 0 ? collapseResource(formResource) : queryResourceValue;
+  const isForm = contentType.includes("application/x-www-form-urlencoded");
+
+  if (kind === "authorize") {
     return {
-      clientId: form.get("client_id") ?? queryClientId,
-      sentResource: formResourceValue,
-      formClone: form,
+      clientId: queryClientId,
+      sentResource: queryResourceValue,
+      formClone: isForm ? new URLSearchParams(await request.clone().text()) : null,
     };
   }
 
+  if (!isForm) {
+    return { clientId: null, sentResource: queryResourceValue, formClone: null };
+  }
+
+  const form = new URLSearchParams(await request.clone().text());
+  const formResource = form.getAll("resource");
   return {
-    clientId: queryClientId,
-    sentResource: queryResourceValue,
-    formClone: null,
+    clientId: basicAuthClientId(request) ?? form.get("client_id"),
+    sentResource: formResource.length > 0 ? collapseResource(formResource) : queryResourceValue,
+    formClone: form,
   };
+}
+
+/**
+ * The client id from an `Authorization: Basic` header, decoded the way
+ * OAuthProvider decodes it (RFC 6749 §2.3.1: form-urlencoded, then
+ * base64). Returns null when there is no usable Basic header.
+ */
+function basicAuthClientId(request: Request): string | null {
+  const header = request.headers.get("Authorization");
+  if (!header || !header.startsWith("Basic ")) return null;
+  try {
+    const credentials = atob(header.substring(6));
+    const separator = credentials.indexOf(":");
+    if (separator === -1) return null;
+    return decodeURIComponent(credentials.substring(0, separator).replace(/\+/g, " ")) || null;
+  } catch {
+    return null;
+  }
 }
 
 function collapseResource(values: string[]): string | string[] | undefined {
@@ -338,9 +381,16 @@ function jsonError(status: number, error: string, error_description: string): Re
   });
 }
 
+/**
+ * RFC 9728 §3.3: `resource` must equal the resource URL the metadata URL was
+ * derived from, so a request for `.../at/<alias>/mcp` gets the MCP endpoint
+ * back. Both forms are accepted as `resource` at /authorize and /token and
+ * issue the same tenant audience (see `validateResourceMatch`).
+ */
 function renderProtectedResourceMetadataForTenant(
   origin: string,
   alias: string,
+  mcpEndpoint: boolean,
   request: Request
 ): Response {
   if (request.method === "OPTIONS") {
@@ -349,7 +399,7 @@ function renderProtectedResourceMetadataForTenant(
   const tenantBase = `${origin}/at/${alias}`;
   return new Response(
     JSON.stringify({
-      resource: tenantBase,
+      resource: mcpEndpoint ? `${tenantBase}/mcp` : tenantBase,
       authorization_servers: [tenantBase],
       bearer_methods_supported: ["header"],
     }),

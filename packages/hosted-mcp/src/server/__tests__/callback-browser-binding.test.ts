@@ -3,7 +3,7 @@
  * when the browser doesn't carry the state cookie set at consent approval.
  */
 
-import { describe, expect, it } from "@jest/globals";
+import { describe, expect, it, jest } from "@jest/globals";
 import { createDefaultHandler, type HostedMcpServerOptions } from "../worker-entry.js";
 import { flowCookieName } from "../../auth/flow-cookies.js";
 import type { HostedMcpEnv } from "../../types/env.js";
@@ -47,6 +47,7 @@ describe("/callback browser binding", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
     expect(response.headers.get("Location")).toBeNull();
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     const body = await response.text();
     expect(body).toContain("Start the connection again from your AI client");
   });
@@ -145,5 +146,89 @@ describe("/callback when Umbraco returns an error", () => {
     expect(response.headers.get("Location")).toBeNull();
     expect(response.status).toBe(400);
     expect(data.has(`oauth_state:${STATE}`)).toBe(true);
+  });
+
+  it("does not repeat Umbraco's error or its description in the error page", async () => {
+    const { env } = envWithState();
+    const response = await handler.fetch(errorCallback("some_upstream_code", false), env);
+
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ error: "Umbraco ended the sign-in with an error" });
+    expect(body).not.toContain("attacker");
+    expect(body).not.toContain("some_upstream_code");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+});
+
+describe("/callback when the sign-in can't be completed", () => {
+  const cookie = { headers: { Cookie: `${flowCookieName("state", STATE)}=${STATE}` } };
+  const INTERNAL_HOST = "umbraco.internal.example.net";
+
+  function envWithState(): HostedMcpEnv {
+    const data = new Map<string, string>([
+      [
+        `oauth_state:${STATE}`,
+        JSON.stringify({
+          authRequest: { clientId: "client-1", redirectUri: "https://client.example.com/cb", state: "s" },
+          codeVerifier: "v",
+          callbackPath: "/callback",
+        }),
+      ],
+    ]);
+    return {
+      ...makeEnv(),
+      OAUTH_KV: {
+        get: async (key: string) => data.get(key) ?? null,
+        put: async () => undefined,
+        delete: async (key: string) => {
+          data.delete(key);
+        },
+      } as unknown as KVNamespace,
+    };
+  }
+
+  async function callbackWith(fetchImpl: typeof fetch): Promise<Response> {
+    const realFetch = globalThis.fetch;
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    globalThis.fetch = fetchImpl;
+    try {
+      return await handler.fetch(
+        new Request(`https://worker.example.com/callback?code=c&state=${STATE}`, cookie),
+        envWithState()
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+      error.mockRestore();
+    }
+  }
+
+  it("does not return Umbraco's token-endpoint response", async () => {
+    const response = await callbackWith(
+      (async () =>
+        new Response(
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: `The code was issued by https://${INTERNAL_HOST}`,
+          }),
+          { status: 400 }
+        )) as typeof fetch
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ error: "The sign-in could not be completed with Umbraco" });
+    expect(body).not.toContain(INTERNAL_HOST);
+    expect(response.headers.get("Location")).toBeNull();
+  });
+
+  it("reports an unexpected failure generically", async () => {
+    const response = await callbackWith((async () => {
+      throw new TypeError(`fetch failed: getaddrinfo ENOTFOUND ${INTERNAL_HOST}`);
+    }) as typeof fetch);
+
+    expect(response.status).toBe(400);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ error: "Authentication failed" });
+    expect(body).not.toContain(INTERNAL_HOST);
   });
 });

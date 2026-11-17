@@ -14,6 +14,7 @@
  * - Helper to wire everything together
  */
 
+import { sanitizeForLog } from "../util/log-sanitize.js";
 import type {
   ToolCollectionExport,
   ToolModeDefinition,
@@ -26,6 +27,8 @@ import type {
 import type { AuthProps, UmbracoAuthHandlerOptions } from "../types/auth.js";
 import { createSiteRouter } from "../site-routing/site-router.js";
 import { rewriteResourceMetadataForTenant } from "./resource-metadata.js";
+import { dropOwnOriginResource } from "../auth/own-resource.js";
+import { guardRegistration } from "../tenant-oauth/registration-guard.js";
 import {
   matchTenantOAuthPath,
   dispatchTenantOAuth,
@@ -34,6 +37,7 @@ import {
   createAuthorizeHandler,
   createCallbackHandler,
   UpstreamAuthorizationError,
+  SignInCallbackError,
   createLogoutCallbackHandler,
 } from "../auth/umbraco-handler.js";
 import type { ConsentModeOption, ConsentToolConfig } from "../auth/consent.js";
@@ -459,6 +463,13 @@ export function createWorkerExport(
         }
       }
 
+      // Root dynamic client registration (single-site and static multi-site;
+      // under site routing it is refused above and handled per tenant).
+      if (pathname === "/register") {
+        const refused = await guardRegistration(request, env);
+        if (refused) return refused;
+      }
+
       if (pathname === "/") {
         const hasAuth = request.headers.has("Authorization");
         const acceptsSSE = request.headers.get("Accept")?.includes("text/event-stream");
@@ -481,6 +492,12 @@ export function createWorkerExport(
         // MCP request: rewrite / → /mcp so OAuthProvider routes it correctly
         url.pathname = "/mcp";
         return fetchOAuth(new Request(url.toString(), request), env, ctx);
+      }
+
+      // Outside site routing a token takes its audience from the grant
+      // (see own-resource.ts).
+      if (!useSiteRouter && pathname === "/token") {
+        request = await dropOwnOriginResource(request);
       }
 
       // All other paths pass through to OAuthProvider unchanged
@@ -718,7 +735,7 @@ async function handleAuthorize(
   try {
     const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
     const authorizeHandler = createAuthorizeHandler(env, authOptions);
-    return authorizeHandler(request, authRequest);
+    return await authorizeHandler(request, authRequest);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Authorization request failed";
@@ -781,12 +798,25 @@ async function handleCallback(
       headers.set("Content-Type", "text/html; charset=utf-8");
       headers.set("X-Frame-Options", "DENY");
       headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+      headers.set("Cache-Control", "no-store");
       return new Response(SIGN_IN_LINK_REJECTED_HTML, { status: 403, headers });
     }
 
-    const message =
-      error instanceof Error ? error.message : "Authentication failed";
+    // Only fixed messages reach the browser. Anything unexpected (a failed
+    // upstream call, a storage error) can name internal hosts, so it is
+    // logged and reported generically.
+    let message = "Authentication failed";
+    if (error instanceof SignInCallbackError) {
+      message = error.message;
+    } else {
+      console.error(
+        `[mcp-hosted] sign-in callback failed: ${sanitizeForLog(
+          error instanceof Error ? error.message : "unknown error"
+        )}`
+      );
+    }
     headers.set("Content-Type", "application/json");
+    headers.set("Cache-Control", "no-store");
     return new Response(JSON.stringify({ error: message }), {
       status: 400,
       headers,

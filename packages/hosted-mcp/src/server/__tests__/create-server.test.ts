@@ -1204,6 +1204,120 @@ describe("createPerRequestServer — version check", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("fails retryably, not as a lost site, when resolveSite throws, and keeps the stored token", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const { setTelemetryAdapter, clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
+    const { SERVER_INIT_SPAN, HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
+    const kvDelete = jest.fn(async () => undefined);
+    // Default mock env: KV holds a stored token, so "not deleted" is meaningful.
+    const defaultEnv = makeMockEnv();
+    const env = makeMockEnv({
+      OAUTH_KV: { ...(defaultEnv.OAUTH_KV as object), delete: kvDelete },
+    } as unknown as Partial<HostedMcpEnv>);
+    const resolverError = new Error("site probe failed: status=503");
+    const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
+    setTelemetryAdapter({
+      startSpan: (name, attributes, fn) => {
+        const span = { name, attributes: { ...attributes } as Record<string, unknown> };
+        recorded.push(span);
+        return fn({ setAttribute: (key, value) => { span.attributes[key] = value; } });
+      },
+    });
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const start = createPerRequestServer(
+        {
+          ...baseOptions,
+          resolveSite: async () => {
+            throw resolverError;
+          },
+        } as typeof baseOptions,
+        env,
+        { ...mockProps, consentChoices: { siteId: "some-site" } },
+      );
+      await expect(start).rejects.toThrow("isn't responding right now");
+      await expect(start).rejects.not.toThrow("Connect again and choose a site.");
+      const thrown = await start.catch((x) => x);
+      const { UmbracoSignInUnavailableError } = await import("../create-server.js");
+      expect(thrown).not.toBeInstanceOf(UmbracoSignInUnavailableError);
+      expect(thrown.cause).toBe(resolverError);
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      const done = logSpy.mock.calls
+        .map((args) => String(args[0]))
+        .find((l) => l.includes("createPerRequestServer:done"));
+      expect(done).toContain("mode=site-unreachable cause=site-unreachable tools=0");
+    } finally {
+      clearTelemetryAdapter();
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+
+    const init = recorded.find((s) => s.name === SERVER_INIT_SPAN)!;
+    expect(init.attributes[HostedTelemetryAttributes.INIT_MODE]).toBe("site-unreachable");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_CAUSE]).toBe("site-unreachable");
+    expect(init.attributes[HostedTelemetryAttributes.INIT_TOOL_COUNT]).toBe(0);
+    expect(kvDelete).not.toHaveBeenCalled();
+  });
+
+  it("logs a resolveSite throw without the site's alias or a stack", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(
+        createPerRequestServer(
+          {
+            ...baseOptions,
+            resolveSite: async () => {
+              throw new TypeError("getaddrinfo ENOTFOUND Secret-Alias.euwest01.umbraco.io");
+            },
+          } as typeof baseOptions,
+          makeMockEnv(),
+          { ...mockProps, consentChoices: { siteId: "secret-alias.euwest01" } },
+        )
+      ).rejects.toThrow("isn't responding right now");
+
+      const lines = [...logSpy.mock.calls, ...errorSpy.mock.calls].map((args) => args.map(String).join(" "));
+      const thrown = lines.filter((l) => l.includes("site resolution threw"));
+      expect(thrown).toHaveLength(1);
+      expect(thrown[0]).toContain("TypeError: getaddrinfo ENOTFOUND");
+      expect(errorSpy.mock.calls.every((args) => args.length === 1)).toBe(true);
+      expect(lines.some((l) => /secret-alias/i.test(l))).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps the logged error readable when the alias is an ordinary word", async () => {
+    const { createPerRequestServer } = await import("../create-server.js");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(
+        createPerRequestServer(
+          {
+            ...baseOptions,
+            resolveSite: async () => {
+              throw new Error("site probe failed: status=503 for site.euwest01.umbraco.io");
+            },
+          } as typeof baseOptions,
+          makeMockEnv(),
+          { ...mockProps, consentChoices: { siteId: "site" } },
+        )
+      ).rejects.toThrow("isn't responding right now");
+      const line = errorSpy.mock.calls.map((args) => String(args[0])).find((l) => l.includes("site resolution threw"))!;
+      expect(line).toContain("Error: site probe failed: status=503 for ");
+      expect(line).not.toContain("site.euwest01");
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
   it("never leaks the per-request check onto the SDK's shared version-check singleton", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     await createPerRequestServer(

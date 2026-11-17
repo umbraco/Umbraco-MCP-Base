@@ -326,6 +326,34 @@ describe("registerChainedTools", () => {
     );
   });
 
+  it("gives chained tools a user with no sections or groups when the user can't be fetched", async () => {
+    mockFetchClient.mockRejectedValue(new Error("Umbraco unavailable"));
+    const seenUsers: unknown[] = [];
+    // A collection that only exposes its tool to users with the content section.
+    const gatedCollection: ToolCollectionExport = {
+      metadata: { name: "notification", displayName: "notification", description: "Gated" },
+      tools: (user: any) => {
+        seenUsers.push(user);
+        return user.allowedSections.includes("content") ? [notificationTool] : [];
+      },
+    };
+    const server = createMockServer();
+
+    const count = await registerChainedTools({
+      server: server as any,
+      env: createMockEnv(),
+      props: createMockProps(),
+      chainedServer: { ...chainedServer, collections: [gatedCollection, analyticsCollection] },
+    });
+
+    expect(seenUsers.length).toBeGreaterThan(0);
+    for (const user of seenUsers) {
+      expect(user).toEqual({ allowedSections: [], userGroupIds: [] });
+    }
+    expect(registeredTools.map((tool) => tool.name)).not.toContain("demo--get-notification");
+    expect(count).toBe(1);
+  });
+
   it("passes clientFactory to in-process server registration", async () => {
     const server = createMockServer();
     const mockClientFactory = jest.fn(() => ({ someClient: true }));
