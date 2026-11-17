@@ -95,11 +95,153 @@ describe("umbracoCloudSiteRouting", () => {
     expect(site).toBeNull();
   });
 
-  it("returns null when the discovery probe network call fails", async () => {
-    fetchSpy.mockRejectedValue(new Error("DNS failure"));
+  it("throws when the discovery probe network call fails", async () => {
+    fetchSpy.mockRejectedValue(new Error("DNS failure for secret-alias.example"));
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-    const site = await config.resolveSite("missing", env);
-    expect(site).toBeNull();
+    const result = config.resolveSite("missing", env);
+    await expect(result).rejects.toThrow("site probe failed: Error");
+    await expect(result).rejects.not.toThrow("secret-alias");
+    const e = (await Promise.resolve(result).catch((x: unknown) => x)) as Error;
+    expect(e.cause).toBeUndefined();
+  });
+
+  it("throws for a 503 with the status in the message", async () => {
+    fetchSpy.mockResolvedValue(new Response("down", { status: 503 }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await expect(config.resolveSite("abc", env)).rejects.toThrow("status=503");
+    await expect(config.resolveSite("abc", env)).rejects.toThrow("status=503");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws for a 429", async () => {
+    fetchSpy.mockResolvedValue(new Response("slow down", { status: 429 }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await expect(config.resolveSite("abc", env)).rejects.toThrow("status=429");
+  });
+
+  it.each([401, 403])("returns null for a %i", async (status) => {
+    fetchSpy.mockResolvedValue(new Response("no", { status }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    expect(await config.resolveSite("abc", env)).toBeNull();
+  });
+
+  it("treats an alias that cannot be a hostname as missing, without fetching", async () => {
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    for (const alias of ["a%20b", "a:b", "a[b"]) {
+      expect(await config.resolveSite(alias, env)).toBeNull();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("logs a missing site by siteRef only, never the alias or URL", async () => {
+    fetchSpy.mockResolvedValue(new Response("nope", { status: 404 }));
+    const spies = (["log", "error", "warn"] as const).map((m) =>
+      jest.spyOn(console, m).mockImplementation(() => undefined)
+    );
+    try {
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      const hashEnv = { ...env, TENANT_HASH_KEY: "ab".repeat(32) } as HostedMcpEnv;
+      expect(await config.resolveSite("secret-alias", hashEnv)).toBeNull();
+      const lines = spies.flatMap((s) => s.mock.calls.map((c) => c.map(String).join(" ")));
+      expect(lines.filter((l) => /^site-probe site=[0-9a-f]{12} status=404$/.test(l))).toHaveLength(1);
+      expect(lines.some((l) => l.includes("secret-alias") || l.includes("umbraco.io"))).toBe(false);
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
+  });
+
+  it("caches a custom validateProject throw for the error TTL", async () => {
+    const validateProject = jest
+      .fn<(siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean>()
+      .mockImplementation(() => {
+        throw new Error("portal API down");
+      });
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(2_000_000);
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor", validateProject });
+      await expect(config.resolveSite("abc", env)).rejects.toThrow(/portal API down/);
+      expect(validateProject).toHaveBeenCalledTimes(1);
+      nowSpy.mockReturnValue(2_005_000);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow(/portal API down/);
+      expect(validateProject).toHaveBeenCalledTimes(1);
+      nowSpy.mockReturnValue(2_010_001);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow(/portal API down/);
+      expect(validateProject).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("counts the error TTL from when the probe failed, and rethrows the validator's own error", async () => {
+    class PortalError extends Error {}
+    const failure = new PortalError("portal API down");
+    const nowSpy = jest.spyOn(Date, "now");
+    // The probe takes 5s to fail, like the default validator's timeout.
+    const validateProject = jest
+      .fn<(siteId: string, baseUrl: string, env: HostedMcpEnv) => boolean>()
+      .mockImplementation(() => {
+        nowSpy.mockReturnValue(3_005_000);
+        throw failure;
+      });
+    try {
+      nowSpy.mockReturnValue(3_000_000);
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor", validateProject });
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+
+      // 12s after the probe started, 7s after it failed: still inside the 10s TTL.
+      nowSpy.mockReturnValue(3_012_000);
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+      expect(validateProject).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(3_015_001);
+      await expect(config.resolveSite("abc", env)).rejects.toBe(failure);
+      expect(validateProject).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("counts the miss TTL from when the probe ended", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(7_000_000);
+      // The probe takes 5s to come back with a 404.
+      fetchSpy.mockImplementation(async () => {
+        nowSpy.mockReturnValue(7_005_000);
+        return new Response("nope", { status: 404 });
+      });
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      expect(await config.resolveSite("abc", env)).toBeNull();
+      // 32s after the probe started, 27s after it ended: inside the 30s TTL.
+      nowSpy.mockReturnValue(7_032_000);
+      expect(await config.resolveSite("abc", env)).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("caches an unreachable site for the error TTL, then probes again", async () => {
+    const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    fetchSpy.mockRejectedValue(timeout);
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(1_000_000);
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1_005_000);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1_010_001);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("supports a custom validateProject hook", async () => {
