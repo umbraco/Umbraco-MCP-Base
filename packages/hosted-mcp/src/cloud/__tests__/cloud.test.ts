@@ -95,11 +95,52 @@ describe("umbracoCloudSiteRouting", () => {
     expect(site).toBeNull();
   });
 
-  it("returns null when the discovery probe network call fails", async () => {
-    fetchSpy.mockRejectedValue(new Error("DNS failure"));
+  it("throws when the discovery probe network call fails", async () => {
+    fetchSpy.mockRejectedValue(new Error("DNS failure for secret-alias.example"));
     const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
-    const site = await config.resolveSite("missing", env);
-    expect(site).toBeNull();
+    const result = config.resolveSite("missing", env);
+    await expect(result).rejects.toThrow("site probe failed: Error");
+    await expect(result).rejects.not.toThrow("secret-alias");
+  });
+
+  it("throws for a 503 with the status in the message", async () => {
+    fetchSpy.mockResolvedValue(new Response("down", { status: 503 }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await expect(config.resolveSite("abc", env)).rejects.toThrow("status=503");
+  });
+
+  it("throws for a 429", async () => {
+    fetchSpy.mockResolvedValue(new Response("slow down", { status: 429 }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    await expect(config.resolveSite("abc", env)).rejects.toThrow("status=429");
+  });
+
+  it.each([401, 403])("returns null for a %i", async (status) => {
+    fetchSpy.mockResolvedValue(new Response("no", { status }));
+    const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+    expect(await config.resolveSite("abc", env)).toBeNull();
+  });
+
+  it("caches an unreachable site for the error TTL, then probes again", async () => {
+    const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    fetchSpy.mockRejectedValue(timeout);
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(1_000_000);
+      const config = umbracoCloudSiteRouting({ oauthClientId: "mcp-cms-editor" });
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1_005_000);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1_010_001);
+      await expect(config.resolveSite("abc", env)).rejects.toThrow("site probe failed: TimeoutError");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("supports a custom validateProject hook", async () => {

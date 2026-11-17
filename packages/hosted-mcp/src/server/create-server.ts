@@ -633,7 +633,19 @@ async function initPerRequestServer(
   // Uses the site's base URL for API calls instead of the global env URL.
   let effectiveEnv = env;
   const siteId = props.consentChoices?.siteId;
-  const site = await resolveRequestSite(siteId, options, env);
+  let site: Awaited<ReturnType<typeof resolveRequestSite>>;
+  try {
+    site = await resolveRequestSite(siteId, options, env);
+  } catch (err) {
+    console.error(`[mcp-hosted] createPerRequestServer id=${traceId} site unreachable:`, err);
+    console.log(
+      `[mcp-hosted] createPerRequestServer:done id=${traceId} mode=site-unreachable cause=site-unreachable tools=0 elapsedMs=${Date.now() - initStartedAt}`
+    );
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_MODE, "site-unreachable");
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_TOOL_COUNT, 0);
+    initSpan.setAttribute(HostedTelemetryAttributes.INIT_CAUSE, "site-unreachable");
+    throw new Error("The Umbraco site isn't responding right now. Try again shortly.", { cause: err });
+  }
 
   // A grant for a site that no longer resolves must not carry on against the
   // env-level Umbraco with none of that site's restrictions.

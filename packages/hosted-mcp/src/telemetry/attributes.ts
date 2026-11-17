@@ -47,7 +47,8 @@ export const HostedTelemetryAttributes = {
    * Why no server was built, set only when `INIT_MODE` isn't `full`: one
    * of the `SignInUnavailableReason` values (`no-token-in-kv`,
    * `refresh-rejected-expired`, `refresh-rejected-misconfigured`,
-   * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`.
+   * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`,
+   * or `site-unreachable` when the site probe failed.
    */
   INIT_CAUSE: "umbraco.mcp.init.cause",
   /** Whether a site was resolved (multi-site / cloud routing) — the alias itself is never recorded. */
@@ -83,7 +84,7 @@ export const HostedTelemetryAttributes = {
 } as const;
 
 /** `umbraco.mcp.init.mode` values. */
-export type ServerInitMode = "full" | "auth-expired" | "auth-misconfigured";
+export type ServerInitMode = "full" | "auth-expired" | "auth-misconfigured" | "site-unreachable";
 
 /** `umbraco.mcp.auth.outcome` values. */
 export type AuthRefreshOutcome = "refreshed" | "failed";
