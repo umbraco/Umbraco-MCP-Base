@@ -466,7 +466,7 @@ export function createWorkerExport(
       // Root dynamic client registration (single-site and static multi-site;
       // under site routing it is refused above and handled per tenant).
       if (pathname === "/register") {
-        const refused = await guardRegistration(request, env);
+        const refused = await guardRegistration(request);
         if (refused) return refused;
       }
 

@@ -137,18 +137,9 @@ wrangler secret put LOGIN_SESSION_HASH_KEY # openssl rand -hex 32
 
 `COOKIE_ENCRYPTION_KEY` is no longer read by this package. Existing deployments can leave the secret in place or remove it.
 
-#### Optional: rate-limit client registration
+#### Client registration
 
-Dynamic client registration (`/register`, or `/at/<alias>/register` under site routing) is open to any caller. Each request is limited to 16 KB. To also limit how often one IP address can register, add a [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) binding named `REGISTER_RATE_LIMITER` to `wrangler.toml`:
-
-```toml
-[[ratelimits]]
-name = "REGISTER_RATE_LIMITER"
-namespace_id = "1001"                  # any integer unique within your account
-simple = { limit = 20, period = 60 }   # 20 registrations per minute per IP address
-```
-
-Without the binding, registration is not rate-limited by the Worker.
+Dynamic client registration (`/register`, or `/at/<alias>/register` under site routing) is open to any caller. The Worker limits each request to 16 KB and does not limit how often a caller can register. To limit the rate, do it in front of the Worker, for example with a Cloudflare WAF rate limiting rule on the registration paths. Cloudflare's Workers Rate Limiting binding is approximate and did not hold a limit at the volume a registration endpoint sees, so this package does not use it.
 
 `TENANT_HASH_KEY` keys the HMAC behind both the `umbraco.mcp.tenant` and
 `umbraco.mcp.login_session` span attributes — omitting it disables both, not
