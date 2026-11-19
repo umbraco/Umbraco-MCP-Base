@@ -523,6 +523,24 @@ It:
 - never throws. If the guard itself fails, it logs to stderr and returns a message saying the
   version was not checked, so the failure reaches `instructions` instead of looking like a pass.
 
+**Warn first, block later: `prepareStartupVersionCheck`.** The same guard, split in two. It runs
+the check and returns `{ message, version, armBlock }` without turning on the block; call
+`armBlock()` when tools should start being blocked. Use it when a server must show the warning
+before it can block, e.g. a CLI mode that should print the mismatch warning but not refuse a
+`--call`:
+
+```typescript
+const versionCheck = await prepareStartupVersionCheck({ /* same options */ });
+await handleCliCommands(/* … */); // prints versionCheck.message, nothing blocked
+versionCheck.armBlock();          // MCP path: a mismatch now blocks the first tool call once
+```
+
+`version` is the version the instance reported, as reported, so a server that gates tools by
+version doesn't fetch it twice. It is `null` when nothing was fetched: the lookup failed or timed
+out, or a parent checked the same major (no request is made). A server that always needs the
+version should fetch it itself and pass a `client` that returns the cached result.
+`runStartupVersionCheck` is `prepareStartupVersionCheck` followed by `armBlock()`.
+
 **Chained children: `UMBRACO_MCP_PARENT_CHECKED_MAJOR`.** A **parent** MCP server that runs its
 own guard and chains this server as a child process sets this in the child's spawn env to the
 major it checked against, using `chainedVersionCheckEnv(major)`:

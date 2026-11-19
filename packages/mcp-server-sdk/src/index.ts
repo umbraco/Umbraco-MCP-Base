@@ -321,12 +321,14 @@ export {
 
 export {
   runStartupVersionCheck,
+  prepareStartupVersionCheck,
   resolveExpectedUmbracoMajor,
   withVersionCheckDeadline,
   DEFAULT_VERSION_CHECK_TIMEOUT_MS,
   PARENT_CHECKED_MAJOR_ENV,
   chainedVersionCheckEnv,
   type StartupVersionCheckOptions,
+  type PreparedStartupVersionCheck,
 } from "./version-check/startup-version-check.js";
 
 // ============================================================================
