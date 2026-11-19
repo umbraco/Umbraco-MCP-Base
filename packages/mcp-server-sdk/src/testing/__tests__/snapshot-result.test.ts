@@ -395,6 +395,18 @@ describe("normalizeErrorResponse", () => {
     expect(result.isError).toBe(true);
   });
 
+  it.each(["01", "02", "03"])("should normalize trace IDs with trace flags %s (e.g. .NET 11)", (flags) => {
+    const input = createToolResultError({
+      title: "Something went wrong",
+      status: 500,
+      traceId: `00-1234567890abcdef1234567890abcdef-1234567890abcdef-${flags}`,
+    }) as CallToolResult;
+
+    const result = normalizeErrorResponse(input);
+
+    expect(JSON.parse((result.content[0] as { text: string }).text).traceId).toBe("normalized-trace-id");
+  });
+
   it("should normalize trace IDs in structuredContent error response", () => {
     const input: CallToolResult = {
       content: [],
