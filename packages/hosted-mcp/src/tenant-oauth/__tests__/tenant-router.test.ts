@@ -635,45 +635,20 @@ describe("dispatchTenantOAuth — registration limits", () => {
     expect(kv.store.size).toBe(0);
   });
 
-  it("refuses a registration over the rate limit, keyed by caller address", async () => {
-    const kv = createMockKV();
-    const oauthFetch = jest.fn();
-    const limit = jest.fn(async (_options: { key: string }) => ({ success: false }));
-
-    const response = await dispatchTenantOAuth(
-      { kind: "register", alias: "demo" },
-      registerRequest("{}", { "cf-connecting-ip": "203.0.113.7" }),
-      { ...makeEnv(kv), REGISTER_RATE_LIMITER: { limit } },
-      ctx,
-      makeRouting(),
-      { fetch: oauthFetch as never }
-    );
-
-    expect(response.status).toBe(429);
-    expect(response.headers.get("Retry-After")).toBe("60");
-    expect(limit).toHaveBeenCalledWith({ key: "203.0.113.7" });
-    expect(oauthFetch).not.toHaveBeenCalled();
-  });
-
-  it("still registers when the rate limiter itself fails", async () => {
+  it("registers a request within the size limit", async () => {
     const kv = createMockKV();
     const oauthFetch = jest.fn(
       async () => new Response(JSON.stringify({ client_id: "client-9" }), { status: 201 })
     );
-    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
-    const limit = jest.fn(async () => {
-      throw new Error("limiter down");
-    });
 
     const response = await dispatchTenantOAuth(
       { kind: "register", alias: "demo" },
       registerRequest("{}"),
-      { ...makeEnv(kv), REGISTER_RATE_LIMITER: { limit } },
+      makeEnv(kv),
       ctx,
       makeRouting(),
       { fetch: oauthFetch as never }
     );
-    warn.mockRestore();
 
     expect(response.status).toBe(201);
     expect(kv.store.get("client:client-9:tenant")).toBe("demo");

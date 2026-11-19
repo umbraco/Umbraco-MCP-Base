@@ -102,5 +102,5 @@ The package implements the MCP Authorization spec's Third-Party Authorization Fl
 - A consent state is tied to the authorization request its screen was rendered for (`authRequestDigest`), and the screen lists only scopes this server supports
 - Every grant has a `resource`, so every access token has an audience. Outside site routing a grant without one defaults to the Worker's origin, and `/token` drops a same-origin `resource` so the grant's own applies (`auth/own-resource.ts`)
 - Under site routing the tenant client binding is checked against the client id the OAuth provider itself will use: the query string at `/authorize`, HTTP Basic or the form body at `/token`.
-- Client registration requests are capped at 16 KB and can be rate-limited per IP address with an optional `REGISTER_RATE_LIMITER` binding
+- Client registration requests are capped at 16 KB. The Worker does not rate-limit registration: Cloudflare's Workers Rate Limiting binding is approximate and did not hold a limit in testing, so a rate limit belongs in front of the Worker (for example a WAF rule)
 - MCP sessions are bound to the sign-in that started them: `createSiteRoutingApiHandler` hands the client `<session id>.<tag>` (an HMAC keyed by the sign-in's token key) and refuses any request whose tag doesn't match the caller's own sign-in
