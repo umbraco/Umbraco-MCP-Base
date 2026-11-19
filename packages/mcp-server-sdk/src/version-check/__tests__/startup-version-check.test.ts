@@ -1,7 +1,8 @@
 /**
  * Tests for the shared stdio startup guard (umbraco/Umbraco-MCP-Base#428):
  * `resolveExpectedUmbracoMajor`, `runStartupVersionCheck` (deadline, hook,
- * chained-child skip, never throws), `chainedVersionCheckEnv` and
+ * chained-child skip, never throws), `prepareStartupVersionCheck` (deferred
+ * block, reported version), `chainedVersionCheckEnv` and
  * `withVersionCheckDeadline`.
  */
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
@@ -10,6 +11,7 @@ import { VersionCheckService, type VersionCheckClient } from "../check-umbraco-v
 import {
   resolveExpectedUmbracoMajor,
   runStartupVersionCheck,
+  prepareStartupVersionCheck,
   withVersionCheckDeadline,
   PARENT_CHECKED_MAJOR_ENV,
   chainedVersionCheckEnv,
@@ -316,6 +318,99 @@ describe("runStartupVersionCheck", () => {
 
   it("defaults the deadline to 5 seconds", () => {
     expect(DEFAULT_VERSION_CHECK_TIMEOUT_MS).toBe(5000);
+  });
+});
+
+describe("prepareStartupVersionCheck", () => {
+  it("on a mismatch returns the warning but blocks nothing until armBlock", async () => {
+    const service = new VersionCheckService();
+    const { client } = clientReturning("17.3.1");
+
+    const result = await prepareStartupVersionCheck({
+      generatedUmbracoMajor: "18",
+      mcpVersion: "1.0.0",
+      client,
+      service,
+    });
+
+    expect(result.message).toMatch(/Version Mismatch/);
+    const { decorated, handler } = decoratedTool();
+
+    const beforeArm = await callTool(decorated);
+    expect(beforeArm.isError).toBeFalsy();
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    result.armBlock();
+    const first = await callTool(decorated);
+    expect(first.isError).toBe(true);
+    expect(JSON.stringify(first)).toMatch(/Version Mismatch/);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    const second = await callTool(decorated);
+    expect(second.isError).toBeFalsy();
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([["17.3.1", "18"], ["18.1.1+abc", "18"]])(
+    "returns the version the instance reported (%j)",
+    async (reported, generated) => {
+      const result = await prepareStartupVersionCheck({
+        generatedUmbracoMajor: generated,
+        mcpVersion: "1.0.0",
+        client: clientReturning(reported).client,
+        service: new VersionCheckService(),
+      });
+
+      expect(result.version).toBe(reported);
+    }
+  );
+
+  it("returns a null version when the lookup fails or times out", async () => {
+    const failing = await prepareStartupVersionCheck({
+      generatedUmbracoMajor: "17",
+      mcpVersion: "1.0.0",
+      client: { getServerInformation: () => Promise.reject(new Error("fetch failed")) },
+      service: new VersionCheckService(),
+    });
+    expect(failing.version).toBeNull();
+    expect(failing.message).toContain("fetch failed");
+
+    const hanging = await prepareStartupVersionCheck({
+      generatedUmbracoMajor: "17",
+      mcpVersion: "1.0.0",
+      client: { getServerInformation: () => new Promise<ServerInfo>(() => {}) },
+      timeoutMs: 20,
+      service: new VersionCheckService(),
+    });
+    expect(hanging.version).toBeNull();
+    expect(hanging.message).toContain("did not respond within 20ms");
+  });
+
+  it("skips when the parent checked the same major: no request, null version, armBlock blocks nothing", async () => {
+    process.env[PARENT_CHECKED_MAJOR_ENV] = "17";
+    const { client, getServerInformation } = clientReturning("15.0.0");
+
+    const result = await prepareStartupVersionCheck({
+      generatedUmbracoMajor: "17",
+      mcpVersion: "1.0.0",
+      client,
+      service: new VersionCheckService(),
+    });
+
+    expect(result).toMatchObject({ message: null, version: null });
+    expect(getServerInformation).not.toHaveBeenCalled();
+    result.armBlock();
+    const { decorated, handler } = decoratedTool();
+    await callTool(decorated);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws, and armBlock is safe after a failure", async () => {
+    const result = await prepareStartupVersionCheck(undefined as any);
+
+    expect(result.message).toContain("Umbraco version check could not run");
+    expect(result.version).toBeNull();
+    expect(() => result.armBlock()).not.toThrow();
   });
 });
 
