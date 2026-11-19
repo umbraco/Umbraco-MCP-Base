@@ -61,7 +61,7 @@ import type { MultiSiteConfig, SiteConfig, SiteRoutingResolver } from "../types/
 import { loadWorkerConfig, loadSiteConfig } from "../config/worker-config.js";
 import { NO_TOOLS_SENTINEL } from "./chained-filter.js";
 import { createFetchClientFromKV } from "../http/umbraco-fetch-client.js";
-import { fetchCurrentUser } from "./current-user.js";
+import { fetchCurrentUser, assertManagementApiObject, ManagementApiBlockedError } from "./current-user.js";
 import type { AuthProps, ConsentChoices } from "../types/auth.js";
 import { deleteStoredUmbracoToken, type RefreshFailureReason } from "../auth/token-storage.js";
 
@@ -747,7 +747,11 @@ async function initPerRequestServer(
         url: SERVER_INFORMATION_PATH,
         method: "GET",
       }, { signal })
-    ).then((info) => ({ version: (info as { version: string }).version }));
+    ).then((info) => {
+      // An HTML page here would otherwise read as the version "undefined".
+      assertManagementApiObject(info);
+      return { version: (info as { version: string }).version };
+    });
     return serverInformationRequest;
   }
 
@@ -784,11 +788,25 @@ async function initPerRequestServer(
   // client, so there's no reason to serialize the round-trips this function
   // makes per request. The server-info fetch always runs; the check only when
   // `expectedUmbracoMajor` is set.
-  const [versionCheckMessage, currentUser, serverInformation] = await Promise.all([
-    expectedUmbracoMajor ? checkVersion() : Promise.resolve(null),
-    fetchCurrentUser(fetchClient),
-    fetchServerInformation(),
-  ]);
+  let versionCheckMessage: string | null;
+  let currentUser: Awaited<ReturnType<typeof fetchCurrentUser>>;
+  let serverInformation: Awaited<ReturnType<typeof fetchServerInformation>>;
+  try {
+    [versionCheckMessage, currentUser, serverInformation] = await Promise.all([
+      expectedUmbracoMajor ? checkVersion() : Promise.resolve(null),
+      fetchCurrentUser(fetchClient),
+      fetchServerInformation(),
+    ]);
+  } catch (err) {
+    if (err instanceof ManagementApiBlockedError) {
+      // The site answered with a non-API page: a restriction in front of the
+      // Management API. Not a dead sign-in, so the stored token is kept; and
+      // never log the response body (anti-forgery tokens, site names).
+      recordFailedStart(initSpan, traceId, initStartedAt, "site-blocked", "site-blocked");
+      console.warn(`[mcp-hosted] createPerRequestServer id=${traceId} siteId=${safeSiteId} ${err.message}`);
+    }
+    throw err;
+  }
   const umbracoVersion = serverInformation?.version;
 
   // Those round-trips are also this request's liveness probe. If any hit a
