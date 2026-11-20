@@ -39,7 +39,11 @@ export const HostedTelemetryAttributes = {
    * `site-unreachable` when resolving the session's site threw (for the Cloud
    * preset: the probe got 5xx, 429, a timeout or another fetch error), where
    * `createPerRequestServer` throws a plain `Error`. That one is transient and
-   * the sign-in is kept.
+   * the sign-in is kept;
+   * `site-blocked` when the Management API answered with a non-JSON page (a
+   * sign-in page from basic auth, an IP restriction or middleware), where
+   * `createPerRequestServer` throws `ManagementApiBlockedError` and keeps the
+   * sign-in.
    */
   INIT_MODE: "umbraco.mcp.init.mode",
   /**
@@ -53,7 +57,7 @@ export const HostedTelemetryAttributes = {
    * `refresh-rejected-expired`, `refresh-rejected-misconfigured`,
    * `refresh-rejected-request`), matching `UmbracoSignInUnavailableError.reason`,
    * or `site-unreachable` when resolving the site threw (for the Cloud preset,
-   * typically the site probe failing).
+   * typically the site probe failing), or `site-blocked`.
    */
   INIT_CAUSE: "umbraco.mcp.init.cause",
   /** Whether a site was resolved (multi-site / cloud routing) — the alias itself is never recorded. */
@@ -89,7 +93,12 @@ export const HostedTelemetryAttributes = {
 } as const;
 
 /** `umbraco.mcp.init.mode` values. */
-export type ServerInitMode = "full" | "auth-expired" | "auth-misconfigured" | "site-unreachable";
+export type ServerInitMode =
+  | "full"
+  | "auth-expired"
+  | "auth-misconfigured"
+  | "site-unreachable"
+  | "site-blocked";
 
 /** `umbraco.mcp.auth.outcome` values. */
 export type AuthRefreshOutcome = "refreshed" | "failed";

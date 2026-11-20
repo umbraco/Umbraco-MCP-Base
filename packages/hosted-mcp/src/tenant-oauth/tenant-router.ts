@@ -206,7 +206,7 @@ async function dispatchRegister(
   ctx: ExecutionContext,
   oauthProvider: OAuthProviderLike
 ): Promise<Response> {
-  const refused = await guardRegistration(request, env);
+  const refused = await guardRegistration(request);
   if (refused) return refused;
 
   const url = new URL(request.url);

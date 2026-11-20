@@ -7,6 +7,8 @@
  * for the server's `instructions`. Built from `checkUmbracoVersion`,
  * `configureVersionCheckHook` and `getVersionCheckMessage`; it adds only the
  * deadline and the chained-child skip (umbraco/Umbraco-MCP-Base#428).
+ * `prepareStartupVersionCheck` is the same guard with arming the block left to
+ * the caller, for servers that must warn before they block.
  */
 
 import { majorFromVersion } from "./major-from-version.js";
@@ -147,10 +149,118 @@ export interface StartupVersionCheckOptions {
   service?: VersionCheckService;
 }
 
+/**
+ * Result of `prepareStartupVersionCheck`.
+ */
+export interface PreparedStartupVersionCheck {
+  /** The message for the server's `instructions`, or `null`. */
+  message: string | null;
+  /**
+   * The version the connected instance reported, exactly as reported, or
+   * `null` when it wasn't fetched: the parent checked the same major, the
+   * lookup failed or timed out, or the guard itself failed.
+   */
+  version: string | null;
+  /**
+   * Turns on the one-time block (`configureVersionCheckHook`), so a mismatch
+   * blocks the first decorated tool call once. Safe to call in every case: it
+   * blocks nothing unless the check found a mismatch. Never throws.
+   */
+  armBlock: () => void;
+}
+
 function parentCheckedSameMajor(expectedUmbracoMajor: string | undefined): boolean {
   const value = typeof process !== "undefined" ? process.env?.[PARENT_CHECKED_MAJOR_ENV] : undefined;
   const parentMajor = majorFromVersion(value);
   return parentMajor !== null && parentMajor === majorFromVersion(expectedUmbracoMajor);
+}
+
+function unblock(service: VersionCheckService): void {
+  try {
+    service.setBlocked(false);
+  } catch {
+    // Nothing more to do: never throw from startup.
+  }
+}
+
+/**
+ * `runStartupVersionCheck` split in two: runs the check now, and leaves turning
+ * on the block to the caller via the returned `armBlock`. Also returns the
+ * version the instance reported.
+ *
+ * For servers that need the warning before the block, e.g. one with a CLI
+ * mode that should print the mismatch warning but not refuse a `--call`: run
+ * this before the CLI handling, and call `armBlock()` after it.
+ *
+ * Same resolution, deadline, chained-child skip and never-throws behaviour as
+ * `runStartupVersionCheck`. When the parent checked the same major it makes no
+ * request, so `version` is `null`; a server that always needs the version
+ * should fetch it itself and pass a client that returns the cached result.
+ *
+ * @example
+ * ```typescript
+ * const versionCheck = await prepareStartupVersionCheck({ ...options });
+ * await handleCliCommands(...); // prints versionCheck's warning, never blocked
+ * versionCheck.armBlock();
+ * ```
+ */
+export async function prepareStartupVersionCheck(
+  options: StartupVersionCheckOptions
+): Promise<PreparedStartupVersionCheck> {
+  const service = options?.service ?? versionCheckService;
+  const noBlock = () => {};
+  try {
+    const expectedUmbracoMajor = resolveExpectedUmbracoMajor(
+      options.expectedUmbracoMajorOverride,
+      options.generatedUmbracoMajor
+    );
+    if (parentCheckedSameMajor(expectedUmbracoMajor)) {
+      return { message: null, version: null, armBlock: noBlock };
+    }
+
+    const { client, timeoutMs = DEFAULT_VERSION_CHECK_TIMEOUT_MS } = options;
+    let version: string | null = null;
+
+    await checkUmbracoVersion({
+      mcpVersion: options.mcpVersion,
+      expectedUmbracoMajor,
+      client: {
+        getServerInformation: async () => {
+          const info = await withVersionCheckDeadline((signal) => client.getServerInformation({ signal }), timeoutMs);
+          version = typeof info?.version === "string" ? info.version : null;
+          return info;
+        },
+      },
+      service,
+    });
+
+    return {
+      message: getVersionCheckMessage(service),
+      version,
+      armBlock: () => {
+        try {
+          configureVersionCheckHook(service);
+        } catch (error) {
+          console.error(
+            `⚠️ Umbraco version check could not turn on the block, so tools are not blocked: ` +
+              sanitizeVersionCheckDetail(error instanceof Error ? error.message : error)
+          );
+          unblock(service);
+        }
+      },
+    };
+  } catch (error) {
+    // `checkUmbracoVersion` already never throws; this covers everything
+    // around it (option access, env parsing, timers).
+    // The message goes into `instructions` too: on stdio nobody reads stderr,
+    // and a guard that silently didn't run looks the same as one that passed.
+    const message =
+      `⚠️ Umbraco version check could not run, so the Umbraco version was not checked and tools are not blocked: ` +
+      sanitizeVersionCheckDetail(error instanceof Error ? error.message : error);
+    console.error(message);
+    unblock(service);
+    return { message, version: null, armBlock: noBlock };
+  }
 }
 
 /**
@@ -193,43 +303,7 @@ function parentCheckedSameMajor(expectedUmbracoMajor: string | undefined): boole
  * ```
  */
 export async function runStartupVersionCheck(options: StartupVersionCheckOptions): Promise<string | null> {
-  const service = options?.service ?? versionCheckService;
-  try {
-    const expectedUmbracoMajor = resolveExpectedUmbracoMajor(
-      options.expectedUmbracoMajorOverride,
-      options.generatedUmbracoMajor
-    );
-    if (parentCheckedSameMajor(expectedUmbracoMajor)) {
-      return null;
-    }
-
-    const { client, timeoutMs = DEFAULT_VERSION_CHECK_TIMEOUT_MS } = options;
-
-    await checkUmbracoVersion({
-      mcpVersion: options.mcpVersion,
-      expectedUmbracoMajor,
-      client: {
-        getServerInformation: () =>
-          withVersionCheckDeadline((signal) => client.getServerInformation({ signal }), timeoutMs),
-      },
-      service,
-    });
-    configureVersionCheckHook(service);
-    return getVersionCheckMessage(service);
-  } catch (error) {
-    // `checkUmbracoVersion` already never throws; this covers everything
-    // around it (option access, env parsing, timers, hook wiring).
-    // The message goes into `instructions` too: on stdio nobody reads stderr,
-    // and a guard that silently didn't run looks the same as one that passed.
-    const message =
-      `⚠️ Umbraco version check could not run, so the Umbraco version was not checked and tools are not blocked: ` +
-      sanitizeVersionCheckDetail(error instanceof Error ? error.message : error);
-    console.error(message);
-    try {
-      service.setBlocked(false);
-    } catch {
-      // Nothing more to do: never throw from startup.
-    }
-    return message;
-  }
+  const { message, armBlock } = await prepareStartupVersionCheck(options);
+  armBlock();
+  return message;
 }

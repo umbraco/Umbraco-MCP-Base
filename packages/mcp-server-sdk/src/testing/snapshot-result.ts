@@ -258,7 +258,9 @@ function normalizeJsonText(text: string, idToReplace?: string): string {
   return JSON.stringify(normalizeObject(parsed, idToReplace, true));
 }
 
-const TRACE_ID_PATTERN = /00-[0-9a-f]{32}-[0-9a-f]{16}-00/g;
+// W3C traceparent: version-traceid-parentid-flags. The flags byte varies by runtime
+// (.NET 11 sets the random-trace-id flag, giving "-02"), so match any hex pair.
+const TRACE_ID_PATTERN = /[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}/g;
 
 /**
  * Normalizes error responses for snapshot testing.

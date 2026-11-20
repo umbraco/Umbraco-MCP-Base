@@ -1151,6 +1151,101 @@ describe("createPerRequestServer — version check", () => {
     },
   );
 
+  describe("when the site answers the Management API with an HTML sign-in page", () => {
+    const SECRET = "anti-forgery-token-abc123";
+    const html = () =>
+      new Response(
+        `<!doctype html><html><head><title>Umbraco - Sign In</title></head><body>` +
+          `<form action="/umbraco/basic-auth"><input name="__RequestVerificationToken" value="${SECRET}"></form></body></html>`,
+        { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+
+    async function startBlocked(blockedPath: string) {
+      mockFetch.mockImplementation((async (input: unknown) => {
+        const url = String(input);
+        if (url.includes(blockedPath)) return html();
+        if (url.includes("/server/information")) return jsonResponse({ version: "15.2.0" });
+        if (url.includes("/user/current")) return jsonResponse({});
+        return jsonResponse({}, 404);
+      }) as typeof fetch);
+
+      const { createPerRequestServer, UmbracoSignInUnavailableError } = await import("../create-server.js");
+      const { setTelemetryAdapter, clearTelemetryAdapter } = await import("@umbraco-cms/mcp-server-sdk");
+      const { SERVER_INIT_SPAN, HostedTelemetryAttributes } = await import("../../telemetry/attributes.js");
+      const kvDelete = jest.fn(async () => undefined);
+      const defaultEnv = makeMockEnv();
+      const env = makeMockEnv({
+        OAUTH_KV: { ...(defaultEnv.OAUTH_KV as object), delete: kvDelete },
+      } as unknown as Partial<HostedMcpEnv>);
+      const recorded: { name: string; attributes: Record<string, unknown> }[] = [];
+      setTelemetryAdapter({
+        startSpan: (name, attributes, fn) => {
+          const span = { name, attributes: { ...attributes } as Record<string, unknown> };
+          recorded.push(span);
+          return fn({ setAttribute: (key, value) => { span.attributes[key] = value; } });
+        },
+      });
+      const logSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        const thrown = await createPerRequestServer(
+          { ...baseOptions, expectedUmbracoMajor: "17" },
+          env,
+          mockProps,
+        ).then(
+          () => undefined,
+          (e) => e as Error,
+        );
+        const logged = [logSpy, warnSpy, errorSpy]
+          .flatMap((spy) => spy.mock.calls)
+          .map((args) => args.map(String).join(" "))
+          .join("\n");
+        return { thrown, logged, recorded, kvDelete, SERVER_INIT_SPAN, HostedTelemetryAttributes, UmbracoSignInUnavailableError };
+      } finally {
+        clearTelemetryAdapter();
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+      }
+    }
+
+    it.each(["/user/current", "/server/information"])(
+      "fails the start clearly as site-blocked for %s, keeping the token and not leaking the body",
+      async (path) => {
+        const r = await startBlocked(path);
+
+        // A `/server/information` page alone is only a degraded version check;
+        // the user/current one fails the session.
+        if (path === "/server/information") {
+          expect(r.thrown).toBeUndefined();
+          expect(r.logged).not.toContain(SECRET);
+          expect(r.logged).not.toContain("unparseable version");
+          return;
+        }
+
+        expect(r.thrown).toBeInstanceOf(Error);
+        expect(r.thrown).not.toBeInstanceOf(TypeError);
+        expect(r.thrown).not.toBeInstanceOf(r.UmbracoSignInUnavailableError);
+        expect(r.thrown!.name).toBe("ManagementApiBlockedError");
+        expect(r.thrown!.message).toContain("returned a sign-in page instead of the Management API");
+        expect(r.thrown!.message).toContain("/umbraco/management/api");
+        expect(r.thrown!.message).not.toContain(SECRET);
+        expect(r.thrown!.message).not.toContain("<");
+        expect(r.logged).toContain("mode=site-blocked cause=site-blocked tools=0");
+        expect(r.logged).not.toContain(SECRET);
+        expect(r.logged).not.toContain("<!doctype");
+
+        const init = r.recorded.find((s) => s.name === r.SERVER_INIT_SPAN)!;
+        expect(init.attributes[r.HostedTelemetryAttributes.INIT_MODE]).toBe("site-blocked");
+        expect(init.attributes[r.HostedTelemetryAttributes.INIT_CAUSE]).toBe("site-blocked");
+        expect(init.attributes[r.HostedTelemetryAttributes.INIT_TOOL_COUNT]).toBe(0);
+        // A deliberate site restriction is not a dead sign-in.
+        expect(r.kvDelete).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   it("resolves within the deadline when /server/information stalls, with an 'Unable to verify' warning", async () => {
     const { createPerRequestServer } = await import("../create-server.js");
     let serverInfoSignal: AbortSignal | undefined;

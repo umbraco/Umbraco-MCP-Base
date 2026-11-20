@@ -89,15 +89,6 @@ export interface HostedMcpEnv {
    */
   COOKIE_ENCRYPTION_KEY?: string;
 
-  /**
-   * Optional Workers Rate Limiting binding for dynamic client registration.
-   * When bound, registration requests are limited per calling IP address;
-   * the limit and period are set on the binding in `wrangler.toml`.
-   */
-  REGISTER_RATE_LIMITER?: {
-    limit(options: { key: string }): Promise<{ success: boolean }>;
-  };
-
   // KV namespaces
   /** KV namespace for encrypted token storage */
   OAUTH_KV: KVNamespace;
