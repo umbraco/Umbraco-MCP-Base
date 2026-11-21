@@ -23,7 +23,29 @@ Before running, ensure:
 - No arguments: build tests for all collections from `.discover.json`
 - Single collection name: build tests only for that collection (e.g. `/build-tools-tests form`)
 
+## Scoped Requests (fast path)
+
+When the request names one collection and limits the tests to specific tools (e.g. "only the read/list
+tools for `culture`"), test exactly those. The rules below still apply, with these changes:
+
+- **Read only what you need:** the collection's `index.ts` and its tool files. Don't read the generated
+  client or Zod files — `setup.ts` needs only the client getter, which the tool files already import
+  (`import type { getXxxAPI } from ...`); copy that name and path, but import it as a value in `setup.ts`
+  (drop `type`), since `setup.ts` calls it.
+- **Skip Steps 4-6** (builder, helper, builder tests) when the request is limited to read tools
+  (GET by id, list, search) — even if the collection itself has create/delete operations. Nothing
+  needs creating: for GET-by-id, take an id from the list response (or a well-known item such as the
+  default `en-US` language).
+- **Skip Step 8 (validation) and Step 10's full `npm test` and `/count-mcp-tools`.** Run only this
+  collection's tests (`node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --testPathPatterns=src/umbraco-api/tools/{collection}/__tests__`) and report.
+- **Only read `instance-management.md` if you actually hit an instance roadblock.**
+- **Don't ask for confirmation.** The request is the confirmation.
+
 ## Agents
+
+If the agents below aren't available in this session (no Agent/Task tool, or the plugin's `agents/`
+directory isn't installed), do the step yourself from the instructions in this file — don't search
+the filesystem for the agent definitions.
 
 This skill orchestrates the following agents — use them for the relevant steps:
 
@@ -513,6 +535,9 @@ For each test file:
 3. Run: `node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand src/umbraco-api/tools/{collection}/__tests__/{test-file}.test.ts`
 4. Fix any failures before creating the next test file
 
+Compile errors only in files you didn't touch (e.g. `src/worker.ts`) are pre-existing — unless they
+trace back to a file you edited — note them, don't try to fix them (this skill may not edit those files anyway).
+
 ### Step 8: Validate with `integration-test-validator`
 
 After all test files pass for a collection, run the `integration-test-validator` agent. The agent will check:
@@ -545,7 +570,7 @@ npm run compile    # Full type check
 npm test           # All integration tests
 ```
 
-Then run `/count-mcp-tools` to confirm all collections have tests. All collections should show "yes" in the Tests column. If any show "no", report which collections are missing integration tests.
+Then, unless this was a scoped request, run `/count-mcp-tools` to confirm all collections have tests (if that skill isn't installed, skip it and list the test files per collection yourself). All collections should show "yes" in the Tests column. If any show "no", report which collections are missing integration tests.
 
 Report what was generated:
 - Number of collections with tests
