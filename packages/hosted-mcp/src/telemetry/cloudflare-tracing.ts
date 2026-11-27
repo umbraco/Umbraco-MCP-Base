@@ -35,9 +35,14 @@ import type { TelemetryAdapter, SpanAttributes, AttributeValue } from "@umbraco-
  * Cloudflare's real span also exposes `isTraced` and `end()`; neither is needed
  * here — `enterSpan` owns the lifecycle, and attributes are cheap enough that
  * gating them on `isTraced` would add a branch for no gain.
+ *
+ * `value` is required and the return type is `unknown` so this stays a
+ * supertype of every `@cloudflare/workers-types` release: from 5.20261127.1
+ * the real `setAttribute` requires `value` and returns the span, and an
+ * optional `value` here made scaffolded Workers fail to type-check.
  */
 export interface CloudflareSpan {
-  setAttribute(key: string, value?: AttributeValue): void;
+  setAttribute(key: string, value: AttributeValue): unknown;
 }
 
 /** The subset of `tracing` (from `cloudflare:workers`) this adapter uses. */
