@@ -41,7 +41,7 @@
   "author": "Phil Whittaker",
   "license": "MIT",
   "devDependencies": {
-    "@modelcontextprotocol/inspector": "^0.22.0",
+    "@modelcontextprotocol/inspector": "^2.15.0",
     "wrangler": "^4.149.0"
   }
 }
